@@ -426,7 +426,7 @@ async function firecrawlSearchAndExtract(
 
   // Step 2: One LLM extraction pass via Lovable AI Gateway over all results.
   const aiResp = await fetch(
-    "https://ai.gateway.lovable.dev/v1/chat/completions",
+    "https://api.openai.com/v1/chat/completions",
     {
       method: "POST",
       headers: {
@@ -434,7 +434,7 @@ async function firecrawlSearchAndExtract(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: "gpt-4o-mini",
         messages: [
           {
             role: "system",
@@ -484,12 +484,12 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY");
-  const lovableKey = Deno.env.get("LOVABLE_API_KEY");
+  const lovableKey = Deno.env.get("OPENAI_API_KEY");
   const attomKey = Deno.env.get("ATTOM_API_KEY");
 
   if (!firecrawlKey || !lovableKey) {
     return new Response(
-      JSON.stringify({ error: "FIRECRAWL_API_KEY or LOVABLE_API_KEY not configured" }),
+      JSON.stringify({ error: "FIRECRAWL_API_KEY or OPENAI_API_KEY not configured" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
