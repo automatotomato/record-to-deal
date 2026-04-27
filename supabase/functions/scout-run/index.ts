@@ -185,6 +185,139 @@ const COUNTY_SOURCES: Record<string, { queries: string[]; hint: string }> = {
     ],
     hint: "Elko County, NV commercial, industrial, ranch / large-acreage transfers. Skip residential homes. Extract owner, address, price ≥$500k, date.",
   },
+  // --- AZ ---
+  az_maricopa: {
+    queries: [
+      `Maricopa County Arizona Phoenix Scottsdale Tempe Mesa commercial OR multifamily OR industrial sold LLC 2026 ${NV_EXCLUSIONS}`,
+      `site:loopnet.com Phoenix OR Scottsdale OR Tempe sold`,
+      `site:crexi.com "Maricopa County" OR Phoenix sold`,
+    ],
+    hint: "Maricopa County, AZ (Phoenix metro) entity-owned multifamily ≥4-units, commercial, retail, industrial, NNN, office transfers. Skip SFR/condo. Extract owner, address, price ≥$500k, date.",
+  },
+  az_pima: {
+    queries: [
+      `Pima County Arizona Tucson commercial OR multifamily OR industrial sold LLC 2026 ${NV_EXCLUSIONS}`,
+      `site:loopnet.com Tucson sold`,
+    ],
+    hint: "Pima County, AZ (Tucson) entity-owned multifamily, commercial, industrial transfers. Skip SFR. Extract owner, address, price ≥$500k, date.",
+  },
+  // --- CA ---
+  ca_los_angeles: {
+    queries: [
+      `Los Angeles County California commercial OR multifamily OR industrial sold LLC 2026 ${NV_EXCLUSIONS}`,
+      `site:loopnet.com Los Angeles sold`,
+      `site:crexi.com "Los Angeles" sold`,
+    ],
+    hint: "Los Angeles County, CA entity-owned multifamily ≥4-units, commercial, industrial, retail, office transfers. Skip SFR/condo. Extract owner, address, price ≥$1M, date.",
+  },
+  ca_orange: {
+    queries: [
+      `Orange County California Irvine Anaheim Newport commercial OR multifamily OR industrial sold LLC 2026 ${NV_EXCLUSIONS}`,
+      `site:loopnet.com "Orange County" California sold`,
+    ],
+    hint: "Orange County, CA entity-owned multifamily, commercial, industrial transfers. Skip SFR. Extract owner, address, price ≥$1M, date.",
+  },
+  ca_san_diego: {
+    queries: [
+      `San Diego County California commercial OR multifamily OR industrial sold LLC 2026 ${NV_EXCLUSIONS}`,
+      `site:loopnet.com San Diego sold`,
+    ],
+    hint: "San Diego County, CA entity-owned multifamily, commercial, industrial transfers. Skip SFR. Extract owner, address, price ≥$1M, date.",
+  },
+  ca_riverside: {
+    queries: [
+      `Riverside County California Palm Springs Indio Temecula industrial OR commercial OR multifamily sold LLC 2026 ${NV_EXCLUSIONS}`,
+    ],
+    hint: "Riverside County, CA (Inland Empire) entity-owned industrial, commercial, multifamily transfers. Skip SFR. Extract owner, address, price ≥$750k, date.",
+  },
+  // --- TX ---
+  tx_harris: {
+    queries: [
+      `Harris County Texas Houston commercial OR multifamily OR industrial sold LLC 2026 ${NV_EXCLUSIONS}`,
+      `site:loopnet.com Houston sold`,
+      `site:crexi.com Houston sold`,
+    ],
+    hint: "Harris County, TX (Houston) entity-owned multifamily ≥4-units, commercial, industrial, NNN, office transfers. Skip SFR/condo. Extract owner, address, price ≥$500k, date.",
+  },
+  tx_dallas: {
+    queries: [
+      `Dallas County Texas commercial OR multifamily OR industrial sold LLC 2026 ${NV_EXCLUSIONS}`,
+      `site:loopnet.com Dallas sold`,
+    ],
+    hint: "Dallas County, TX entity-owned multifamily, commercial, industrial transfers. Skip SFR. Extract owner, address, price ≥$500k, date.",
+  },
+  tx_travis: {
+    queries: [
+      `Travis County Texas Austin commercial OR multifamily OR industrial sold LLC 2026 ${NV_EXCLUSIONS}`,
+      `site:loopnet.com Austin sold`,
+    ],
+    hint: "Travis County, TX (Austin) entity-owned multifamily, commercial, industrial, office transfers. Skip SFR. Extract owner, address, price ≥$500k, date.",
+  },
+  tx_bexar: {
+    queries: [
+      `Bexar County Texas San Antonio commercial OR multifamily OR industrial sold LLC 2026 ${NV_EXCLUSIONS}`,
+    ],
+    hint: "Bexar County, TX (San Antonio) entity-owned multifamily, commercial, industrial transfers. Skip SFR. Extract owner, address, price ≥$500k, date.",
+  },
+  // --- FL ---
+  fl_miami_dade: {
+    queries: [
+      `Miami-Dade County Florida Miami commercial OR multifamily OR hospitality sold LLC 2026 ${NV_EXCLUSIONS}`,
+      `site:loopnet.com Miami sold`,
+      `site:crexi.com Miami sold`,
+    ],
+    hint: "Miami-Dade County, FL entity-owned multifamily ≥4-units, commercial, hospitality, retail transfers. Skip condo/SFR. Extract owner, address, price ≥$1M, date.",
+  },
+  fl_broward: {
+    queries: [
+      `Broward County Florida Fort Lauderdale commercial OR multifamily OR industrial sold LLC 2026 ${NV_EXCLUSIONS}`,
+    ],
+    hint: "Broward County, FL (Fort Lauderdale) entity-owned multifamily, commercial, industrial transfers. Skip condo/SFR. Extract owner, address, price ≥$500k, date.",
+  },
+  fl_orange: {
+    queries: [
+      `Orange County Florida Orlando commercial OR multifamily OR hospitality sold LLC 2026 ${NV_EXCLUSIONS}`,
+      `site:loopnet.com Orlando sold`,
+    ],
+    hint: "Orange County, FL (Orlando) entity-owned multifamily, commercial, hospitality transfers. Skip condo/SFR. Extract owner, address, price ≥$500k, date.",
+  },
+  fl_hillsborough: {
+    queries: [
+      `Hillsborough County Florida Tampa commercial OR multifamily OR industrial sold LLC 2026 ${NV_EXCLUSIONS}`,
+      `site:loopnet.com Tampa sold`,
+    ],
+    hint: "Hillsborough County, FL (Tampa) entity-owned multifamily, commercial, industrial transfers. Skip condo/SFR. Extract owner, address, price ≥$500k, date.",
+  },
+  // --- CO ---
+  co_denver: {
+    queries: [
+      `Denver County Colorado commercial OR multifamily OR industrial sold LLC 2026 ${NV_EXCLUSIONS}`,
+      `site:loopnet.com Denver sold`,
+    ],
+    hint: "Denver County, CO entity-owned multifamily, commercial, industrial, office transfers. Skip SFR/condo. Extract owner, address, price ≥$500k, date.",
+  },
+  co_arapahoe: {
+    queries: [
+      `Arapahoe County Colorado Aurora Centennial commercial OR multifamily OR industrial sold LLC 2026 ${NV_EXCLUSIONS}`,
+    ],
+    hint: "Arapahoe County, CO (Aurora) entity-owned multifamily, commercial, industrial transfers. Skip SFR. Extract owner, address, price ≥$500k, date.",
+  },
+  // --- UT ---
+  ut_salt_lake: {
+    queries: [
+      `Salt Lake County Utah commercial OR multifamily OR industrial sold LLC 2026 ${NV_EXCLUSIONS}`,
+      `site:loopnet.com "Salt Lake" sold`,
+    ],
+    hint: "Salt Lake County, UT entity-owned multifamily, commercial, industrial transfers. Skip SFR. Extract owner, address, price ≥$500k, date.",
+  },
+  // --- WA ---
+  wa_king: {
+    queries: [
+      `King County Washington Seattle Bellevue commercial OR multifamily OR industrial sold LLC 2026 ${NV_EXCLUSIONS}`,
+      `site:loopnet.com Seattle OR Bellevue sold`,
+    ],
+    hint: "King County, WA (Seattle/Bellevue) entity-owned multifamily ≥4-units, commercial, industrial, office transfers. Skip SFR/condo. Extract owner, address, price ≥$1M, date.",
+  },
 };
 
 interface ExtractedLead {
