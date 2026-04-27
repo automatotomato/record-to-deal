@@ -198,6 +198,7 @@ Deno.serve(async (req) => {
   let qualified = 0;
   const tierA: string[] = [];
   const tierB: string[] = [];
+  const allScored: string[] = []; // every successfully scored lead, in order
 
   for (const lead of list) {
     const r = score(lead);
