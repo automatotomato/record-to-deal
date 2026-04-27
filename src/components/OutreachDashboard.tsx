@@ -22,6 +22,8 @@ export const OutreachDashboard = () => {
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+  const [profiling, setProfiling] = useState(false);
+  const [profileProgress, setProfileProgress] = useState({ done: 0, total: 0, ok: 0, fail: 0 });
 
   const { data: leads, isLoading } = useQuery({
     queryKey: ["leads"],
