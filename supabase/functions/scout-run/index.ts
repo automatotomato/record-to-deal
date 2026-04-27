@@ -710,8 +710,8 @@ Deno.serve(async (req) => {
           scout_confidence: 55,
         });
       }
-      if (droppedNonNv || droppedHomeowner || droppedTooSmall) {
-        console.log(`${county.county}: filtered out ${droppedNonNv} non-NV, ${droppedHomeowner} homeowner, ${droppedTooSmall} small`);
+      if (droppedWrongState || droppedHomeowner || droppedTooSmall) {
+        console.log(`${county.county}: filtered out ${droppedWrongState} wrong-state, ${droppedHomeowner} homeowner, ${droppedTooSmall} small`);
       }
 
       if (payloads.length) {
