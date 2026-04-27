@@ -305,9 +305,9 @@ Parcel: ${l.parcel_number ?? "—"}
           role: "user",
           content: `${propertyContext}
 
-Web research snippets:
+${assessorBlock}Web research snippets:
 
-${corpus.slice(0, 18000) || "(no web results found — work with the property record only)"}
+${corpus.slice(0, 16000) || "(no web results found — work with the property record only)"}
 
 Return JSON with this exact shape:
 {
