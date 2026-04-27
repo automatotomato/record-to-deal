@@ -205,9 +205,10 @@ Deno.serve(async (req) => {
 
   const supabase = createClient(supabaseUrl, serviceKey);
 
-  let body: { lead_id?: string } = {};
+  let body: { lead_id?: string; force?: boolean } = {};
   try { body = await req.json(); } catch (_) {}
   const leadId = body.lead_id;
+  const force = body.force === true;
   if (!leadId) {
     return new Response(JSON.stringify({ error: "lead_id required" }), {
       status: 400,
@@ -225,6 +226,28 @@ Deno.serve(async (req) => {
       status: 404,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
+  }
+
+  // Cache guard: if this lead already has seller contact info on file, skip
+  // the (expensive) Firecrawl + AI run and return the stored profile. Callers
+  // can pass `force: true` to explicitly re-profile.
+  const hasSellerInfo =
+    !!(lead.contact_email || lead.contact_phone || lead.contact_linkedin || lead.mailing_address);
+  if (hasSellerInfo && !force) {
+    console.log(`Profiler: skipping ${leadId} — seller info already on file`);
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        cached: true,
+        lead_id: leadId,
+        message: "Seller info already on file. Pass force:true to re-profile.",
+        contact_email: lead.contact_email,
+        contact_phone: lead.contact_phone,
+        contact_linkedin: lead.contact_linkedin,
+        mailing_address: lead.mailing_address,
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
   }
 
   const l = lead as Lead;
