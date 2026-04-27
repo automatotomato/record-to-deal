@@ -5,12 +5,36 @@ import { Navigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Switch } from "@/components/ui/switch";
+import { Button } from "@/components/ui/button";
 import { fmtRelative } from "@/lib/format";
 import { toast } from "sonner";
+import { Loader2, Play } from "lucide-react";
 
 const Admin = () => {
   const { isAdmin, loading } = useAuth();
   const qc = useQueryClient();
+  const [running, setRunning] = useState(false);
+
+  const runScout = async () => {
+    setRunning(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("scout-run", {
+        body: { trigger_kind: "manual" },
+      });
+      if (error) throw error;
+      toast.success(`Scout complete — ${data?.leads_found ?? 0} new leads from ${data?.counties_scanned ?? 0} counties`);
+      if (data?.errors?.length) {
+        toast.warning(`${data.errors.length} county error(s) — see run log`);
+      }
+      qc.invalidateQueries({ queryKey: ["runs"] });
+      qc.invalidateQueries({ queryKey: ["counties"] });
+      qc.invalidateQueries({ queryKey: ["leads"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Scout failed");
+    } finally {
+      setRunning(false);
+    }
+  };
 
   const { data: counties } = useQuery({
     queryKey: ["counties"],
@@ -38,9 +62,15 @@ const Admin = () => {
 
   return (
     <AppShell>
-      <div className="px-8 py-6 border-b border-border bg-card">
-        <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-1">Configuration</div>
-        <h1 className="font-display text-5xl leading-none">Sources.</h1>
+      <div className="px-8 py-6 border-b border-border bg-card flex items-end justify-between gap-4">
+        <div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-1">Configuration</div>
+          <h1 className="font-display text-5xl leading-none">Sources.</h1>
+        </div>
+        <Button onClick={runScout} disabled={running} size="lg" className="font-mono uppercase tracking-wider text-xs">
+          {running ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
+          {running ? "Scouting…" : "Run Scout now"}
+        </Button>
       </div>
 
       <div className="p-8 space-y-10">
