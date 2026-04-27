@@ -1,96 +1,64 @@
-## Goal
+## What's actually going wrong
 
-Make The Desk feel like a single, obvious workflow:
-**Find leads → Review urgent ones → Open a lead → Draft outreach.**
+You're right — the Scout is getting weaker each run, and the data isn't framed around 1031 candidates. Three concrete causes:
 
-No jargon. One clear primary action at any moment. Everything else tucked away.
+### 1. ATTOM is returning **0 sales every single run**
+Every ATTOM call is returning HTTP 400: `"Address1 and Address2 are required"`. We're calling `/sale/snapshot` with only `address2` (the city). ATTOM's snapshot endpoint requires either a full address pair OR a geo ID (`geoIdV4`) — it's not designed to pull "all sales in a city". So **ATTOM has contributed 0 leads since it was wired in.** That's the entire reason it feels like it's getting worse: we added a "primary source" that returns nothing, and Firecrawl results vary run-to-run.
 
-## What changes (user-facing)
+The right ATTOM endpoint for "give me recent high-value sales in Clark County, NV" is `/sale/snapshot` with `geoIdV4` (county/CBSA geo IDs from ATTOM's `/area/lookup`), or `/property/snapshot` with a geoId + filters. Address-based snapshot only works one property at a time.
 
-### 1. Header — one primary action, plain language
+### 2. Each re-run finds **fewer leads** because Firecrawl returns mostly the same URLs
+Firecrawl `search` with `tbs: qdr:m` (last month) hits the same LoopNet/Crexi pages repeatedly. The dedupe logic then correctly says "already have this lead" and the `leads_found` counter (which only counts **new inserts**) drops. The data is actually fine — the **counter is misleading.** It should also report "updated" and "total active leads in DB" so the user sees the pipeline growing, not shrinking.
 
-Current header has "Find new leads" + a "More" dropdown for export. It's small and looks decorative.
+### 3. The dashboard doesn't speak "1031 candidate"
+Right now you see status/tier columns. There's no view that says "here are the X owners who just sold appreciated CRE/multifamily and have a 180-day clock ticking" — which is literally the only thing that matters.
 
-New header:
-- Big title stays ("The Desk").
-- A short helper line under it: e.g. *"148 leads · 12 urgent · last refreshed 2h ago"* — replaces the "Outreach pipeline · Live feed" eyebrow.
-- One **prominent primary button**: **`+ Find new leads`** (orange, larger, with a tooltip: *"Scans Nevada county records for fresh investment property sales"*).
-- Secondary button: **`Export CSV`** (visible, not buried in a dropdown).
-- "Sources" admin button moved to header (admin only) so admins don't hunt for it in the sidebar.
+Current data: **9 URGENT, 2 WARM, 5 COLD, 12 DISQUALIFIED.** Those 9 URGENT (Stephanie Development, GPS LV Business Park, Green Unicorns LLC, etc. — all entity-owned NV CRE sales between $2M–$11M) ARE good 1031 candidates. They're just buried.
 
-### 2. KPI strip — fewer, friendlier
+---
 
-Today: 6 KPIs, some are jargon ("Avg score", "Data quality").
+## The fix (3 parts, in priority order)
 
-New: 4 KPIs, each with a 1-line description on hover:
-- **Total leads** (all time)
-- **Urgent** *(sold in the last 30 days — 1031 clock is ticking)*
-- **Hot leads** *(strongest 1031 candidates)*
-- **Pipeline tax exposure** *(combined estimated tax bill across all leads)*
+### Part 1 — Make ATTOM actually work (biggest impact)
+Replace the broken city-loop with the proper geoId-based call:
 
-Drop "Avg score" and "Data quality" — they're internal metrics, not client-actionable.
+1. On first run per county, look up the ATTOM `geoIdV4` for that NV county via `/area/lookup` (county-level: `geoType=CO`) and cache it on the `counties` row (new column `attom_geo_id`).
+2. Call `/sale/snapshot?geoIdV4={countyGeoId}&minsaleamt=500000&startsalesearchdate=...&endsalesearchdate=...&pagesize=100` — one call per county instead of one per city.
+3. Page through results (ATTOM caps at 100/page).
+4. Filter the response to property classes that matter for 1031: commercial, multifamily ≥4u, industrial, retail, office, hospitality, land. Drop SFR/condo unless price > $1M and owner is an entity.
 
-### 3. Tabs — clearer labels, one default view
+This single change should take ATTOM from 0 → dozens of structured NV CRE sales per run.
 
-Current: `Active leads / Cold / Disqualified`.
+### Part 2 — Make Scout results feel cumulative, not shrinking
+- Track and report **`leads_updated`** alongside `leads_found` in `scout_runs` (new column) so a re-run shows "5 new, 18 refreshed" instead of "5 new" looking like a regression.
+- In the dashboard "Find new leads" toast/result, show: `"Found 5 new + refreshed 18. You now have 28 active 1031 candidates."`
+- Bump Firecrawl `tbs` from `qdr:m` to `qdr:w` on subsequent runs (only pull last week) so we're not re-fetching the same monthly cache. Keep `qdr:m` only for the very first run per county.
 
-New labels (clearer intent):
-- **`Worth pursuing`** *(URGENT + HOT + WARM + UNSCORED)* — default
-- **`Low priority`** *(COLD)*
-- **`Filtered out`** *(DISQUALIFIED — explains in tooltip: "Owner-occupied homes, too small, etc.")*
+### Part 3 — Reframe the dashboard around 1031 candidates
+Restructure the existing tabs (we already have Cold / Disqualified tabs from earlier work) so the primary view is:
 
-Each tab keeps its count badge.
+- **"1031 Candidates"** (default tab) — `tier IN (URGENT, WARM)` AND `trigger_event IN (sale_recorded, pending_sale)` AND owner is entity (LLC/Corp/Trust). Sorted by `sale_date DESC` so the freshest 180-day clocks float to the top.
+- Each row gets a pill: **"X days into 180-day window"** computed from `sale_date`, color-coded:
+  - 🟢 0–45 days = "Fresh — call this week"
+  - 🟡 46–135 days = "Active window"
+  - 🔴 136–180 days = "Closing fast"
+  - ⚫ >180 = "Window closed"
+- Secondary tabs: **All Leads**, **Cold**, **Disqualified** (existing).
+- A header stat strip: `"X active 1031 candidates · $Y total sale volume · $Z estimated tax exposure"`.
 
-### 4. Filters — collapse into one row, hide noise
+This makes the value of every Scout run obvious: not "how many rows did you scrape" but "how many qualified 1031 conversations are on the table right now."
 
-Current: 3 select dropdowns + search, all visible.
+---
 
-New:
-- Search bar stays, full width on the left, with placeholder *"Search by owner, address, or city"*.
-- A single **`Filters`** button opens a popover with Tier / State / Status filters. A small badge shows how many filters are active.
-- Removes visual clutter; advanced users still get the same controls.
+## Files I'll change
+- `supabase/functions/scout-run/index.ts` — replace `attomSalesSnapshot` with geoId-based version, add geoId lookup/cache, track `leads_updated`, tighten Firecrawl time window logic.
+- Migration — add `counties.attom_geo_id text`, add `scout_runs.leads_updated int default 0`.
+- `src/components/OutreachDashboard.tsx` — add "1031 Candidates" as default tab, add 180-day countdown pill, add header stat strip, update toast copy from scout result.
+- `src/lib/format.ts` — add `daysSinceSale` + `windowStatus` helpers.
 
-### 5. Lead table — clearer columns, scannable
+## What I'm NOT changing (to keep scope tight)
+- Profiler / qualifier logic — those are working.
+- ATTOM enrichment in profiler-run — that path uses address lookup which is correct for a single known property.
+- Auth, RLS, schema beyond the two columns above.
 
-Same data, friendlier headers and small cleanups:
-- `Tier` → `Priority`
-- `Score` → removed from default view (it's an internal number — moved to lead drawer)
-- `Type` → `Property type`
-- `Mailing address` → `Owner mailing` with a small "no address" badge instead of an em-dash when missing
-- `Sold` → `Last sale`
-- `Status` column: replace text with a colored dot + label (e.g. green dot "New", grey dot "Contacted") — easier to scan
-- Add a subtle row hover hint: *"Click to open lead"* on first hover only.
-
-### 6. Empty state — guides next step
-
-Current empty state mentions "Los Angeles and Cook counties" (stale copy from before NV pivot).
-
-New empty state:
-- Headline: *"No leads yet."*
-- Subline: *"Click 'Find new leads' to scan Nevada county records for recent investment property sales. This usually takes 1–2 minutes."*
-- Big primary button to run the scout.
-
-### 7. Lead drawer — one clear next action
-
-Currently has two near-identical buttons: "Find seller info" in the Seller section AND "Profile + draft email" in the AI section, both calling the same function. Confusing.
-
-Fix:
-- Remove the duplicate button in the Seller section.
-- Rename the single action to **`Find owner & draft email`** (action verb, plain language).
-- Once data exists, the button becomes **`Refresh & re-draft`**.
-- Move the "Workflow / Status" section to the **top** of the drawer so changing status is one click after opening.
-
-## What stays the same
-
-- Editorial typography, color palette, dense data feel — only labels and layout improve.
-- All scout / qualifier / profiler logic is untouched.
-- Realtime updates, CSV export, drawer content all preserved.
-
-## Technical scope
-
-Files edited:
-- `src/components/OutreachDashboard.tsx` — header restructure, KPI changes, tab labels, filter popover, table column updates, empty-state copy.
-- `src/components/LeadDrawer.tsx` — remove duplicate action button, rename primary CTA, move Workflow section to top.
-- `src/components/AppShell.tsx` — minor: keep "Sources" in sidebar for admins (no change needed if header link added).
-
-No database, edge function, or schema changes. No new dependencies.
+Approve and I'll ship it.
