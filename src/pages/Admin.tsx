@@ -8,7 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { fmtRelative } from "@/lib/format";
 import { toast } from "sonner";
-import { Loader2, Play, Sparkles, Target } from "lucide-react";
+import { Loader2, Play } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 
 const Admin = () => {
@@ -26,7 +26,7 @@ const Admin = () => {
         body: { rescore_all: true, auto_profile: true },
       });
       if (error) throw error;
-      toast.success(`Scored ${data?.qualified ?? 0} leads · ${data?.tier_a ?? 0} tier A · ${data?.tier_b ?? 0} tier B · profiling top ${data?.auto_profiling ?? 0} in background`);
+      toast.success(`Scored ${data?.qualified ?? 0} leads · ${data?.tier_urgent ?? 0} urgent · ${data?.tier_hot ?? 0} hot · ${data?.tier_warm ?? 0} warm · profiling top ${data?.auto_profiling ?? 0} in background`);
       qc.invalidateQueries({ queryKey: ["leads"] });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Qualifier failed");
@@ -194,7 +194,7 @@ const Admin = () => {
                     <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{c.parser_key}</td>
                     <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{fmtRelative(c.last_run_at)}</td>
                     <td className="px-4 py-3 text-right">
-                      <Switch checked={c.enabled} onCheckedChange={(v) => toggle(c.id, v)} disabled={!["la_county", "cook_county"].includes(c.parser_key)} />
+                      <Switch checked={c.enabled} onCheckedChange={(v) => toggle(c.id, v)} disabled={!["clark_county", "washoe_county"].includes(c.parser_key)} />
                     </td>
                   </tr>
                 ))}
@@ -202,7 +202,7 @@ const Admin = () => {
             </table>
           </div>
           <p className="mt-3 text-xs text-muted-foreground italic">
-            Only Los Angeles and Cook counties have parsers wired up. Others are placeholders for future expansion.
+            Only Clark and Washoe counties (Nevada) have parsers wired up. Others are placeholders for future expansion.
           </p>
         </section>
 
