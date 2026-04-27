@@ -12,17 +12,6 @@ const corsHeaders = {
 const FIRECRAWL_V2 = "https://api.firecrawl.dev/v2";
 const ATTOM_BASE = "https://api.gateway.attomdata.com/propertyapi/v1.0.0";
 
-// ATTOM city lists per Nevada county (covers the meaningful CRE markets).
-const ATTOM_COUNTY_CITIES: Record<string, string[]> = {
-  nv_clark: ["LAS VEGAS", "HENDERSON", "NORTH LAS VEGAS", "PARADISE", "SUMMERLIN", "SPRING VALLEY"],
-  nv_washoe: ["RENO", "SPARKS", "INCLINE VILLAGE"],
-  nv_carson_city: ["CARSON CITY"],
-  nv_douglas: ["MINDEN", "GARDNERVILLE", "STATELINE", "ZEPHYR COVE"],
-  nv_lyon: ["FERNLEY", "YERINGTON", "DAYTON"],
-  nv_nye: ["PAHRUMP", "TONOPAH"],
-  nv_elko: ["ELKO", "SPRING CREEK", "WEST WENDOVER"],
-};
-
 // Map ATTOM standard land use to our property_type enum
 function attomLandUseToType(use: string | undefined | null): string {
   const u = (use ?? "").toLowerCase();
@@ -34,34 +23,65 @@ function attomLandUseToType(use: string | undefined | null): string {
   return "Unknown";
 }
 
-async function attomSalesSnapshot(
-  cities: string[],
+// Look up an ATTOM geoIdV4 for a Nevada county. Cached on counties.attom_geo_id.
+async function attomLookupCountyGeoId(
+  countyName: string,
+  apiKey: string,
+): Promise<string | null> {
+  // ATTOM /area/lookup expects: WhereClause + geoType. County geoType is "CO".
+  // Example geoIdV4 for Clark County NV: "CO46f4...". The lookup returns it.
+  const params = new URLSearchParams({
+    WhereClause: `CountyName like '${countyName.toUpperCase()}' and StateAbbreviation = 'NV'`,
+    geoType: "CO",
+  });
+  try {
+    const r = await fetch(`${ATTOM_BASE}/area/lookup?${params}`, {
+      headers: { Accept: "application/json", apikey: apiKey },
+    });
+    if (!r.ok) {
+      console.warn(`ATTOM area lookup ${countyName} ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      return null;
+    }
+    const data = await r.json();
+    const areas: Array<Record<string, any>> = data?.response?.result?.package?.item ?? data?.areas ?? [];
+    const first = areas[0];
+    return first?.geoIdV4 ?? first?.geoIdV3 ?? first?.geoId ?? null;
+  } catch (e) {
+    console.warn(`ATTOM area lookup ${countyName} failed:`, e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
+// Pull recent high-value sales for a whole county via ATTOM geoIdV4.
+async function attomCountySales(
+  geoId: string,
   apiKey: string,
 ): Promise<ExtractedLead[]> {
-  // ATTOM /sale/snapshot returns recent sale events for a geography.
-  // We pull each city in the county, last 60 days, min $500k.
   const out: ExtractedLead[] = [];
   const startDate = new Date(Date.now() - 60 * 24 * 3600 * 1000).toISOString().slice(0, 10);
   const endDate = new Date().toISOString().slice(0, 10);
-
-  for (const city of cities) {
+  const pageSize = 100;
+  // Cap at 3 pages (300 sales/county/run) to stay within edge-function time budget.
+  for (let page = 1; page <= 3; page++) {
     const params = new URLSearchParams({
-      address2: `${city}, NV`,
+      geoIdV4: geoId,
       startsalesearchdate: startDate,
       endsalesearchdate: endDate,
       minsaleamt: "500000",
-      pagesize: "50",
+      pagesize: String(pageSize),
+      page: String(page),
     });
     try {
       const r = await fetch(`${ATTOM_BASE}/sale/snapshot?${params}`, {
         headers: { Accept: "application/json", apikey: apiKey },
       });
       if (!r.ok) {
-        console.warn(`ATTOM ${city} ${r.status}: ${(await r.text()).slice(0, 200)}`);
-        continue;
+        console.warn(`ATTOM snapshot page ${page} ${r.status}: ${(await r.text()).slice(0, 200)}`);
+        break;
       }
       const data = await r.json();
       const props: Array<Record<string, any>> = data?.property ?? [];
+      if (!props.length) break;
       for (const p of props) {
         const addr = p?.address ?? {};
         const sale = p?.sale ?? {};
@@ -74,23 +94,34 @@ async function attomSalesSnapshot(
           null;
         const price = Number(sale?.amount?.saleamt ?? sale?.saleAmountData?.saleamt ?? 0) || null;
         const saleDate = sale?.salesearchdate ?? sale?.amount?.salerecdate ?? null;
-        if (!street || !price || price < 500_000) continue;
+        const propType = attomLandUseToType(summary?.propclass ?? summary?.proptype);
+
+        if (!street || !price) continue;
+
+        // 1031 filter: keep CRE / multifamily / land / industrial. Drop SFR
+        // unless price is >= $1M AND owner name looks like an entity.
+        const ownerLooksEntity = ownerName ? /\b(LLC|L\.L\.C|INC|CORP|CO\.|COMPANY|TRUST|TRUSTEE|HOLDINGS|PARTNERS|LP|LLP)\b/i.test(ownerName) : false;
+        if (propType === "SFR" && !(price >= 1_000_000 && ownerLooksEntity)) continue;
+        if (propType === "Unknown" && price < 750_000) continue;
+
         out.push({
           owner_name: ownerName || undefined,
           property_address: street,
-          property_city: addr.locality ?? city,
+          property_city: addr.locality ?? undefined,
           property_zip: addr.postal1 ?? addr.postal ?? undefined,
           parcel_number: p?.identifier?.apn ?? undefined,
           sale_price: price,
           sale_date: saleDate ? String(saleDate).slice(0, 10) : undefined,
           deed_date: saleDate ? String(saleDate).slice(0, 10) : undefined,
-          property_type: attomLandUseToType(summary?.propclass ?? summary?.proptype),
+          property_type: propType,
           source_record_url: `https://api.attomdata.com/property/${p?.identifier?.attomId ?? ""}`,
           trigger_event: "recent_sale",
         });
       }
+      if (props.length < pageSize) break;
     } catch (e) {
-      console.warn(`ATTOM ${city} failed:`, e instanceof Error ? e.message : e);
+      console.warn(`ATTOM snapshot page ${page} failed:`, e instanceof Error ? e.message : e);
+      break;
     }
   }
   return out;
