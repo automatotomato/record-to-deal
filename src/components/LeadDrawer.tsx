@@ -308,6 +308,14 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
   );
 };
 
+// Returns true if the most recent profiler_run activity recorded that the
+// mailing address came from the official county assessor record.
+function mailingFromAssessor(activities: any[] | undefined): boolean {
+  if (!activities) return false;
+  const latest = activities.find((a) => a.kind === "profiler_run");
+  return !!latest?.payload?.mailing_from_assessor;
+}
+
 const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
   <div className="px-6 py-5 border-b border-border">
     <div className="kpi-label mb-3">{title}</div>
