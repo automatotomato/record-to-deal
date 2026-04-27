@@ -198,22 +198,37 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
             )}
 
             {/* AI draft + re-profile */}
-            <Section title="AI outreach draft">
+            <Section title="Outreach draft">
               <div className="flex items-center gap-2 mb-3">
-                <Button size="sm" variant="outline" onClick={() => draftEmail(false)} disabled={drafting} className="rounded-none font-mono text-[10px] uppercase tracking-wider">
+                <Button
+                  size="sm"
+                  onClick={() => draftEmail(false)}
+                  disabled={drafting}
+                  className="rounded-none bg-accent text-accent-foreground hover:bg-accent/90 font-mono text-[10px] uppercase tracking-wider"
+                >
                   {drafting ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
-                  {lead.personality_type ? "Re-draft with AI" : "Profile + draft email"}
+                  {lead.personality_type ? "Refresh & re-draft" : "Find owner & draft email"}
                 </Button>
                 {lead.personality_type && (
-                  <Button size="sm" variant="ghost" onClick={() => draftEmail(true)} disabled={drafting} className="rounded-none font-mono text-[10px] uppercase tracking-wider">
-                    Re-profile seller
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => draftEmail(true)}
+                    disabled={drafting}
+                    className="rounded-none font-mono text-[10px] uppercase tracking-wider"
+                  >
+                    Re-pull from public records
                   </Button>
                 )}
               </div>
               {(() => {
                 const latestDraft = emails?.find((e: any) => e.status === "draft");
                 if (!latestDraft) {
-                  return <div className="text-xs text-muted-foreground italic">No draft yet — click "Profile + draft email" to generate one.</div>;
+                  return (
+                    <div className="text-xs text-muted-foreground italic">
+                      No draft yet — click "Find owner & draft email" to look up the owner and generate a personalized outreach email.
+                    </div>
+                  );
                 }
                 return (
                   <div className="space-y-2 border border-border bg-secondary/30 p-3">
@@ -227,20 +242,6 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
                   </div>
                 );
               })()}
-            </Section>
-
-            {/* Status */}
-            <Section title="Workflow">
-              <div className="flex items-center gap-2">
-                <span className="kpi-label">Status</span>
-                <Select value={lead.status} onValueChange={updateStatus}>
-                  <SelectTrigger className="rounded-none h-8 w-[180px] font-mono text-xs"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {["new", "reviewing", "contacted", "replied", "meeting", "won", "dead"].map((s) =>
-                      <SelectItem key={s} value={s} className="font-mono text-xs">{s}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
             </Section>
 
             {/* Reference links — public-record sources used to find seller info */}
