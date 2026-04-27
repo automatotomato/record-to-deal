@@ -12,7 +12,99 @@ const corsHeaders = {
 
 const SMARTY_LOOKUP = "https://us-property.api.smarty.com/lookup";
 const SMARTY_SEARCH = "https://us-property.api.smarty.com/search";
+const ATTOM_BASE = "https://api.gateway.attomdata.com/propertyapi/v1.0.0";
 const AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
+
+// --- ATTOM enrichment ---------------------------------------------------
+// Returns a SmartyAttrs-shaped object so downstream mapping/estimator code
+// works unchanged. ATTOM gives us richer NV coverage than Smarty.
+async function attomEnrich(
+  street: string,
+  city: string | null,
+  state: string | null,
+  apiKey: string,
+): Promise<{ attrs: SmartyAttrs; sources: string[] } | null> {
+  const params = new URLSearchParams({ address1: street });
+  if (city && state) params.set("address2", `${city}, ${state}`);
+  else if (state) params.set("address2", state);
+  try {
+    const r = await fetch(`${ATTOM_BASE}/property/expandedprofile?${params}`, {
+      headers: { Accept: "application/json", apikey: apiKey },
+    });
+    if (!r.ok) {
+      console.warn(`ATTOM expandedprofile ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      return null;
+    }
+    const data = await r.json();
+    const p = data?.property?.[0];
+    if (!p) return null;
+
+    const owner = p.owner ?? {};
+    const o1 = owner.owner1 ?? {};
+    const sale = p.sale ?? {};
+    const assessment = p.assessment ?? {};
+    const assessed = assessment.assessed ?? {};
+    const market = assessment.market ?? {};
+    const tax = assessment.tax ?? {};
+    const mortgage = assessment.mortgage ?? {};
+    const summary = p.summary ?? {};
+    const building = p.building ?? {};
+    const lot = p.lot ?? {};
+    const mailingAddr = owner.mailingaddressoneline ?? owner.mailingAddress?.oneLine ?? null;
+
+    const ownerName =
+      o1.fullname ??
+      [o1.firstnameandmi, o1.lastname].filter(Boolean).join(" ").trim() ||
+      null;
+    const isCompany =
+      (o1.lastname && /\b(LLC|INC|CORP|TRUST|COMPANY|LP|LLP|HOLDINGS)\b/i.test(o1.lastname)) ||
+      (ownerName && /\b(LLC|INC|CORP|TRUST|COMPANY|LP|LLP|HOLDINGS)\b/i.test(ownerName));
+
+    // Fold mailing one-liner into the mail_* fields the rest of the code reads
+    const attrs: SmartyAttrs = {
+      owner_full_name: ownerName,
+      ownership_type: isCompany ? "company" : "individual",
+      company_flag: isCompany ? "owner_is_company" : null,
+      mail_full_address: mailingAddr,
+      mail_city: owner.mailingaddresscity ?? null,
+      mail_state: owner.mailingaddressstate ?? null,
+      mail_zipcode: owner.mailingaddresszip ?? null,
+      deed_sale_price: sale?.amount?.saleamt ?? null,
+      deed_sale_date: sale?.salesearchdate ?? sale?.amount?.salerecdate ?? null,
+      assessed_value: assessed?.assdttlvalue ?? null,
+      assessed_improvement_value: assessed?.assdimprvalue ?? null,
+      market_value: market?.mktttlvalue ?? null,
+      tax_billed_amount: tax?.taxamt ?? null,
+      land_use_standard: summary?.propclass ?? summary?.propsubtype ?? null,
+      land_use_group: summary?.proptype ?? null,
+      building_sqft: building?.size?.bldgsize ?? building?.size?.universalsize ?? null,
+      year_built: summary?.yearbuilt ?? building?.summary?.yearbuiltrenov ?? null,
+      acres: lot?.lotsize1 ?? null,
+      owner_occupancy_status:
+        summary?.absenteeInd === "ABSENTEE" || summary?.absenteeInd === "ABSENTEE_OWNER"
+          ? "not_owner_occupied"
+          : null,
+      financial_history: mortgage?.amount
+        ? [{
+            mortgage_amount: mortgage.amount,
+            mortgage_type: mortgage.loantype ?? null,
+            lender_name: mortgage.lender?.lastname ?? mortgage.lender?.fullname ?? null,
+            mortgage_recording_date: mortgage.date ?? null,
+          }]
+        : [],
+    };
+    return {
+      attrs,
+      sources: [
+        "attomdata.com",
+        p.identifier?.attomId ? `attom_id:${p.identifier.attomId}` : null,
+      ].filter(Boolean) as string[],
+    };
+  } catch (e) {
+    console.warn("ATTOM enrich failed:", e);
+    return null;
+  }
+}
 
 interface Lead {
   id: string;
