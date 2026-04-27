@@ -220,6 +220,7 @@ Deno.serve(async (req) => {
     qualified += 1;
     if (r.tier === "A") tierA.push(lead.id);
     else if (r.tier === "B") tierB.push(lead.id);
+    allScored.push(lead.id);
 
     await supabase.from("lead_activities").insert({
       lead_id: lead.id,
@@ -229,12 +230,16 @@ Deno.serve(async (req) => {
     });
   }
 
-  // Optionally fan out the Profiler for high-value leads (tier A first, then B)
+  // Fan out the Profiler for EVERY scored lead (tier A first, then B, then rest)
+  // so seller/owner contact info is pulled automatically for every property.
   let profiled = 0;
-  if (body.auto_profile) {
-    const targets = [...tierA, ...tierB].slice(0, 25);
+  let profileTargetCount = 0;
+  if (autoProfile) {
+    const restOfLeads = allScored.filter((id) => !tierA.includes(id) && !tierB.includes(id));
+    const targets = [...tierA, ...tierB, ...restOfLeads].slice(0, profileCap);
+    profileTargetCount = targets.length;
     const work = async () => {
-      // Concurrency 3
+      // Concurrency 3 — Firecrawl rate-limit friendly
       const queue = [...targets];
       const worker = async () => {
         while (queue.length) {
