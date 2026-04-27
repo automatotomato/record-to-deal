@@ -169,10 +169,13 @@ Deno.serve(async (req) => {
   let body: {
     lead_ids?: string[];
     rescore_all?: boolean;
-    auto_profile?: boolean; // fan out Profiler for tier A/B
+    auto_profile?: boolean; // fan out Profiler for ALL scored leads (default true)
+    profile_cap?: number; // max leads to profile in one run (default 50)
     run_id?: string;
   } = {};
   try { body = await req.json(); } catch (_) {}
+  const autoProfile = body.auto_profile !== false; // default true
+  const profileCap = body.profile_cap ?? 50;
 
   // Load target leads
   let q = supabase
@@ -195,6 +198,7 @@ Deno.serve(async (req) => {
   let qualified = 0;
   const tierA: string[] = [];
   const tierB: string[] = [];
+  const allScored: string[] = []; // every successfully scored lead, in order
 
   for (const lead of list) {
     const r = score(lead);
@@ -216,6 +220,7 @@ Deno.serve(async (req) => {
     qualified += 1;
     if (r.tier === "A") tierA.push(lead.id);
     else if (r.tier === "B") tierB.push(lead.id);
+    allScored.push(lead.id);
 
     await supabase.from("lead_activities").insert({
       lead_id: lead.id,
@@ -225,12 +230,16 @@ Deno.serve(async (req) => {
     });
   }
 
-  // Optionally fan out the Profiler for high-value leads (tier A first, then B)
+  // Fan out the Profiler for EVERY scored lead (tier A first, then B, then rest)
+  // so seller/owner contact info is pulled automatically for every property.
   let profiled = 0;
-  if (body.auto_profile) {
-    const targets = [...tierA, ...tierB].slice(0, 25);
+  let profileTargetCount = 0;
+  if (autoProfile) {
+    const restOfLeads = allScored.filter((id) => !tierA.includes(id) && !tierB.includes(id));
+    const targets = [...tierA, ...tierB, ...restOfLeads].slice(0, profileCap);
+    profileTargetCount = targets.length;
     const work = async () => {
-      // Concurrency 3
+      // Concurrency 3 — Firecrawl rate-limit friendly
       const queue = [...targets];
       const worker = async () => {
         while (queue.length) {
@@ -275,7 +284,7 @@ Deno.serve(async (req) => {
       qualified,
       tier_a: tierA.length,
       tier_b: tierB.length,
-      auto_profiling: body.auto_profile ? Math.min(tierA.length + tierB.length, 25) : 0,
+      auto_profiling: profileTargetCount,
     }),
     { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
   );

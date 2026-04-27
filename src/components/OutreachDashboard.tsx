@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fmtMoney, fmtDate, fmtRelative, tierColor } from "@/lib/format";
-import { Loader2, Play, Download, AlertCircle, Search } from "lucide-react";
+import { Loader2, Play, Download, AlertCircle, Search, Mail, Phone, Linkedin, Home } from "lucide-react";
 import { toast } from "sonner";
 import { LeadDrawer } from "./LeadDrawer";
 import { useAuth } from "@/hooks/useAuth";
@@ -212,6 +212,7 @@ export const OutreachDashboard = () => {
                   <td className="px-4 py-3">
                     <div className="text-sm">{l.owner_name ?? "—"}</div>
                     <div className="text-[11px] text-muted-foreground font-mono uppercase">{l.owner_type}</div>
+                    <SellerIcons lead={l} />
                   </td>
                   <td className="px-4 py-3 data-cell text-right">{fmtMoney(l.sale_price, { compact: true })}</td>
                   <td className="px-4 py-3 data-cell text-right text-accent font-semibold">{fmtMoney(l.total_tax_exposure, { compact: true })}</td>
@@ -241,6 +242,34 @@ const Kpi = ({ label, value, accent }: { label: string; value: string; accent?: 
 const Th = ({ children, right }: { children: React.ReactNode; right?: boolean }) => (
   <th className={`px-4 py-2 font-medium ${right ? "text-right" : "text-left"}`}>{children}</th>
 );
+
+const SellerIcons = ({ lead }: { lead: any }) => {
+  const items: { icon: React.ReactNode; on: boolean; label: string; value?: string }[] = [
+    { icon: <Mail className="h-3 w-3" />, on: !!lead.contact_email, label: "Email", value: lead.contact_email },
+    { icon: <Phone className="h-3 w-3" />, on: !!lead.contact_phone, label: "Phone", value: lead.contact_phone },
+    { icon: <Linkedin className="h-3 w-3" />, on: !!lead.contact_linkedin, label: "LinkedIn", value: lead.contact_linkedin },
+    { icon: <Home className="h-3 w-3" />, on: !!lead.mailing_address, label: "Mailing", value: lead.mailing_address },
+  ];
+  const hasAny = items.some((i) => i.on);
+  return (
+    <div className="mt-1.5 flex items-center gap-1.5">
+      {items.map((it, i) => (
+        <span
+          key={i}
+          title={it.on && it.value ? `${it.label}: ${it.value}` : `${it.label} missing`}
+          className={`inline-flex items-center justify-center h-4 w-4 ${it.on ? "text-accent" : "text-muted-foreground/30"}`}
+        >
+          {it.icon}
+        </span>
+      ))}
+      {!hasAny && (
+        <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground/60 ml-1">
+          no contact yet
+        </span>
+      )}
+    </div>
+  );
+};
 
 const FilterSelect = ({ value, onChange, label, options }: { value: string; onChange: (v: string) => void; label: string; options: { v: string; l: string }[] }) => (
   <div className="flex items-center gap-2">

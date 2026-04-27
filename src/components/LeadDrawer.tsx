@@ -139,17 +139,65 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
               <Fact label="Held" value={lead.ownership_years ? `${lead.ownership_years}y` : "—"} />
             </div>
 
-            {/* Owner & contact */}
-            <Section title="Owner">
-              <div className="text-lg">{lead.owner_name ?? "Unknown"}</div>
-              {lead.mailing_address && <div className="text-xs text-muted-foreground font-mono mt-1">Mailing: {lead.mailing_address}</div>}
+            {/* Seller / Owner */}
+            <Section title="Seller information">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-lg font-semibold">{lead.owner_name ?? "Unknown owner"}</div>
+                  <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mt-0.5">
+                    {lead.owner_type ?? "Unknown"}
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={draftEmail}
+                  disabled={drafting}
+                  className="rounded-none font-mono text-[10px] uppercase tracking-wider shrink-0"
+                >
+                  {drafting ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
+                  {lead.contact_email || lead.contact_phone || lead.mailing_address ? "Re-profile" : "Find seller info"}
+                </Button>
+              </div>
+
+              {lead.mailing_address && (
+                <div className="mt-3 p-3 bg-secondary/50 border-l-2 border-accent">
+                  <div className="kpi-label flex items-center gap-2">
+                    Mailing address
+                    {mailingFromAssessor(activities) && (
+                      <span className="font-mono text-[9px] uppercase tracking-wider bg-accent text-accent-foreground px-1.5 py-0.5">
+                        from county records
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-sm font-mono mt-1 leading-relaxed">{lead.mailing_address}</div>
+                </div>
+              )}
+
               <div className="mt-3 flex flex-wrap gap-2 text-xs">
                 <ContactPill icon={<Mail className="h-3 w-3" />} value={lead.contact_email} />
                 <ContactPill icon={<Phone className="h-3 w-3" />} value={lead.contact_phone} />
                 <ContactPill icon={<Linkedin className="h-3 w-3" />} value={lead.contact_linkedin} link />
               </div>
-              {!lead.contact_email && !lead.contact_phone && (
-                <div className="mt-3 text-[11px] text-warm font-mono uppercase tracking-wider">⚠ Manual contact lookup needed</div>
+
+              {/* Completeness bar */}
+              <div className="mt-3">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="kpi-label">Contact completeness</span>
+                  <span className="font-mono text-[10px] tabular">{lead.contact_completeness ?? 0}%</span>
+                </div>
+                <div className="h-1 bg-muted overflow-hidden">
+                  <div
+                    className="h-full bg-accent transition-all"
+                    style={{ width: `${Math.min(100, lead.contact_completeness ?? 0)}%` }}
+                  />
+                </div>
+              </div>
+
+              {!lead.contact_email && !lead.contact_phone && !lead.mailing_address && (
+                <div className="mt-3 text-[11px] text-warm font-mono uppercase tracking-wider">
+                  ⚠ No seller contact yet — click "Find seller info" to pull from public records
+                </div>
               )}
             </Section>
 
@@ -259,6 +307,14 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
     </Sheet>
   );
 };
+
+// Returns true if the most recent profiler_run activity recorded that the
+// mailing address came from the official county assessor record.
+function mailingFromAssessor(activities: any[] | undefined): boolean {
+  if (!activities) return false;
+  const latest = activities.find((a) => a.kind === "profiler_run");
+  return !!latest?.payload?.mailing_from_assessor;
+}
 
 const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
   <div className="px-6 py-5 border-b border-border">

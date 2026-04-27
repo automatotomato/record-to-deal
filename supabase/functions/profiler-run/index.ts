@@ -46,6 +46,103 @@ interface ContactProfile {
   email_body?: string;
 }
 
+async function firecrawlScrape(
+  url: string,
+  apiKey: string,
+): Promise<{ markdown: string; url: string } | null> {
+  try {
+    const resp = await fetch(`${FIRECRAWL_V2}/scrape`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        url,
+        formats: ["markdown"],
+        onlyMainContent: true,
+        waitFor: 3000,
+      }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      console.warn(`Assessor scrape ${resp.status} for ${url}`);
+      return null;
+    }
+    const md =
+      (data?.data?.markdown as string) ??
+      (data?.markdown as string) ??
+      "";
+    if (!md) return null;
+    return { markdown: md.slice(0, 8000), url };
+  } catch (e) {
+    console.warn("Assessor scrape failed:", e);
+    return null;
+  }
+}
+
+// Try to fetch the official county assessor record for the property.
+// Returns { corpus, source } when successful, null otherwise.
+async function fetchCountyAssessor(
+  lead: Lead,
+  apiKey: string,
+): Promise<{ corpus: string; source: string } | null> {
+  const state = (lead.state ?? "").toUpperCase();
+  const county = (lead.county ?? "").toLowerCase();
+  const parcelRaw = (lead.parcel_number ?? "").trim();
+  const parcelDigits = parcelRaw.replace(/[^0-9]/g, "");
+
+  // LA County
+  if (state === "CA" && county.includes("los angeles")) {
+    if (parcelDigits.length >= 8) {
+      const direct = await firecrawlScrape(
+        `https://portal.assessor.lacounty.gov/parceldetail/${parcelDigits}`,
+        apiKey,
+      );
+      if (direct?.markdown) return { corpus: direct.markdown, source: direct.url };
+    }
+    if (lead.property_address) {
+      const search = await firecrawlSearch(
+        `"${lead.property_address}" site:assessor.lacounty.gov`,
+        apiKey,
+        2,
+      );
+      if (search.corpus) return { corpus: search.corpus.slice(0, 8000), source: search.sources[0] ?? "assessor.lacounty.gov" };
+    }
+    return null;
+  }
+
+  // Cook County
+  if (state === "IL" && county.includes("cook")) {
+    if (parcelDigits.length >= 10) {
+      const direct = await firecrawlScrape(
+        `https://www.cookcountyassessor.com/pin/${parcelDigits}`,
+        apiKey,
+      );
+      if (direct?.markdown) return { corpus: direct.markdown, source: direct.url };
+    }
+    if (lead.property_address) {
+      const search = await firecrawlSearch(
+        `"${lead.property_address}" site:cookcountyassessor.com`,
+        apiKey,
+        2,
+      );
+      if (search.corpus) return { corpus: search.corpus.slice(0, 8000), source: search.sources[0] ?? "cookcountyassessor.com" };
+    }
+    return null;
+  }
+
+  // Generic fallback for any other county
+  if (lead.property_address || parcelRaw) {
+    const q = parcelRaw
+      ? `"${parcelRaw}" ${lead.county ?? ""} county assessor mailing address`
+      : `"${lead.property_address}" ${lead.county ?? ""} ${state} assessor mailing address taxpayer`;
+    const search = await firecrawlSearch(q, apiKey, 3);
+    if (search.corpus) return { corpus: search.corpus.slice(0, 8000), source: search.sources[0] ?? "assessor" };
+  }
+  return null;
+}
+
 async function firecrawlSearch(
   query: string,
   apiKey: string,
@@ -150,12 +247,27 @@ Deno.serve(async (req) => {
     queries.push(`"${l.property_address}" ${cityState} owner contact`);
   }
 
-  // Run searches in parallel (cap to 4 to stay within timeout)
-  const searchResults = await Promise.all(
-    queries.slice(0, 4).map((q) => firecrawlSearch(q, firecrawlKey, 4)),
-  );
+  // 1. Fetch the official county assessor record FIRST (highest-trust source).
+  // 2. Fan out web searches in parallel (cap to 4) for owner contact info.
+  const [assessor, searchResults] = await Promise.all([
+    fetchCountyAssessor(l, firecrawlKey),
+    Promise.all(queries.slice(0, 4).map((q) => firecrawlSearch(q, firecrawlKey, 4))),
+  ]);
   const corpus = searchResults.map((r) => r.corpus).filter(Boolean).join("\n\n===\n\n");
-  const sources = Array.from(new Set(searchResults.flatMap((r) => r.sources)));
+  const sources = Array.from(new Set([
+    ...(assessor ? [assessor.source] : []),
+    ...searchResults.flatMap((r) => r.sources),
+  ]));
+  const assessorBlock = assessor
+    ? `=== OFFICIAL COUNTY ASSESSOR RECORD (TRUSTED — prefer this for mailing_address and taxpayer name) ===
+Source: ${assessor.source}
+
+${assessor.corpus}
+
+=== END OFFICIAL RECORD ===
+
+`
+    : "";
 
   // AI: extract contact + profile + draft email in one pass
   const propertyContext = `
@@ -193,9 +305,9 @@ Parcel: ${l.parcel_number ?? "—"}
           role: "user",
           content: `${propertyContext}
 
-Web research snippets:
+${assessorBlock}Web research snippets:
 
-${corpus.slice(0, 18000) || "(no web results found — work with the property record only)"}
+${corpus.slice(0, 16000) || "(no web results found — work with the property record only)"}
 
 Return JSON with this exact shape:
 {
@@ -231,11 +343,14 @@ Return JSON with this exact shape:
   let profile: ContactProfile = {};
   try { profile = JSON.parse(content); } catch (_) { /* ignore */ }
 
-  // Compute contact_completeness score
+  // Compute contact_completeness score (max 100)
   let completeness = 0;
   if (profile.contact_email) completeness += 50;
   if (profile.contact_phone) completeness += 30;
   if (profile.contact_linkedin) completeness += 20;
+  // Verified mailing address from county assessor → +10 (capped at 100)
+  if (assessor && profile.mailing_address) completeness = Math.min(100, completeness + 10);
+  const mailingFromAssessor = !!(assessor && profile.mailing_address);
 
   // Update lead row
   const updates: Record<string, unknown> = {
@@ -290,8 +405,8 @@ Return JSON with this exact shape:
   await supabase.from("lead_activities").insert({
     lead_id: leadId,
     kind: "profiler_run",
-    summary: `Profiled owner — completeness ${completeness}%${profile.contact_email ? `, email ${profile.contact_email}` : ", no email found"}`,
-    payload: { sources: sources.slice(0, 10), completeness },
+    summary: `Profiled owner — completeness ${completeness}%${profile.contact_email ? `, email ${profile.contact_email}` : ", no email found"}${mailingFromAssessor ? " · mailing from county" : ""}`,
+    payload: { sources: sources.slice(0, 10), completeness, mailing_from_assessor: mailingFromAssessor },
   });
 
   return new Response(
