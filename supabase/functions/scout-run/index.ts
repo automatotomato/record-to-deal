@@ -293,20 +293,15 @@ Deno.serve(async (req) => {
       countiesScanned += 1;
       console.log(`${county.county}: extracted ${extracted.length} candidate leads`);
 
+      // Build payloads, dedupe in-batch first
+      const seen = new Set<string>();
+      const payloads = [];
       for (const lead of extracted) {
         if (!lead.property_address && !lead.parcel_number) continue;
-
-        const dedupeFilter = lead.parcel_number
-          ? { parcel_number: lead.parcel_number, county_id: county.id }
-          : { property_address: lead.property_address!, county_id: county.id };
-
-        const { data: existing } = await supabase
-          .from("leads")
-          .select("id")
-          .match(dedupeFilter)
-          .maybeSingle();
-
-        const payload = {
+        const key = `${lead.parcel_number ?? ""}|${lead.property_address ?? ""}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        payloads.push({
           county_id: county.id,
           state: county.state,
           county: county.county,
@@ -324,26 +319,53 @@ Deno.serve(async (req) => {
           source_record_url: lead.source_record_url ?? null,
           data_sources: ["firecrawl_search", county.parser_key],
           scout_confidence: 55,
-        };
+        });
+      }
 
-        if (existing?.id) {
-          await supabase.from("leads").update(payload).eq("id", existing.id);
-        } else {
-          const { data: inserted } = await supabase
+      if (payloads.length) {
+        // Bulk fetch existing matches in one query
+        const addresses = payloads.map((p) => p.property_address).filter(Boolean) as string[];
+        const { data: existing } = await supabase
+          .from("leads")
+          .select("id, property_address, parcel_number")
+          .eq("county_id", county.id)
+          .or(
+            addresses.length
+              ? `property_address.in.(${addresses.map((a) => `"${a.replace(/"/g, '\\"')}"`).join(",")})`
+              : "id.is.null",
+          );
+        const existingByAddr = new Map((existing ?? []).map((r) => [r.property_address, r.id]));
+
+        const toInsert = payloads.filter((p) => !existingByAddr.has(p.property_address));
+        const toUpdate = payloads.filter((p) => existingByAddr.has(p.property_address));
+
+        if (toInsert.length) {
+          const { data: inserted, error: insErr } = await supabase
             .from("leads")
-            .insert(payload)
-            .select("id")
-            .single();
-          if (inserted?.id) {
-            totalFound += 1;
-            await supabase.from("lead_activities").insert({
-              lead_id: inserted.id,
-              kind: "scout_found",
-              summary: `Scouted from ${county.county}, ${county.state}`,
-              payload: { source_url: lead.source_record_url, run_id: runRow.id },
-            });
+            .insert(toInsert)
+            .select("id");
+          if (insErr) console.error("Bulk insert error:", insErr.message);
+          if (inserted?.length) {
+            totalFound += inserted.length;
+            await supabase.from("lead_activities").insert(
+              inserted.map((row) => ({
+                lead_id: row.id,
+                kind: "scout_found",
+                summary: `Scouted from ${county.county}, ${county.state}`,
+                payload: { run_id: runRow.id },
+              })),
+            );
           }
         }
+        // Updates run in parallel (fire-and-forget chunks)
+        await Promise.all(
+          toUpdate.map((p) =>
+            supabase
+              .from("leads")
+              .update(p)
+              .eq("id", existingByAddr.get(p.property_address)!),
+          ),
+        );
       }
 
       await supabase
