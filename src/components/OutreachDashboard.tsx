@@ -40,7 +40,7 @@ const STATUS_LABEL: Record<string, string> = {
 export const OutreachDashboard = () => {
   const { isAdmin } = useAuth();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<TabKey>("active");
+  const [tab, setTab] = useState<TabKey>("candidates");
   const [tierFilter, setTierFilter] = useState<string>("all");
   const [stateFilter, setStateFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("active");
@@ -89,9 +89,22 @@ export const OutreachDashboard = () => {
     return () => { supabase.removeChannel(ch); };
   }, [qc]);
 
+  // A lead qualifies as a true 1031 candidate when:
+  //  - it's a real opportunity (not COLD/DISQUALIFIED)
+  //  - the trigger is a recent or pending sale (the 180-day clock applies)
+  //  - the owner looks like an investor entity (LLC/Corp/Trust/etc.)
+  const isCandidate = (l: Lead) => {
+    if (l.tier === "COLD" || l.tier === "DISQUALIFIED") return false;
+    const trig = (l.trigger_event ?? "").toLowerCase();
+    if (!trig.includes("sale") && trig !== "probate") return false;
+    const otype = (l.owner_type ?? "").toLowerCase();
+    return otype !== "individual" && otype !== "unknown" && otype !== "";
+  };
+
   const filtered = useMemo(() => {
     if (!leads) return [];
     return leads.filter((l) => {
+      if (tab === "candidates" && !isCandidate(l)) return false;
       if (tab === "active" && (l.tier === "COLD" || l.tier === "DISQUALIFIED")) return false;
       if (tab === "cold" && l.tier !== "COLD") return false;
       if (tab === "disqualified" && l.tier !== "DISQUALIFIED") return false;
@@ -108,12 +121,23 @@ export const OutreachDashboard = () => {
     });
   }, [leads, tab, tierFilter, stateFilter, statusFilter, search]);
 
+  // For "1031 Candidates" tab, sort freshest sale first so closing-window leads bubble up.
+  const ordered = useMemo(() => {
+    if (tab !== "candidates") return filtered;
+    return [...filtered].sort((a, b) => {
+      const da = a.sale_date ? new Date(a.sale_date).getTime() : 0;
+      const db = b.sale_date ? new Date(b.sale_date).getTime() : 0;
+      return db - da;
+    });
+  }, [filtered, tab]);
+
   const tabCounts = useMemo(() => {
-    const c = { active: 0, cold: 0, disqualified: 0 };
+    const c = { candidates: 0, active: 0, cold: 0, disqualified: 0 };
     for (const l of leads ?? []) {
       if (l.tier === "COLD") c.cold += 1;
       else if (l.tier === "DISQUALIFIED") c.disqualified += 1;
       else c.active += 1;
+      if (isCandidate(l)) c.candidates += 1;
     }
     return c;
   }, [leads]);
