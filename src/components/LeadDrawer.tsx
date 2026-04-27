@@ -226,8 +226,8 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
               </Section>
             )}
 
-            {/* Outreach composer */}
-            <Section title="Outreach">
+            {/* AI draft + re-profile */}
+            <Section title="AI outreach draft">
               <div className="flex items-center gap-2 mb-3">
                 <Button size="sm" variant="outline" onClick={() => draftEmail(false)} disabled={drafting} className="rounded-none font-mono text-[10px] uppercase tracking-wider">
                   {drafting ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
@@ -239,22 +239,23 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
                   </Button>
                 )}
               </div>
-
-              <div className="space-y-2">
-                <Input value={toEmail} onChange={(e) => setToEmail(e.target.value)} placeholder="recipient@example.com"
-                       className="rounded-none font-mono text-xs h-8" />
-                <Input value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} placeholder="Subject"
-                       className="rounded-none text-sm h-9" />
-                <Textarea value={emailBody} onChange={(e) => setEmailBody(e.target.value)} rows={12}
-                          placeholder="Email body — click 'Profile + draft email' to auto-generate."
-                          className="rounded-none text-sm font-sans leading-relaxed" />
-                <div className="flex justify-end">
-                  <Button onClick={sendEmail} disabled={sending || !toEmail || !emailBody} className="rounded-none bg-accent text-accent-foreground hover:bg-accent/90 font-mono text-[10px] uppercase tracking-wider">
-                    {sending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Send className="h-3 w-3 mr-1" />}
-                    Send via Gmail
-                  </Button>
-                </div>
-              </div>
+              {(() => {
+                const latestDraft = emails?.find((e: any) => e.status === "draft");
+                if (!latestDraft) {
+                  return <div className="text-xs text-muted-foreground italic">No draft yet — click "Profile + draft email" to generate one.</div>;
+                }
+                return (
+                  <div className="space-y-2 border border-border bg-secondary/30 p-3">
+                    <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Subject</div>
+                    <div className="text-sm font-medium">{latestDraft.subject}</div>
+                    <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mt-2">Body</div>
+                    <pre className="text-sm whitespace-pre-wrap font-sans leading-relaxed">{latestDraft.body}</pre>
+                    {latestDraft.to_email && (
+                      <div className="font-mono text-[10px] text-muted-foreground mt-2">To: {latestDraft.to_email}</div>
+                    )}
+                  </div>
+                );
+              })()}
             </Section>
 
             {/* Status */}
