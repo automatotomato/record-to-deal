@@ -380,33 +380,53 @@ Deno.serve(async (req) => {
 
   const l = lead as Lead;
 
-  // 1. Pull from Smarty: prefer cached smarty_key, fall back to address search
+  // 1. Try ATTOM first (best NV coverage), fall back to Smarty.
   let smarty: SmartyRecord | null = null;
-  if (l.smarty_key) {
-    smarty = await smartyByKey(l.smarty_key, smartyId, smartyToken);
-  }
-  if (!smarty && l.property_address) {
-    smarty = await smartyByAddress(
+  let enrichSource: "attom" | "smarty" | null = null;
+  let extraSources: string[] = [];
+
+  if (attomKey && l.property_address) {
+    const attom = await attomEnrich(
       l.property_address,
       l.property_city ?? null,
       l.state ?? null,
-      l.property_zip ?? null,
-      smartyId,
-      smartyToken,
+      attomKey,
     );
+    if (attom) {
+      smarty = { smarty_key: l.smarty_key ?? undefined, attributes: attom.attrs };
+      enrichSource = "attom";
+      extraSources = attom.sources;
+    }
+  }
+
+  if (!smarty && smartyId && smartyToken) {
+    if (l.smarty_key) {
+      smarty = await smartyByKey(l.smarty_key, smartyId, smartyToken);
+    }
+    if (!smarty && l.property_address) {
+      smarty = await smartyByAddress(
+        l.property_address,
+        l.property_city ?? null,
+        l.state ?? null,
+        l.property_zip ?? null,
+        smartyId,
+        smartyToken,
+      );
+    }
+    if (smarty) enrichSource = "smarty";
   }
 
   if (!smarty || !smarty.attributes) {
     await supabase.from("lead_activities").insert({
       lead_id: leadId,
       kind: "profiler_run",
-      summary: "Smarty returned no match for this property",
-      payload: { source: "smarty", matched: false },
+      summary: "No property match found in ATTOM or Smarty",
+      payload: { source: "none", matched: false },
     });
     return new Response(
       JSON.stringify({
         ok: false,
-        error: "Smarty returned no property match",
+        error: "No property match in ATTOM or Smarty",
         lead_id: leadId,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
