@@ -326,9 +326,9 @@ export const OutreachDashboard = () => {
           <TabButton
             active={tab === "active"}
             onClick={() => { setTab("active"); setTierFilter("all"); }}
-            label="All worth pursuing"
+            label="All active leads"
             count={tabCounts.active}
-            tooltip="Urgent, hot, warm, and unscored leads — your active pipeline."
+            tooltip="Urgent, hot, warm, and unscored leads — your active pipeline. Cold and filtered-out leads are hidden."
           />
         </div>
 
