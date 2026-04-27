@@ -156,7 +156,12 @@ function score(lead: Lead): ScoreResult {
   if (total >= 70) tier = "HOT";
   else if (total >= 50) tier = "WARM";
   else if (total >= 30) tier = "COLD";
-  if (isUrgent && total >= 50) tier = "URGENT";
+  // URGENT requires real investor signal — not just a recent residential sale
+  const investorSignal =
+    ownerType === "LLC" || ownerType === "Corporation" || ownerType === "Trust" ||
+    investmentTypes.has(propertyType) ||
+    sp >= 1_000_000;
+  if (isUrgent && total >= 50 && investorSignal) tier = "URGENT";
 
   // Tax exposure — prefer Smarty-derived values when available (assessed value
   // gives us the current FMV, sale_price gives us the basis, ownership_years
