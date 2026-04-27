@@ -1,22 +1,16 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fmtMoney, fmtDate, fmtRelative, tierColor, daysSince } from "@/lib/format";
-import { Loader2, Sparkles, Send, AlertCircle, ExternalLink, Mail, Phone, Linkedin } from "lucide-react";
+import { Loader2, Sparkles, AlertCircle, ExternalLink, Mail, Phone, Linkedin } from "lucide-react";
 import { toast } from "sonner";
 
 export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () => void }) => {
   const qc = useQueryClient();
   const [drafting, setDrafting] = useState(false);
-  const [sending, setSending] = useState(false);
-  const [emailSubject, setEmailSubject] = useState("");
-  const [emailBody, setEmailBody] = useState("");
-  const [toEmail, setToEmail] = useState("");
 
   const { data: lead, isLoading } = useQuery({
     queryKey: ["lead", leadId],
