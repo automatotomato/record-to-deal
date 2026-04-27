@@ -17,6 +17,7 @@ type Lead = any;
 export const OutreachDashboard = () => {
   const { isAdmin } = useAuth();
   const qc = useQueryClient();
+  const [tab, setTab] = useState<"active" | "cold" | "disqualified">("active");
   const [tierFilter, setTierFilter] = useState<string>("all");
   const [stateFilter, setStateFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("active");
@@ -51,6 +52,10 @@ export const OutreachDashboard = () => {
   const filtered = useMemo(() => {
     if (!leads) return [];
     return leads.filter((l) => {
+      // Tab gating
+      if (tab === "active" && (l.tier === "COLD" || l.tier === "DISQUALIFIED")) return false;
+      if (tab === "cold" && l.tier !== "COLD") return false;
+      if (tab === "disqualified" && l.tier !== "DISQUALIFIED") return false;
       if (tierFilter !== "all" && l.tier !== tierFilter) return false;
       if (stateFilter !== "all" && l.state !== stateFilter) return false;
       if (statusFilter === "active" && (l.status === "dead" || l.status === "won")) return false;
@@ -62,7 +67,17 @@ export const OutreachDashboard = () => {
       }
       return true;
     });
-  }, [leads, tierFilter, stateFilter, statusFilter, search]);
+  }, [leads, tab, tierFilter, stateFilter, statusFilter, search]);
+
+  const tabCounts = useMemo(() => {
+    const c = { active: 0, cold: 0, disqualified: 0 };
+    for (const l of leads ?? []) {
+      if (l.tier === "COLD") c.cold += 1;
+      else if (l.tier === "DISQUALIFIED") c.disqualified += 1;
+      else c.active += 1;
+    }
+    return c;
+  }, [leads]);
 
   const stats = useMemo(() => {
     if (!leads) return { total: 0, urgent: 0, hot: 0, avgScore: 0, tax: 0, quality: 0 };
@@ -154,6 +169,27 @@ export const OutreachDashboard = () => {
           <Kpi label="Data quality" value={`${stats.quality}%`} accent={stats.quality > 0 && stats.quality < 80} />
         </div>
       </header>
+
+      {/* Tabs */}
+      <div className="px-8 border-b border-border bg-background flex items-center gap-0">
+        {([
+          { k: "active", l: "Active leads", c: tabCounts.active },
+          { k: "cold", l: "Cold", c: tabCounts.cold },
+          { k: "disqualified", l: "Disqualified", c: tabCounts.disqualified },
+        ] as const).map((t) => (
+          <button
+            key={t.k}
+            onClick={() => { setTab(t.k); setTierFilter("all"); }}
+            className={`px-4 py-3 font-mono text-[10px] uppercase tracking-[0.2em] border-b-2 -mb-px transition-colors ${
+              tab === t.k
+                ? "border-accent text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {t.l} <span className="ml-1 tabular text-muted-foreground">({t.c})</span>
+          </button>
+        ))}
+      </div>
 
       {/* Filters */}
       <div className="px-8 py-4 border-b border-border bg-background flex flex-wrap items-center gap-3">
