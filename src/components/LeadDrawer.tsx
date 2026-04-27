@@ -15,7 +15,9 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
   const qc = useQueryClient();
   const [drafting, setDrafting] = useState(false);
   const [sending, setSending] = useState(false);
+  const [discovering, setDiscovering] = useState(false);
   const [recipientOverride, setRecipientOverride] = useState("");
+  const [websiteHint, setWebsiteHint] = useState("");
 
   const { data: lead, isLoading } = useQuery({
     queryKey: ["lead", leadId],
@@ -59,6 +61,30 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
       toast.error(`Draft failed: ${e.message}`, { id: "draft" });
     } finally {
       setDrafting(false);
+    }
+  };
+
+  const findContact = async (opts: { force?: boolean; website?: string } = {}) => {
+    setDiscovering(true);
+    toast.loading("Hunting for seller contact info…", { id: "disc" });
+    try {
+      const { data, error } = await supabase.functions.invoke("seller-discovery", {
+        body: { lead_id: leadId, force: opts.force ?? true, company_website: opts.website },
+      });
+      if (error) throw error;
+      const status = (data as any)?.status;
+      const email = (data as any)?.discovery?.email;
+      if (email) toast.success(`Found ${email}`, { id: "disc" });
+      else if (status === "partial") toast.success("Found partial contact (no email yet)", { id: "disc" });
+      else toast.error("No contact found — try giving us the company website", { id: "disc" });
+      qc.invalidateQueries({ queryKey: ["lead", leadId] });
+      qc.invalidateQueries({ queryKey: ["activities", leadId] });
+      qc.invalidateQueries({ queryKey: ["emails", leadId] });
+      qc.invalidateQueries({ queryKey: ["leads"] });
+    } catch (e: any) {
+      toast.error(`Discovery failed: ${e.message}`, { id: "disc" });
+    } finally {
+      setDiscovering(false);
     }
   };
 
@@ -153,11 +179,23 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
 
             {/* Seller / Owner */}
             <Section title="Seller information">
-              <div>
-                <div className="text-lg font-semibold">{lead.owner_name ?? "Unknown owner"}</div>
-                <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mt-0.5">
-                  {lead.owner_type ?? "Unknown"}
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-lg font-semibold">{lead.decision_maker_name ?? lead.owner_name ?? "Unknown owner"}</div>
+                  <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mt-0.5">
+                    {lead.decision_maker_role ? `${lead.decision_maker_role} · ` : ""}{lead.owner_type ?? "Unknown"}
+                    {lead.owner_name && lead.decision_maker_name && lead.decision_maker_name !== lead.owner_name ? ` · entity: ${lead.owner_name}` : ""}
+                  </div>
                 </div>
+                <Button
+                  size="sm"
+                  onClick={() => findContact({ force: true })}
+                  disabled={discovering}
+                  className="rounded-none bg-foreground text-background hover:bg-foreground/90 font-mono text-[10px] uppercase tracking-wider shrink-0"
+                >
+                  {discovering ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <RefreshCw className="h-3 w-3 mr-1" />}
+                  {lead.discovery_status === "reachable" ? "Re-find contact" : "Find contact info"}
+                </Button>
               </div>
 
               {lead.mailing_address && (
@@ -174,10 +212,13 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
                 </div>
               )}
 
-              <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                <ContactPill icon={<Mail className="h-3 w-3" />} value={lead.contact_email} />
-                <ContactPill icon={<Phone className="h-3 w-3" />} value={lead.contact_phone} />
-                <ContactPill icon={<Linkedin className="h-3 w-3" />} value={lead.contact_linkedin} link />
+              <div className="mt-3 space-y-2">
+                <ContactRow icon={<Mail className="h-3 w-3" />} value={lead.decision_maker_email ?? lead.contact_email} field="email" lead={lead} />
+                <ContactRow icon={<Phone className="h-3 w-3" />} value={lead.decision_maker_phone ?? lead.contact_phone} field="phone" lead={lead} />
+                <ContactRow icon={<Linkedin className="h-3 w-3" />} value={lead.decision_maker_linkedin ?? lead.contact_linkedin} field="linkedin" lead={lead} link />
+                {lead.company_website && (
+                  <ContactRow icon={<Building2 className="h-3 w-3" />} value={lead.company_website} field="company_website" lead={lead} link />
+                )}
               </div>
 
               {/* Completeness bar */}
@@ -194,9 +235,39 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
                 </div>
               </div>
 
-              {!lead.contact_email && !lead.contact_phone && !lead.mailing_address && (
-                <div className="mt-3 text-[11px] text-warm font-mono uppercase tracking-wider">
-                  ⚠ No seller contact yet — use "Find owner & draft email" below to pull from public records.
+              {/* Related entities (other LLCs run by same officer) */}
+              {Array.isArray(lead.related_entities) && lead.related_entities.length > 0 && (
+                <div className="mt-3">
+                  <div className="kpi-label mb-1">Related entities</div>
+                  <div className="flex flex-wrap gap-1">
+                    {lead.related_entities.slice(0, 6).map((e: any, i: number) => (
+                      <span key={i} className="font-mono text-[10px] bg-secondary px-2 py-0.5">{e.name}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Fallback: let user supply company website if discovery fails */}
+              {(lead.discovery_status === "failed" || (!lead.decision_maker_email && !lead.contact_email)) && (
+                <div className="mt-4 p-3 border border-dashed border-border bg-secondary/30">
+                  <div className="kpi-label mb-2">No email yet — try giving us the company website</div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="text"
+                      placeholder="example.com"
+                      value={websiteHint}
+                      onChange={(e) => setWebsiteHint(e.target.value)}
+                      className="rounded-none h-8 font-mono text-xs"
+                    />
+                    <Button
+                      size="sm"
+                      onClick={() => findContact({ force: true, website: websiteHint.trim() })}
+                      disabled={discovering || !websiteHint.trim()}
+                      className="rounded-none bg-accent text-accent-foreground hover:bg-accent/90 font-mono text-[10px] uppercase tracking-wider"
+                    >
+                      Search this domain
+                    </Button>
+                  </div>
                 </div>
               )}
             </Section>
@@ -468,7 +539,45 @@ const ContactPill = ({ icon, value, link }: { icon: React.ReactNode; value?: str
   );
 };
 
-// Human-readable labels for each scoring factor
+const ContactRow = ({ icon, value, field, lead, link }: { icon: React.ReactNode; value?: string | null; field: string; lead: any; link?: boolean }) => {
+  const conf = lead?.discovery_confidence_by_field?.[field];
+  if (!value) {
+    return (
+      <div className="flex items-center gap-2 text-xs">
+        <span className="inline-flex items-center gap-1 px-2 py-1 bg-muted text-muted-foreground font-mono text-[10px] uppercase tracking-wider">
+          {icon} missing
+        </span>
+      </div>
+    );
+  }
+  const href = link
+    ? (value.startsWith("http") ? value : `https://${value}`)
+    : null;
+  const display = value.length > 40 ? value.slice(0, 40) + "…" : value;
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      {href ? (
+        <a href={href} target="_blank" rel="noopener" className="inline-flex items-center gap-1 px-2 py-1 bg-secondary hover:bg-accent/10 font-mono">
+          {icon} {display}
+        </a>
+      ) : (
+        <span className="inline-flex items-center gap-1 px-2 py-1 bg-secondary font-mono">{icon} {display}</span>
+      )}
+      {conf && (
+        <span
+          title={`Source: ${conf.source}`}
+          className={`font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 ${
+            conf.score >= 70 ? "bg-accent text-accent-foreground"
+              : conf.score >= 45 ? "bg-warm/20 text-warm"
+              : "bg-muted text-muted-foreground"
+          }`}
+        >
+          {conf.source} · {conf.score}%
+        </span>
+      )}
+    </div>
+  );
+};
 const SCORE_LABELS: Record<string, { label: string; help: string }> = {
   high_tax_state: { label: "High-tax origin state", help: "Owners in high-tax states have the strongest motivation to defer gains via 1031." },
   investment_property: { label: "Investment property type", help: "Multifamily/commercial/industrial qualify for 1031; primary residences do not." },
