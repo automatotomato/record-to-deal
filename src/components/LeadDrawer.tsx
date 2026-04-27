@@ -179,11 +179,23 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
 
             {/* Seller / Owner */}
             <Section title="Seller information">
-              <div>
-                <div className="text-lg font-semibold">{lead.owner_name ?? "Unknown owner"}</div>
-                <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mt-0.5">
-                  {lead.owner_type ?? "Unknown"}
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-lg font-semibold">{lead.decision_maker_name ?? lead.owner_name ?? "Unknown owner"}</div>
+                  <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mt-0.5">
+                    {lead.decision_maker_role ? `${lead.decision_maker_role} · ` : ""}{lead.owner_type ?? "Unknown"}
+                    {lead.owner_name && lead.decision_maker_name && lead.decision_maker_name !== lead.owner_name ? ` · entity: ${lead.owner_name}` : ""}
+                  </div>
                 </div>
+                <Button
+                  size="sm"
+                  onClick={() => findContact({ force: true })}
+                  disabled={discovering}
+                  className="rounded-none bg-foreground text-background hover:bg-foreground/90 font-mono text-[10px] uppercase tracking-wider shrink-0"
+                >
+                  {discovering ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <RefreshCw className="h-3 w-3 mr-1" />}
+                  {lead.discovery_status === "reachable" ? "Re-find contact" : "Find contact info"}
+                </Button>
               </div>
 
               {lead.mailing_address && (
@@ -200,10 +212,13 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
                 </div>
               )}
 
-              <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                <ContactPill icon={<Mail className="h-3 w-3" />} value={lead.contact_email} />
-                <ContactPill icon={<Phone className="h-3 w-3" />} value={lead.contact_phone} />
-                <ContactPill icon={<Linkedin className="h-3 w-3" />} value={lead.contact_linkedin} link />
+              <div className="mt-3 space-y-2">
+                <ContactRow icon={<Mail className="h-3 w-3" />} value={lead.decision_maker_email ?? lead.contact_email} field="email" lead={lead} />
+                <ContactRow icon={<Phone className="h-3 w-3" />} value={lead.decision_maker_phone ?? lead.contact_phone} field="phone" lead={lead} />
+                <ContactRow icon={<Linkedin className="h-3 w-3" />} value={lead.decision_maker_linkedin ?? lead.contact_linkedin} field="linkedin" lead={lead} link />
+                {lead.company_website && (
+                  <ContactRow icon={<Building2 className="h-3 w-3" />} value={lead.company_website} field="company_website" lead={lead} link />
+                )}
               </div>
 
               {/* Completeness bar */}
@@ -220,9 +235,39 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
                 </div>
               </div>
 
-              {!lead.contact_email && !lead.contact_phone && !lead.mailing_address && (
-                <div className="mt-3 text-[11px] text-warm font-mono uppercase tracking-wider">
-                  ⚠ No seller contact yet — use "Find owner & draft email" below to pull from public records.
+              {/* Related entities (other LLCs run by same officer) */}
+              {Array.isArray(lead.related_entities) && lead.related_entities.length > 0 && (
+                <div className="mt-3">
+                  <div className="kpi-label mb-1">Related entities</div>
+                  <div className="flex flex-wrap gap-1">
+                    {lead.related_entities.slice(0, 6).map((e: any, i: number) => (
+                      <span key={i} className="font-mono text-[10px] bg-secondary px-2 py-0.5">{e.name}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Fallback: let user supply company website if discovery fails */}
+              {(lead.discovery_status === "failed" || (!lead.decision_maker_email && !lead.contact_email)) && (
+                <div className="mt-4 p-3 border border-dashed border-border bg-secondary/30">
+                  <div className="kpi-label mb-2">No email yet — try giving us the company website</div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="text"
+                      placeholder="example.com"
+                      value={websiteHint}
+                      onChange={(e) => setWebsiteHint(e.target.value)}
+                      className="rounded-none h-8 font-mono text-xs"
+                    />
+                    <Button
+                      size="sm"
+                      onClick={() => findContact({ force: true, website: websiteHint.trim() })}
+                      disabled={discovering || !websiteHint.trim()}
+                      className="rounded-none bg-accent text-accent-foreground hover:bg-accent/90 font-mono text-[10px] uppercase tracking-wider"
+                    >
+                      Search this domain
+                    </Button>
+                  </div>
                 </div>
               )}
             </Section>
