@@ -338,23 +338,50 @@ Deno.serve(async (req) => {
       // Build payloads, dedupe in-batch first
       const seen = new Set<string>();
       const payloads = [];
+      let droppedNonNv = 0;
+      let droppedHomeowner = 0;
+      let droppedTooSmall = 0;
       for (const lead of extracted) {
         if (!lead.property_address && !lead.parcel_number) continue;
         const key = `${lead.parcel_number ?? ""}|${lead.property_address ?? ""}`;
         if (seen.has(key)) continue;
         seen.add(key);
+
+        // --- HARD STATE GUARD: drop anything that doesn't look Nevada ---
+        const addrBlob = `${lead.property_address ?? ""} ${lead.property_city ?? ""}`.toUpperCase();
+        const looksNonNv = /\b(IL|ILLINOIS|CHICAGO|CA|CALIFORNIA|TX|TEXAS|FL|FLORIDA|NY|NEW YORK|DOLTON|EVANSTON|WILMETTE|SKOKIE|NILES|HOFFMAN ESTATES|WHEELING)\b/.test(addrBlob);
+        if (county.state === "NV" && looksNonNv) {
+          droppedNonNv += 1;
+          continue;
+        }
+
+        // --- INVESTOR FILTER: drop owner-occupied SFR/condo/small sales ---
+        const isCondoOrApt = /\b(APT|UNIT|#|STE|SUITE)\b/.test(addrBlob);
+        const ownerType = inferOwnerType(lead.owner_name);
+        const propLower = (lead.property_type ?? "").toLowerCase();
+        const looksResidential = propLower.includes("single") || propLower.includes("sfr") || propLower === "" || isCondoOrApt;
+        const price = lead.sale_price ?? 0;
+        if (looksResidential && ownerType === "Individual" && price > 0 && price < 750_000) {
+          droppedHomeowner += 1;
+          continue;
+        }
+        // Skip tiny sales we can't make a 1031 case for, unless owner is clearly entity
+        if (price > 0 && price < 250_000 && ownerType === "Individual") {
+          droppedTooSmall += 1;
+          continue;
+        }
+
         payloads.push({
           county_id: county.id,
           state: county.state,
           county: county.county,
           owner_name: lead.owner_name ?? null,
-          owner_type: inferOwnerType(lead.owner_name),
+          owner_type: ownerType,
           property_address: lead.property_address ?? null,
           property_city: lead.property_city ?? null,
           property_zip: lead.property_zip ?? null,
           parcel_number: lead.parcel_number ?? null,
           property_type: ((): string => {
-            // Map LLM outputs to the property_type enum (no Industrial/Office/Retail)
             const raw = (lead.property_type ?? "Unknown").toString();
             const valid = ["SFR", "Multifamily", "Commercial", "Land", "Mixed", "Unknown"];
             if (valid.includes(raw)) return raw;
@@ -382,6 +409,9 @@ Deno.serve(async (req) => {
           data_sources: ["firecrawl_search", county.parser_key],
           scout_confidence: 55,
         });
+      }
+      if (droppedNonNv || droppedHomeowner || droppedTooSmall) {
+        console.log(`${county.county}: filtered out ${droppedNonNv} non-NV, ${droppedHomeowner} homeowner, ${droppedTooSmall} small`);
       }
 
       if (payloads.length) {
