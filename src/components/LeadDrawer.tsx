@@ -247,6 +247,9 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
                 </div>
               )}
 
+              {/* Reference links — public-record sources used to find seller info */}
+              <ReferenceLinksInline lead={lead} activities={activities} />
+
               {/* Fallback: let user supply company website if discovery fails */}
               {(lead.discovery_status === "failed" || (!lead.decision_maker_email && !lead.contact_email)) && (
                 <div className="mt-4 p-3 border border-dashed border-border bg-secondary/30">
