@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fmtMoney, fmtDate, fmtRelative, tierColor } from "@/lib/format";
-import { Loader2, Play, Download, AlertCircle, Search } from "lucide-react";
+import { Loader2, Play, Download, AlertCircle, Search, Mail, Phone, Linkedin, Home } from "lucide-react";
 import { toast } from "sonner";
 import { LeadDrawer } from "./LeadDrawer";
 import { useAuth } from "@/hooks/useAuth";
