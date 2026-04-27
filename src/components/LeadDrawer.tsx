@@ -436,3 +436,102 @@ const ContactPill = ({ icon, value, link }: { icon: React.ReactNode; value?: str
     <span className="inline-flex items-center gap-1 px-2 py-1 bg-secondary font-mono text-xs">{icon} {value}</span>
   );
 };
+
+// Human-readable labels for each scoring factor
+const SCORE_LABELS: Record<string, { label: string; help: string }> = {
+  high_tax_state: { label: "High-tax origin state", help: "Owners in high-tax states have the strongest motivation to defer gains via 1031." },
+  investment_property: { label: "Investment property type", help: "Multifamily/commercial/industrial qualify for 1031; primary residences do not." },
+  entity_owner: { label: "Entity owner (LLC/Trust)", help: "Properties held in entities are almost always investment-held — strong 1031 candidates." },
+  sale_size: { label: "Sale size", help: "Larger sales = larger tax bills = more 1031 leverage." },
+  recent_sale: { label: "Recent sale (45-day window)", help: "1031 requires identifying replacement property within 45 days of closing." },
+  long_hold: { label: "Long ownership", help: "More years held = more depreciation taken = larger recapture exposure." },
+  trigger_boost: { label: "Trigger event", help: "Probate or pending sale events boost urgency." },
+};
+
+const TIER_DESCRIPTIONS: Record<string, string> = {
+  A: "Tier A — top-priority 1031 candidate. Multiple strong signals (high-tax state, recent sale, large basis, entity owner). Reach out immediately.",
+  B: "Tier B — strong candidate. Most key 1031 markers present, worth a personalized outreach.",
+  C: "Tier C — qualified but not urgent. Some 1031 indicators; nurture and re-evaluate when fresh data arrives.",
+  D: "Tier D — weak fit. Few 1031 markers — primary residence, small sale, or low-tax state. Skip or recycle later.",
+  HOT: "Hot lead — recently scored as a top-tier 1031 candidate.",
+  URGENT: "Urgent — sale closed inside the 45-day 1031 identification window.",
+  WARM: "Warm — qualified candidate worth nurturing.",
+  COLD: "Cold — limited 1031 indicators.",
+  UNSCORED: "Not yet scored. Run the qualifier from the Admin page.",
+};
+
+const ScoreExplanation = ({ lead }: { lead: any }) => {
+  const breakdown = (lead.score_breakdown ?? {}) as Record<string, number>;
+  const factors = Object.entries(breakdown).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+  const tierKey = (lead.tier ?? "UNSCORED") as string;
+  const tierDesc = TIER_DESCRIPTIONS[tierKey] ?? "";
+
+  const cap = lead.capital_gains_estimate as number | null;
+  const recap = lead.depreciation_recapture_est as number | null;
+  const total = lead.total_tax_exposure as number | null;
+
+  return (
+    <Section title="Why this tier & score">
+      {/* Tier headline */}
+      <div className="flex items-center gap-3 mb-3">
+        <span className={`tier-pill ${tierColor(lead.tier)}`}>{lead.tier}</span>
+        <span className="font-mono text-sm tabular">Score {lead.score ?? 0}/100</span>
+        {lead.is_urgent && (
+          <span className="font-mono text-[10px] uppercase tracking-wider text-urgent">⚠ Urgent</span>
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground leading-relaxed mb-4">{tierDesc}</p>
+
+      {/* Factor breakdown */}
+      {factors.length > 0 ? (
+        <div className="space-y-2 mb-4">
+          {factors.map(([key, value]) => {
+            const meta = SCORE_LABELS[key] ?? { label: key.replace(/_/g, " "), help: "" };
+            return (
+              <div key={key} className="border-l-2 border-accent pl-3 py-1">
+                <div className="flex items-baseline justify-between gap-2">
+                  <div className="text-xs font-semibold">{meta.label}</div>
+                  <div className="font-mono text-xs tabular text-accent shrink-0">+{value}</div>
+                </div>
+                {meta.help && <div className="text-[11px] text-muted-foreground leading-snug mt-0.5">{meta.help}</div>}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="text-xs text-muted-foreground italic mb-4">No scoring factors recorded yet.</div>
+      )}
+
+      {/* Tax exposure breakdown */}
+      <div className="border-t border-border pt-4">
+        <div className="kpi-label mb-2">Estimated tax exposure if sold today</div>
+        <div className="space-y-1.5 font-mono text-xs">
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Capital gains tax</span>
+            <span className="tabular">{cap ? fmtMoney(cap, { compact: true }) : "—"}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Depreciation recapture</span>
+            <span className="tabular">{recap ? fmtMoney(recap, { compact: true }) : "—"}</span>
+          </div>
+          <div className="flex justify-between border-t border-border pt-1.5 mt-1.5 font-semibold">
+            <span>Total exposure</span>
+            <span className="tabular text-accent">{total ? fmtMoney(total, { compact: true }) : "—"}</span>
+          </div>
+        </div>
+        <p className="text-[11px] text-muted-foreground italic mt-3 leading-snug">
+          Based on Smarty assessed value (${lead.assessed_value?.toLocaleString() ?? "?"}),
+          {" "}original sale price (${lead.sale_price?.toLocaleString() ?? "?"}), and
+          {" "}{lead.ownership_years ?? "unknown"} years of ownership.
+          A 1031 exchange could defer ~100% of this.
+        </p>
+      </div>
+
+      {lead.qualifier_notes && (
+        <p className="text-[11px] text-muted-foreground italic mt-3 pt-3 border-t border-border leading-relaxed">
+          {lead.qualifier_notes}
+        </p>
+      )}
+    </Section>
+  );
+};
