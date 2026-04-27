@@ -240,22 +240,30 @@ Deno.serve(async (req) => {
 
   for (const county of counties ?? []) {
     const source = COUNTY_SOURCES[county.parser_key];
-    const url = county.source_url ?? source?.url;
+    const queries = source?.queries ?? [
+      `${county.county} ${county.state} recent property sale owner LLC`,
+    ];
     const hint = source?.hint ??
-      `${county.county}, ${county.state} public recorder index. Extract recent property transfers.`;
-    if (!url) {
-      errors.push({ county: county.county, message: "No source URL configured" });
-      continue;
-    }
+      `${county.county}, ${county.state} recent property transfers. Extract owner name, address, sale price/date.`;
 
     try {
-      const extracted = await firecrawlScrape(url, hint, firecrawlKey);
+      const extracted: ExtractedLead[] = [];
+      for (const q of queries) {
+        try {
+          const { leads } = await firecrawlSearchAndExtract(q, hint, firecrawlKey);
+          extracted.push(...leads);
+        } catch (qe) {
+          const msg = qe instanceof Error ? qe.message : String(qe);
+          console.warn(`Query failed [${q}]:`, msg);
+          errors.push({ county: county.county, message: `query "${q}": ${msg}` });
+        }
+      }
       countiesScanned += 1;
+      console.log(`${county.county}: extracted ${extracted.length} candidate leads`);
 
       for (const lead of extracted) {
         if (!lead.property_address && !lead.parcel_number) continue;
 
-        // Dedupe key: county + parcel OR county + address
         const dedupeFilter = lead.parcel_number
           ? { parcel_number: lead.parcel_number, county_id: county.id }
           : { property_address: lead.property_address!, county_id: county.id };
@@ -281,9 +289,9 @@ Deno.serve(async (req) => {
           sale_date: lead.sale_date ?? null,
           deed_date: lead.deed_date ?? lead.sale_date ?? null,
           trigger_event: lead.trigger_event ?? "recent_sale",
-          source_record_url: lead.source_record_url ?? url,
-          data_sources: ["firecrawl", county.parser_key],
-          scout_confidence: 70,
+          source_record_url: lead.source_record_url ?? null,
+          data_sources: ["firecrawl_search", county.parser_key],
+          scout_confidence: 55,
         };
 
         if (existing?.id) {
@@ -300,7 +308,7 @@ Deno.serve(async (req) => {
               lead_id: inserted.id,
               kind: "scout_found",
               summary: `Scouted from ${county.county}, ${county.state}`,
-              payload: { source_url: url, run_id: runRow.id },
+              payload: { source_url: lead.source_record_url, run_id: runRow.id },
             });
           }
         }
