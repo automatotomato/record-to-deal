@@ -96,7 +96,10 @@ async function firecrawlSearchAndExtract(
   query: string,
   hint: string,
   apiKey: string,
+  lovableKey: string,
 ): Promise<{ leads: ExtractedLead[]; sourceUrls: string[] }> {
+  // Step 1: Firecrawl search with markdown scrape (no LLM extraction here -
+  // doing it inline blows past the edge function timeout).
   const resp = await fetch(`${FIRECRAWL_V2}/search`, {
     method: "POST",
     headers: {
@@ -106,48 +109,72 @@ async function firecrawlSearchAndExtract(
     body: JSON.stringify({
       query,
       limit: 4,
-      tbs: "qdr:m", // last month
-      scrapeOptions: {
-        onlyMainContent: true,
-        formats: [
-          "markdown",
-          {
-            type: "json",
-            schema: EXTRACTION_SCHEMA,
-            prompt:
-              `${hint} Return up to 10 distinct property transfers found on this page. ` +
-              `Use ISO dates. Skip any record without at least an address or owner name.`,
-          },
-        ],
-      },
+      tbs: "qdr:m",
+      scrapeOptions: { onlyMainContent: true, formats: ["markdown"] },
     }),
   });
   const data = await resp.json();
   if (!resp.ok) {
     throw new Error(
-      `Firecrawl ${resp.status}: ${JSON.stringify(data).slice(0, 400)}`,
+      `Firecrawl search ${resp.status}: ${JSON.stringify(data).slice(0, 400)}`,
     );
   }
-  // Response: { success, data: { web: [{ url, json: { leads: [...] } }] } } (v2 SDK shape)
-  // Older shape: { data: [{ url, json: {...} }] }
   const results: Array<Record<string, unknown>> =
     (data?.data?.web as Array<Record<string, unknown>>) ??
     (Array.isArray(data?.data) ? data.data : []) ??
     [];
-  const aggregated: ExtractedLead[] = [];
   const sourceUrls: string[] = [];
+  const corpus: string[] = [];
   for (const r of results) {
     const url = (r?.url as string) ?? "";
+    const title = (r?.title as string) ?? "";
+    const md = (r?.markdown as string) ?? (r?.description as string) ?? "";
     if (url) sourceUrls.push(url);
-    const json = (r?.json as { leads?: ExtractedLead[] } | undefined) ??
-      ((r?.extract as { leads?: ExtractedLead[] } | undefined));
-    const leads = Array.isArray(json?.leads) ? json!.leads! : [];
-    for (const lead of leads) {
-      if (!lead.source_record_url && url) lead.source_record_url = url;
-      aggregated.push(lead);
-    }
+    corpus.push(`### ${title}\nURL: ${url}\n\n${md.slice(0, 4000)}`);
   }
-  return { leads: aggregated, sourceUrls };
+
+  if (!corpus.length) return { leads: [], sourceUrls };
+
+  // Step 2: One LLM extraction pass via Lovable AI Gateway over all results.
+  const aiResp = await fetch(
+    "https://ai.gateway.lovable.dev/v1/chat/completions",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${lovableKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash",
+        messages: [
+          {
+            role: "system",
+            content:
+              "You extract structured property-transfer leads from web content. " +
+              "Return ONLY valid JSON matching the provided schema. Skip records without an address or owner name.",
+          },
+          {
+            role: "user",
+            content: `${hint}\n\nReturn JSON: { "leads": [ { owner_name, property_address, property_city, property_zip, parcel_number, sale_price (number, no $/commas), sale_date (YYYY-MM-DD), deed_date (YYYY-MM-DD), property_type (one of SFR|Multifamily|Commercial|Land|Industrial|Mixed|Unknown), source_record_url, trigger_event (one of recent_sale|listed_for_sale|long_hold_owner|trust_transfer|off_market_signal) } ] }\n\nWeb content:\n\n${corpus.join("\n\n---\n\n").slice(0, 18000)}`,
+          },
+        ],
+        response_format: { type: "json_object" },
+      }),
+    },
+  );
+  if (!aiResp.ok) {
+    const t = await aiResp.text();
+    throw new Error(`AI extract ${aiResp.status}: ${t.slice(0, 300)}`);
+  }
+  const aiData = await aiResp.json();
+  const content = aiData?.choices?.[0]?.message?.content ?? "{}";
+  let parsed: { leads?: ExtractedLead[] } = {};
+  try { parsed = JSON.parse(content); } catch { /* ignore */ }
+  const leads = Array.isArray(parsed.leads) ? parsed.leads : [];
+  for (const lead of leads) {
+    if (!lead.source_record_url && sourceUrls[0]) lead.source_record_url = sourceUrls[0];
+  }
+  return { leads, sourceUrls };
 }
 
 function inferOwnerType(name?: string) {
