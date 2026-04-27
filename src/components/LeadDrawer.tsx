@@ -279,6 +279,9 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
               </div>
             </Section>
 
+            {/* Reference links — public-record sources used to find seller info */}
+            <ReferenceLinks lead={lead} activities={activities} />
+
             {/* Activity */}
             <Section title="Activity">
               {!activities?.length ? <div className="text-xs text-muted-foreground italic">No activity yet.</div> : (
