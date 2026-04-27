@@ -18,6 +18,7 @@ export type Database = {
         Row: {
           attom_geo_id: string | null
           county: string
+          court_records_enabled: boolean
           created_at: string
           enabled: boolean
           id: string
@@ -31,6 +32,7 @@ export type Database = {
         Insert: {
           attom_geo_id?: string | null
           county: string
+          court_records_enabled?: boolean
           created_at?: string
           enabled?: boolean
           id?: string
@@ -44,6 +46,7 @@ export type Database = {
         Update: {
           attom_geo_id?: string | null
           county?: string
+          court_records_enabled?: boolean
           created_at?: string
           enabled?: boolean
           id?: string
@@ -94,6 +97,56 @@ export type Database = {
           },
         ]
       }
+      lead_touchpoints: {
+        Row: {
+          body: string | null
+          created_at: string
+          direction: string
+          id: string
+          kind: string
+          lead_id: string
+          metadata: Json
+          occurred_at: string
+          outcome: string | null
+          subject: string | null
+          user_id: string | null
+        }
+        Insert: {
+          body?: string | null
+          created_at?: string
+          direction?: string
+          id?: string
+          kind: string
+          lead_id: string
+          metadata?: Json
+          occurred_at?: string
+          outcome?: string | null
+          subject?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          body?: string | null
+          created_at?: string
+          direction?: string
+          id?: string
+          kind?: string
+          lead_id?: string
+          metadata?: Json
+          occurred_at?: string
+          outcome?: string | null
+          subject?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lead_touchpoints_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       leads: {
         Row: {
           assessed_value: number | null
@@ -107,16 +160,28 @@ export type Database = {
           county_id: string | null
           created_at: string
           data_sources: string[] | null
+          decision_maker_email: string | null
+          decision_maker_linkedin: string | null
+          decision_maker_name: string | null
+          decision_maker_phone: string | null
+          decision_maker_role: string | null
           deed_date: string | null
           depreciation_recapture_est: number | null
+          enrichment_confidence: number
+          enrichment_payload: Json
+          entity_registry_url: string | null
           id: string
           is_urgent: boolean
           last_contacted_at: string | null
+          last_touchpoint_at: string | null
+          last_touchpoint_kind: string | null
           list_date: string | null
           list_price: number | null
           lv_property_recommendation: string | null
           mailing_address: string | null
           motivation_type: string | null
+          next_action: string | null
+          next_action_at: string | null
           notes: string | null
           owner_name: string | null
           owner_type: Database["public"]["Enums"]["owner_type"] | null
@@ -158,16 +223,28 @@ export type Database = {
           county_id?: string | null
           created_at?: string
           data_sources?: string[] | null
+          decision_maker_email?: string | null
+          decision_maker_linkedin?: string | null
+          decision_maker_name?: string | null
+          decision_maker_phone?: string | null
+          decision_maker_role?: string | null
           deed_date?: string | null
           depreciation_recapture_est?: number | null
+          enrichment_confidence?: number
+          enrichment_payload?: Json
+          entity_registry_url?: string | null
           id?: string
           is_urgent?: boolean
           last_contacted_at?: string | null
+          last_touchpoint_at?: string | null
+          last_touchpoint_kind?: string | null
           list_date?: string | null
           list_price?: number | null
           lv_property_recommendation?: string | null
           mailing_address?: string | null
           motivation_type?: string | null
+          next_action?: string | null
+          next_action_at?: string | null
           notes?: string | null
           owner_name?: string | null
           owner_type?: Database["public"]["Enums"]["owner_type"] | null
@@ -209,16 +286,28 @@ export type Database = {
           county_id?: string | null
           created_at?: string
           data_sources?: string[] | null
+          decision_maker_email?: string | null
+          decision_maker_linkedin?: string | null
+          decision_maker_name?: string | null
+          decision_maker_phone?: string | null
+          decision_maker_role?: string | null
           deed_date?: string | null
           depreciation_recapture_est?: number | null
+          enrichment_confidence?: number
+          enrichment_payload?: Json
+          entity_registry_url?: string | null
           id?: string
           is_urgent?: boolean
           last_contacted_at?: string | null
+          last_touchpoint_at?: string | null
+          last_touchpoint_kind?: string | null
           list_date?: string | null
           list_price?: number | null
           lv_property_recommendation?: string | null
           mailing_address?: string | null
           motivation_type?: string | null
+          next_action?: string | null
+          next_action_at?: string | null
           notes?: string | null
           owner_name?: string | null
           owner_type?: Database["public"]["Enums"]["owner_type"] | null
