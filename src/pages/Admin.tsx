@@ -62,9 +62,15 @@ const Admin = () => {
 
   return (
     <AppShell>
-      <div className="px-8 py-6 border-b border-border bg-card">
-        <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-1">Configuration</div>
-        <h1 className="font-display text-5xl leading-none">Sources.</h1>
+      <div className="px-8 py-6 border-b border-border bg-card flex items-end justify-between gap-4">
+        <div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-1">Configuration</div>
+          <h1 className="font-display text-5xl leading-none">Sources.</h1>
+        </div>
+        <Button onClick={runScout} disabled={running} size="lg" className="font-mono uppercase tracking-wider text-xs">
+          {running ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
+          {running ? "Scouting…" : "Run Scout now"}
+        </Button>
       </div>
 
       <div className="p-8 space-y-10">
