@@ -10,6 +10,91 @@ const corsHeaders = {
 };
 
 const FIRECRAWL_V2 = "https://api.firecrawl.dev/v2";
+const ATTOM_BASE = "https://api.gateway.attomdata.com/propertyapi/v1.0.0";
+
+// ATTOM city lists per Nevada county (covers the meaningful CRE markets).
+const ATTOM_COUNTY_CITIES: Record<string, string[]> = {
+  nv_clark: ["LAS VEGAS", "HENDERSON", "NORTH LAS VEGAS", "PARADISE", "SUMMERLIN", "SPRING VALLEY"],
+  nv_washoe: ["RENO", "SPARKS", "INCLINE VILLAGE"],
+  nv_carson_city: ["CARSON CITY"],
+  nv_douglas: ["MINDEN", "GARDNERVILLE", "STATELINE", "ZEPHYR COVE"],
+  nv_lyon: ["FERNLEY", "YERINGTON", "DAYTON"],
+  nv_nye: ["PAHRUMP", "TONOPAH"],
+  nv_elko: ["ELKO", "SPRING CREEK", "WEST WENDOVER"],
+};
+
+// Map ATTOM standard land use to our property_type enum
+function attomLandUseToType(use: string | undefined | null): string {
+  const u = (use ?? "").toLowerCase();
+  if (!u) return "Unknown";
+  if (u.includes("apartment") || u.includes("multi") || u.includes("duplex") || u.includes("triplex")) return "Multifamily";
+  if (u.includes("commercial") || u.includes("retail") || u.includes("office") || u.includes("industrial") || u.includes("warehouse") || u.includes("hotel")) return "Commercial";
+  if (u.includes("single") || u.includes("sfr") || u.includes("residential") || u.includes("condo")) return "SFR";
+  if (u.includes("land") || u.includes("vacant") || u.includes("agric")) return "Land";
+  return "Unknown";
+}
+
+async function attomSalesSnapshot(
+  cities: string[],
+  apiKey: string,
+): Promise<ExtractedLead[]> {
+  // ATTOM /sale/snapshot returns recent sale events for a geography.
+  // We pull each city in the county, last 60 days, min $500k.
+  const out: ExtractedLead[] = [];
+  const startDate = new Date(Date.now() - 60 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+  const endDate = new Date().toISOString().slice(0, 10);
+
+  for (const city of cities) {
+    const params = new URLSearchParams({
+      address2: `${city}, NV`,
+      startsalesearchdate: startDate,
+      endsalesearchdate: endDate,
+      minsaleamt: "500000",
+      pagesize: "50",
+    });
+    try {
+      const r = await fetch(`${ATTOM_BASE}/sale/snapshot?${params}`, {
+        headers: { Accept: "application/json", apikey: apiKey },
+      });
+      if (!r.ok) {
+        console.warn(`ATTOM ${city} ${r.status}: ${(await r.text()).slice(0, 200)}`);
+        continue;
+      }
+      const data = await r.json();
+      const props: Array<Record<string, any>> = data?.property ?? [];
+      for (const p of props) {
+        const addr = p?.address ?? {};
+        const sale = p?.sale ?? {};
+        const summary = p?.summary ?? {};
+        const owner = p?.owner ?? {};
+        const street = addr.line1 ?? addr.oneLine ?? null;
+        const ownerName =
+          owner?.owner1?.fullname ??
+          [owner?.owner1?.firstnameandmi, owner?.owner1?.lastname].filter(Boolean).join(" ") ??
+          null;
+        const price = Number(sale?.amount?.saleamt ?? sale?.saleAmountData?.saleamt ?? 0) || null;
+        const saleDate = sale?.salesearchdate ?? sale?.amount?.salerecdate ?? null;
+        if (!street || !price || price < 500_000) continue;
+        out.push({
+          owner_name: ownerName || undefined,
+          property_address: street,
+          property_city: addr.locality ?? city,
+          property_zip: addr.postal1 ?? addr.postal ?? undefined,
+          parcel_number: p?.identifier?.apn ?? undefined,
+          sale_price: price,
+          sale_date: saleDate ? String(saleDate).slice(0, 10) : undefined,
+          deed_date: saleDate ? String(saleDate).slice(0, 10) : undefined,
+          property_type: attomLandUseToType(summary?.propclass ?? summary?.proptype),
+          source_record_url: `https://api.attomdata.com/property/${p?.identifier?.attomId ?? ""}`,
+          trigger_event: "recent_sale",
+        });
+      }
+    } catch (e) {
+      console.warn(`ATTOM ${city} failed:`, e instanceof Error ? e.message : e);
+    }
+  }
+  return out;
+}
 
 // Source URLs (public, no login). These are the landing/search pages we ask
 // Firecrawl to render + extract structured records from. The county row
