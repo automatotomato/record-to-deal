@@ -167,9 +167,23 @@ export const OutreachDashboard = () => {
             </div>
             <h1 className="font-display text-5xl leading-none">The Desk.</h1>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2 justify-end">
             <Button variant="outline" size="sm" onClick={exportCsv} className="rounded-none font-mono uppercase text-[10px] tracking-wider">
               <Download className="h-3 w-3 mr-1" /> Export CSV
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={findSellersBulk}
+              disabled={profiling}
+              className="rounded-none font-mono uppercase text-[10px] tracking-wider"
+            >
+              {profiling
+                ? <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                : <Sparkles className="h-3 w-3 mr-1" />}
+              {profiling
+                ? `Finding ${profileProgress.done}/${profileProgress.total}`
+                : "Find seller info (visible)"}
             </Button>
             {isAdmin && (
               <Button size="sm" onClick={runScout} disabled={running} className="rounded-none bg-accent text-accent-foreground hover:bg-accent/90 font-mono uppercase text-[10px] tracking-wider">
@@ -179,6 +193,16 @@ export const OutreachDashboard = () => {
             )}
           </div>
         </div>
+
+        {profiling && profileProgress.total > 0 && (
+          <div className="mt-4">
+            <div className="flex justify-between font-mono text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
+              <span>Pulling seller info · {profileProgress.ok} ok · {profileProgress.fail} failed</span>
+              <span className="tabular">{profileProgress.done} / {profileProgress.total}</span>
+            </div>
+            <Progress value={(profileProgress.done / profileProgress.total) * 100} className="h-1" />
+          </div>
+        )}
 
         {/* KPI strip */}
         <div className="mt-8 grid grid-cols-5 gap-px bg-border border border-border">
