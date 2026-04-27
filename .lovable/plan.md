@@ -1,101 +1,64 @@
-# 1031 Exchange Lead Agent — MVP Build Plan
+## Goal
 
-A multi-agent system that scrapes public county records for property sales in high-tax states, qualifies the owners as 1031 exchange candidates targeting Las Vegas, profiles them, drafts personalized outreach emails, and lets you send them — all from a single dashboard.
+Make seller/owner contact info appear automatically on every property the Scout discovers — not just Tier A/B — and pull the official mailing address from the county assessor record so direct-mail outreach is reliable.
 
-## Scope
+## Changes
 
-- **Pipeline**: All three layers — Scout → Qualifier → Profiler
-- **Data source**: Public county scrapers, starting with **2 counties** (Los Angeles County, CA + Cook County, IL — highest-volume targets in two top-tax states)
-- **Geography target**: High-tax origin states only — CA, NY, IL, NJ, OR, MA (counties added incrementally)
-- **Outreach**: View leads + AI-drafted personalized email + send directly via Gmail (your connected account)
+### 1. Profiler edge function — add county assessor lookup
+File: `supabase/functions/profiler-run/index.ts`
 
-## What we're building
+Before the existing Firecrawl web searches, run a targeted scrape of the county assessor parcel page when we have a `parcel_number` or `property_address`:
 
-### 1. Outreach Dashboard (`/outreach`)
-- **Lead pipeline table**: ranked by score, color-coded by tier (URGENT / HOT / WARM / COLD)
-- **Filters**: state, county, score range, status (new / contacted / replied / dead), urgency, property type, min capital gains
-- **Detail drawer per lead**: property facts, owner profile, wealth signals, score breakdown, AI-drafted email, send button, activity log
-- **KPI strip**: total leads, urgent count (closed in last 30 days), avg score, sent today, reply rate
-- **Manual "Run Scout now"** button + scheduled daily runs
-- **CSV export** of filtered view
+- **LA County** (`assessor.lacounty.gov`) — query by AIN (parcel number) or address; extract the `Mail Address` block.
+- **Cook County** (`cookcountyassessor.com`) — query by PIN or address; extract the `Mailing Address` and `Taxpayer Name` fields.
+- Generic fallback for other counties: Firecrawl search `"<parcel>" site:<county-assessor-domain>` and let the AI extract the mailing block.
 
-### 2. Scout Agent (Layer 1)
-Edge function `scout-run` that scrapes recent deed filings + MLS-style listing data from configured counties.
-- v1 sources: LA County Registrar-Recorder public deed search + Cook County Recorder of Deeds public search (both have free public web portals — we scrape with Firecrawl)
-- Filters to investment property indicators: non-owner-occupied (mailing address ≠ property address), commercial/multifamily zoning, LLC/Trust ownership, sale price > $500k
-- Writes raw `lead` rows with confidence score
-- Runs daily on a cron schedule + on-demand from dashboard
+Feed the assessor result into the AI prompt as a separate, **trusted** source block ("OFFICIAL COUNTY RECORD — prefer this for mailing_address and taxpayer name"). The AI already returns `mailing_address`; we just give it a stronger signal and stop relying on guesses.
 
-### 3. Qualifier Agent (Layer 2)
-Edge function `qualifier-run` triggered after each Scout run.
-- Scores each lead 0–100 across: property value, capital gains estimate (sale price − assessed basis − depreciation), ownership length, owner type, location in target tax state, contact completeness
-- **Urgency override**: any lead closed in last 30 days → flagged URGENT regardless of score
-- Enriches with: estimated wealth signals (other properties owned, LLC affiliations via OpenCorporates free API, ProPublica nonprofit board seats)
-- Attempts contact enrichment via free sources (county tax mailing address, public WHOIS-style lookups). Phone/email left blank if not found — flagged as "needs manual lookup"
-- Tiers: URGENT (closed <30d) / HOT (80+) / WARM (65–79) / COLD (50–64) / DISQUALIFIED (<50)
+Also bump `contact_completeness` scoring to add +10 when we have a verified `mailing_address` from the assessor (so direct-mail-only leads still register as partially profiled).
 
-### 4. Profiler Agent (Layer 3)
-Edge function `profiler-run` for each qualified lead.
-- Uses Lovable AI (Gemini) to infer: personality type (Legacy Builder / Yield Hunter / Active Investor / C-Suite / Ultra-HNW), primary motivation, recommended Las Vegas property category, best outreach channel
-- Generates a personalized first email matching the spec's drafting prompt
-- Result stored on the lead; editable in the detail drawer before sending
+### 2. Qualifier — auto-profile EVERY lead, not just Tier A/B
+File: `supabase/functions/qualifier-run/index.ts`
 
-### 5. Outreach via Gmail
-- Connect your Gmail account (one-click connector flow)
-- "Send" button in detail drawer sends the AI-drafted email from your inbox
-- Sent emails logged with timestamp; lead status auto-moves to `contacted`
-- Reply detection (later phase) — for now you mark replied/dead manually
+Currently lines ~228–240 fan out Profiler only for Tier A+B (capped at 25). Change to:
+- Fan out Profiler for **every** scored lead (all tiers).
+- Process in batches of 3 in parallel to respect Firecrawl rate limits.
+- Cap per-run at 50 (configurable via request body) so a huge Scout run doesn't blow the function timeout — overflow gets picked up on the next run since they remain "unprofiled".
+- Keep `auto_profile` flag default = true.
 
-### 6. Auth
-- Single-user / small team. Email + password auth via Lovable Cloud
-- Roles table (admin / agent) — admins can configure counties and trigger scout runs
+### 3. Scout → Qualifier chain stays the same
+`scout-run` already calls `qualifier-run` on completion, so flipping the qualifier to auto-profile-all means **every newly discovered lead gets seller info pulled automatically**. No change needed in scout.
 
-## Data model
+### 4. Outreach dashboard — surface seller info on the row
+File: `src/components/OutreachDashboard.tsx`
 
-```text
-counties           — configured scrape targets (state, county, source_url, enabled, last_run_at)
-leads              — unified lead record (Scout + Qualifier + Profiler fields per spec section 5)
-lead_activities    — append-only log: scraped, scored, profiled, emailed, replied, status_change
-outreach_emails    — drafted + sent emails (subject, body, sent_at, gmail_message_id)
-scout_runs         — run history with stats (counties, leads found, errors)
-profiles + user_roles — auth
-```
+Add a compact "Seller" column (or merge into existing owner column) showing:
+- Owner name + a small icon row: ✉ if `contact_email`, ☎ if `contact_phone`, in if `contact_linkedin`, 🏠 if `mailing_address`.
+- Greyed-out icons when missing; colored when present.
+- Hover tooltip shows the actual value.
 
-## User flow
+This makes it obvious at a glance which leads have full contact data vs. need a manual re-profile.
 
-```text
-Login → /outreach dashboard (URGENT bucket on top)
-  → click lead row → side drawer opens
-    → review property + owner + score breakdown
-    → review/edit AI-drafted email
-    → click "Send via Gmail" → email goes out → status flips to Contacted
-  → filter by state/score/urgency to work the pipeline
-  → "Run Scout" (admin) to pull fresh leads on demand
-```
+### 5. Lead drawer — dedicated "Seller / Owner" section
+File: `src/components/LeadDrawer.tsx`
 
-## Technical details
+Group the existing scattered contact fields into one clearly-labeled **Seller Information** card at the top of the drawer with:
+- Owner name + type (Individual / LLC / Trust)
+- Mailing address (with "from county records" badge when sourced from assessor)
+- Email · Phone · LinkedIn (clickable)
+- Contact completeness bar
+- "Re-profile" button to re-run if data is stale
 
-- **Stack**: React + Vite + Tailwind + shadcn/ui (existing); Lovable Cloud (Supabase) for DB/auth/edge functions
-- **Scraping**: Firecrawl connector for the two county sites (handles JS rendering + anti-bot). Each county gets its own parser module so we can add more counties cleanly later.
-- **AI**: Lovable AI Gateway (Gemini 2.5 Flash) for Qualifier enrichment reasoning + Profiler personality inference + email drafting. No separate API key needed.
-- **Email send**: Gmail connector via gateway (`gmail.send` scope). Sends from your authenticated inbox.
-- **Free enrichment APIs**: OpenCorporates (LLC lookup), ProPublica Nonprofit Explorer, USPS address validation
-- **Scheduling**: pg_cron job runs `scout-run` daily at 6am PT
-- **Edge functions**: `scout-run`, `qualifier-run`, `profiler-run`, `send-outreach-email`, `lead-export-csv`
-- **Secrets needed**: Firecrawl + Gmail connectors (one-click), Lovable AI key (auto)
+## Technical notes
 
-## Honest caveats
+- LA assessor portal: `https://portal.assessor.lacounty.gov/parceldetail/<AIN>` — Firecrawl scrape with `formats: ['markdown']`, `onlyMainContent: true`.
+- Cook assessor: `https://www.cookcountyassessor.com/pin/<PIN>` — same pattern.
+- Both pages render server-side enough that Firecrawl markdown captures the mailing block reliably.
+- Add a 3-second `waitFor` to handle any JS rendering.
+- If assessor scrape fails (404, timeout), silently fall through to web-search-only path — never block the Profiler run.
+- Throttling: Profiler calls Firecrawl ~5 times per lead; with 50 leads × parallelism 3, expect ~80s of wall time, which fits inside the 150s edge-function limit.
 
-- **County scrapers are fragile**: when LA County or Cook County change their site HTML, the parser breaks. We'll add error logging + dashboard alerts so you know when a source goes down. Plan to budget time monthly to fix parsers, or upgrade to ATTOM Data later for stability across all 50 states.
-- **Contact enrichment is limited on free sources**: many leads will have no phone/email and need manual lookup (LinkedIn, etc.). The dashboard surfaces this gap clearly.
-- **Las Vegas property recommendations** are AI-inferred categories (e.g., "Summerlin luxury SFR", "Ascaya custom lot") — not live MLS listings. Adding a live LV inventory feed is a future phase.
-- **Scaling counties**: each new county = a new parser module. We start with 2 and add more on request.
+## Out of scope (ask after this lands)
 
-## Build order
-
-1. DB schema + auth + roles + empty `/outreach` dashboard shell
-2. Scout for LA County (one source end-to-end) → leads appear in dashboard
-3. Qualifier scoring + urgency override + tier filtering
-4. Profiler + AI email drafting + detail drawer
-5. Gmail connector + send flow + activity log
-6. Add Cook County scraper, daily cron, CSV export, KPI polish
+- Secretary of State LLC principal lookup (you didn't pick this option).
+- Skip-tracing services (BatchSkipTracing, Spokeo) — those are paid APIs we can add later if web-only profiling has too low a hit rate.
