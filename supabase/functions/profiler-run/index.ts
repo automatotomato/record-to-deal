@@ -437,7 +437,7 @@ Return JSON with this exact shape:
     capital_gains_estimate: capitalGainsEstimate,
     depreciation_recapture_est: depreciationRecapture,
     total_tax_exposure:
-      (capitalGainsEstimate ?? 0) * 0.20 + (depreciationRecapture ?? 0) || null,
+      ((capitalGainsEstimate ?? 0) + (depreciationRecapture ?? 0)) || null,
     wealth_signals: wealthSignals,
     contact_completeness: completeness,
     personality_type: profile.personality_type ?? null,
