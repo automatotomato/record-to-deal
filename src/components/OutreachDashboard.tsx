@@ -51,9 +51,11 @@ export const OutreachDashboard = () => {
   const { data: leads, isLoading } = useQuery({
     queryKey: ["leads"],
     queryFn: async () => {
+      // Hide cold/disqualified leads — they stay in DB for dedupe but never reach the UI.
       const { data, error } = await supabase
         .from("leads")
         .select("*")
+        .not("tier", "in", "(COLD,DISQUALIFIED)")
         .order("is_urgent", { ascending: false })
         .order("score", { ascending: false })
         .limit(500);
