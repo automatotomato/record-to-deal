@@ -171,8 +171,7 @@ export const OutreachDashboard = () => {
           <div className="flex items-center gap-2">
             {isAdmin && (
               <Button size="sm" onClick={runScout} disabled={running} className="rounded-none bg-accent text-accent-foreground hover:bg-accent/90 font-mono uppercase text-[10px] tracking-wider">
-                {running ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Play className="h-3 w-3 mr-1" />}
-                Run Scout
+                {running ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Finding leads…</> : <><Play className="h-3 w-3 mr-1" /> Find new leads</>}
               </Button>
             )}
             <DropdownMenu>
@@ -182,16 +181,17 @@ export const OutreachDashboard = () => {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="rounded-none font-mono text-xs">
-                <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Actions</DropdownMenuLabel>
-                <DropdownMenuItem onClick={findSellersBulk} disabled={profiling}>
-                  {profiling
-                    ? <><Loader2 className="h-3 w-3 mr-2 animate-spin" /> Finding {profileProgress.done}/{profileProgress.total}</>
-                    : <><Sparkles className="h-3 w-3 mr-2" /> Re-enrich visible leads</>}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">More</DropdownMenuLabel>
                 <DropdownMenuItem onClick={exportCsv}>
                   <Download className="h-3 w-3 mr-2" /> Export CSV
                 </DropdownMenuItem>
+                {isAdmin && (
+                  <DropdownMenuItem onClick={findSellersBulk} disabled={profiling}>
+                    {profiling
+                      ? <><Loader2 className="h-3 w-3 mr-2 animate-spin" /> Re-pulling {profileProgress.done}/{profileProgress.total}</>
+                      : <><Sparkles className="h-3 w-3 mr-2" /> Re-pull missing seller info</>}
+                  </DropdownMenuItem>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>

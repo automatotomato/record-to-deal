@@ -154,17 +154,9 @@ const Admin = () => {
           <h1 className="font-display text-5xl leading-none">Sources.</h1>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          <Button onClick={runQualifier} disabled={qualifying || running} variant="outline" size="lg" className="font-mono uppercase tracking-wider text-xs">
-            {qualifying ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Target className="w-4 h-4 mr-2" />}
-            {qualifying ? "Scoring…" : "Score + auto-profile"}
-          </Button>
-          <Button onClick={profileAllUnprofiled} disabled={profiling || running} variant="outline" size="lg" className="font-mono uppercase tracking-wider text-xs">
-            {profiling ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
-            {profiling ? `Enriching ${profileProgress.done}/${profileProgress.total}` : "Enrich + score with Smarty"}
-          </Button>
           <Button onClick={runScout} disabled={running || profiling || qualifying} size="lg" className="font-mono uppercase tracking-wider text-xs">
             {running ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
-            {running ? "Scouting…" : "Run Scout now"}
+            {running ? "Finding leads…" : "Find new leads"}
           </Button>
         </div>
       </div>
