@@ -17,6 +17,7 @@ type Lead = any;
 export const OutreachDashboard = () => {
   const { isAdmin } = useAuth();
   const qc = useQueryClient();
+  const [tab, setTab] = useState<"active" | "cold" | "disqualified">("active");
   const [tierFilter, setTierFilter] = useState<string>("all");
   const [stateFilter, setStateFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("active");
