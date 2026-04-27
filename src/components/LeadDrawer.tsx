@@ -56,13 +56,17 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
     }
   }, [lead, emails]);
 
-  const draftEmail = async () => {
+  const draftEmail = async (force = false) => {
     setDrafting(true);
-    toast.loading("Profiling lead and drafting outreach…", { id: "draft" });
+    toast.loading(force ? "Re-profiling seller…" : "Profiling lead and drafting outreach…", { id: "draft" });
     try {
-      const { data, error } = await supabase.functions.invoke("profiler-run", { body: { lead_id: leadId } });
+      const { data, error } = await supabase.functions.invoke("profiler-run", { body: { lead_id: leadId, force } });
       if (error) throw error;
-      toast.success("Draft ready", { id: "draft" });
+      if ((data as any)?.cached) {
+        toast.success("Using saved seller info", { id: "draft" });
+      } else {
+        toast.success("Draft ready", { id: "draft" });
+      }
       qc.invalidateQueries({ queryKey: ["lead", leadId] });
       qc.invalidateQueries({ queryKey: ["emails", leadId] });
     } catch (e: any) {
@@ -151,7 +155,7 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={draftEmail}
+                  onClick={() => draftEmail(false)}
                   disabled={drafting}
                   className="rounded-none font-mono text-[10px] uppercase tracking-wider shrink-0"
                 >
@@ -242,10 +246,15 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
             {/* Outreach composer */}
             <Section title="Outreach">
               <div className="flex items-center gap-2 mb-3">
-                <Button size="sm" variant="outline" onClick={draftEmail} disabled={drafting} className="rounded-none font-mono text-[10px] uppercase tracking-wider">
+                <Button size="sm" variant="outline" onClick={() => draftEmail(false)} disabled={drafting} className="rounded-none font-mono text-[10px] uppercase tracking-wider">
                   {drafting ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
                   {lead.personality_type ? "Re-draft with AI" : "Profile + draft email"}
                 </Button>
+                {lead.personality_type && (
+                  <Button size="sm" variant="ghost" onClick={() => draftEmail(true)} disabled={drafting} className="rounded-none font-mono text-[10px] uppercase tracking-wider">
+                    Re-profile seller
+                  </Button>
+                )}
               </div>
 
               <div className="space-y-2">
