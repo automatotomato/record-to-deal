@@ -513,7 +513,7 @@ Deno.serve(async (req) => {
             return map[lead.trigger_event ?? ""] ?? "sale_recorded";
           })(),
           source_record_url: lead.source_record_url ?? null,
-          data_sources: ["firecrawl_search", county.parser_key],
+          data_sources: sourcesUsed,
           scout_confidence: 55,
         });
       }
