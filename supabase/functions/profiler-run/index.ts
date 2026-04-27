@@ -343,11 +343,14 @@ Return JSON with this exact shape:
   let profile: ContactProfile = {};
   try { profile = JSON.parse(content); } catch (_) { /* ignore */ }
 
-  // Compute contact_completeness score
+  // Compute contact_completeness score (max 100)
   let completeness = 0;
   if (profile.contact_email) completeness += 50;
   if (profile.contact_phone) completeness += 30;
   if (profile.contact_linkedin) completeness += 20;
+  // Verified mailing address from county assessor → +10 (capped at 100)
+  if (assessor && profile.mailing_address) completeness = Math.min(100, completeness + 10);
+  const mailingFromAssessor = !!(assessor && profile.mailing_address);
 
   // Update lead row
   const updates: Record<string, unknown> = {
