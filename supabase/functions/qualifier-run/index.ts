@@ -284,7 +284,7 @@ Deno.serve(async (req) => {
       qualified,
       tier_a: tierA.length,
       tier_b: tierB.length,
-      auto_profiling: body.auto_profile ? Math.min(tierA.length + tierB.length, 25) : 0,
+      auto_profiling: profileTargetCount,
     }),
     { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
   );
