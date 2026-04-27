@@ -461,7 +461,7 @@ const ReferenceLinksInline = ({ lead, activities }: { lead: any; activities: any
   if (!uniqueSources.length && !manualLinks.length) return null;
 
   return (
-    <div className="px-6 py-5 border-b border-border">
+    <div className="mt-4 pt-3 border-t border-border">
       <div className="kpi-label mb-3">Reference links</div>
 
       {manualLinks.length > 0 && (
