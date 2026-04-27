@@ -28,6 +28,25 @@ export const daysSince = (d?: string | null): number | null => {
   return Math.floor((Date.now() - new Date(d).getTime()) / 86_400_000);
 };
 
+// 1031 exchange clock: 180 days from sale to close on replacement.
+export type WindowStatus = {
+  daysIn: number;
+  daysLeft: number;
+  label: string;
+  tone: "fresh" | "active" | "closing" | "expired" | "unknown";
+};
+
+export const windowStatus = (saleDate?: string | null): WindowStatus | null => {
+  const d = daysSince(saleDate);
+  if (d == null) return null;
+  const daysLeft = 180 - d;
+  if (d < 0) return { daysIn: 0, daysLeft: 180, label: "future sale", tone: "unknown" };
+  if (d <= 45) return { daysIn: d, daysLeft, label: `${d}d in · fresh`, tone: "fresh" };
+  if (d <= 135) return { daysIn: d, daysLeft, label: `${d}d in · ${daysLeft}d left`, tone: "active" };
+  if (d <= 180) return { daysIn: d, daysLeft, label: `${daysLeft}d left · closing`, tone: "closing" };
+  return { daysIn: d, daysLeft: 0, label: "window closed", tone: "expired" };
+};
+
 export const tierColor = (tier: string) => {
   switch (tier) {
     case "URGENT": return "bg-urgent text-urgent-foreground";
