@@ -295,13 +295,13 @@ const ReferenceLinks = ({ lead, activities }: { lead: any; activities: any[] | u
   const addr = encodeURIComponent(lead.property_address ?? "");
   const ownerQ = encodeURIComponent(lead.owner_name ?? "");
 
-  if (state === "CA" && county.includes("los angeles")) {
-    if (parcel.length >= 8) manualLinks.push({ label: "LA County Assessor (parcel)", url: `https://portal.assessor.lacounty.gov/parceldetail/${parcel}` });
-    manualLinks.push({ label: "LA Recorder (deeds)", url: `https://www.lavote.gov/home/county-clerk/property-document-records/property-document-search` });
+  if (state === "NV" && county.includes("clark")) {
+    manualLinks.push({ label: "Clark County Assessor", url: `https://maps.clarkcountynv.gov/assessor/AssessorParcelDetail/parceldetail.aspx?hdnParcel=${parcel}` });
+    manualLinks.push({ label: "Clark County Recorder", url: `https://recorder.co.clark.nv.us/RecorderEcommerce/` });
   }
-  if (state === "IL" && county.includes("cook")) {
-    if (parcel.length >= 10) manualLinks.push({ label: "Cook County Assessor (PIN)", url: `https://www.cookcountyassessor.com/pin/${parcel}` });
-    manualLinks.push({ label: "Cook County Recorder", url: `https://crs.cookcountyclerkil.gov/` });
+  if (state === "NV" && county.includes("washoe")) {
+    if (parcel.length >= 8) manualLinks.push({ label: "Washoe Assessor (parcel)", url: `https://www.washoecounty.gov/assessor/cama/index.php?parid=${parcel}` });
+    manualLinks.push({ label: "Washoe Recorder", url: `https://www.washoecounty.gov/recorder/online_services/recorded_documents.php` });
   }
   if (lead.owner_name) {
     manualLinks.push({ label: "Search owner on Google", url: `https://www.google.com/search?q=${ownerQ}+${addr}` });
