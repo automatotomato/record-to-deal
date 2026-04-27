@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { fmtRelative } from "@/lib/format";
 import { useAuth } from "@/hooks/useAuth";
-import { Mail, Phone, Calendar, MessageSquare, StickyNote, Linkedin, Send, Loader2, ChevronDown } from "lucide-react";
+import { Mail, Phone, Calendar, MessageSquare, StickyNote, Link2 as Linkedin, Send, Loader2, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 
 const KIND_META: Record<string, { icon: any; label: string; color: string }> = {
