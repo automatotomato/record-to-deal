@@ -64,6 +64,30 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
     }
   };
 
+  const findContact = async (opts: { force?: boolean; website?: string } = {}) => {
+    setDiscovering(true);
+    toast.loading("Hunting for seller contact info…", { id: "disc" });
+    try {
+      const { data, error } = await supabase.functions.invoke("seller-discovery", {
+        body: { lead_id: leadId, force: opts.force ?? true, company_website: opts.website },
+      });
+      if (error) throw error;
+      const status = (data as any)?.status;
+      const email = (data as any)?.discovery?.email;
+      if (email) toast.success(`Found ${email}`, { id: "disc" });
+      else if (status === "partial") toast.success("Found partial contact (no email yet)", { id: "disc" });
+      else toast.error("No contact found — try giving us the company website", { id: "disc" });
+      qc.invalidateQueries({ queryKey: ["lead", leadId] });
+      qc.invalidateQueries({ queryKey: ["activities", leadId] });
+      qc.invalidateQueries({ queryKey: ["emails", leadId] });
+      qc.invalidateQueries({ queryKey: ["leads"] });
+    } catch (e: any) {
+      toast.error(`Discovery failed: ${e.message}`, { id: "disc" });
+    } finally {
+      setDiscovering(false);
+    }
+  };
+
   const sendEmail = async (emailRow: any, lead: any) => {
     const to = recipientOverride.trim() || emailRow.to_email || lead.decision_maker_email || lead.contact_email;
     if (!to) { toast.error("Add a recipient email first"); return; }
