@@ -597,18 +597,17 @@ Return JSON with this exact shape:
     emailId = emailRow?.id ?? null;
   }
 
-  // Activity log with Smarty source URLs
-  const sources = [
-    `https://smarty.com/products/apis/us-property-data-api`,
-    smartyKey ? `smarty_key:${smartyKey}` : null,
-  ].filter(Boolean) as string[];
+  // Activity log
+  const sources = enrichSource === "attom"
+    ? ["https://api.developer.attomdata.com/", ...extraSources]
+    : ["https://smarty.com/products/apis/us-property-data-api", smartyKey ? `smarty_key:${smartyKey}` : null].filter(Boolean) as string[];
 
   await supabase.from("lead_activities").insert({
     lead_id: leadId,
     kind: "profiler_run",
-    summary: `Profiled via Smarty — ${ownerName ?? "owner"}, mailing ${mailingAddress ? "✓" : "✗"}, ${wealthSignals.length} wealth signals`,
+    summary: `Profiled via ${enrichSource?.toUpperCase() ?? "?"} — ${ownerName ?? "owner"}, mailing ${mailingAddress ? "✓" : "✗"}, ${wealthSignals.length} wealth signals`,
     payload: {
-      source: "smarty",
+      source: enrichSource,
       smarty_key: smartyKey,
       sources,
       completeness,
