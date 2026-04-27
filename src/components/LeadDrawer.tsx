@@ -62,6 +62,32 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
     }
   };
 
+  const sendEmail = async (emailRow: any, lead: any) => {
+    const to = recipientOverride.trim() || emailRow.to_email || lead.decision_maker_email || lead.contact_email;
+    if (!to) { toast.error("Add a recipient email first"); return; }
+    setSending(true);
+    toast.loading("Sending from your Gmail…", { id: "send" });
+    try {
+      const { data, error } = await supabase.functions.invoke("send-outreach-email", {
+        body: { email_id: emailRow.id, to_email: to },
+      });
+      if (error) throw error;
+      if ((data as any)?.error === "gmail_not_connected") {
+        toast.error("Connect your Gmail account first (Connectors → Google Mail)", { id: "send", duration: 8000 });
+      } else {
+        toast.success("Sent ✓", { id: "send" });
+      }
+      qc.invalidateQueries({ queryKey: ["emails", leadId] });
+      qc.invalidateQueries({ queryKey: ["touchpoints", leadId] });
+      qc.invalidateQueries({ queryKey: ["lead", leadId] });
+      qc.invalidateQueries({ queryKey: ["leads"] });
+    } catch (e: any) {
+      toast.error(`Send failed: ${e.message}`, { id: "send" });
+    } finally {
+      setSending(false);
+    }
+  };
+
   const updateStatus = async (status: string) => {
     await supabase.from("leads").update({ status: status as any }).eq("id", leadId);
     await supabase.from("lead_activities").insert({ lead_id: leadId, kind: "status_change", summary: `Status → ${status}` });
