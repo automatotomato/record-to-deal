@@ -155,7 +155,7 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={draftEmail}
+                  onClick={() => draftEmail(false)}
                   disabled={drafting}
                   className="rounded-none font-mono text-[10px] uppercase tracking-wider shrink-0"
                 >
