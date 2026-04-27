@@ -39,25 +39,26 @@ const Admin = () => {
     setProfiling(true);
     setProfileProgress({ done: 0, total: 0, ok: 0, fail: 0 });
     try {
-      // Unprofiled = no contact_email AND no personality_type
+      // Unprofiled by Smarty = no smarty_key on file
       const { data: leads, error } = await supabase
         .from("leads")
-        .select("id, property_address, owner_name")
-        .is("contact_email", null)
-        .is("personality_type", null)
+        .select("id, property_address")
+        .is("smarty_key", null)
+        .not("property_address", "is", null)
         .order("created_at", { ascending: false })
         .limit(200);
       if (error) throw error;
       const list = leads ?? [];
       if (!list.length) {
-        toast.info("No unprofiled leads found");
+        toast.info("All leads already enriched with Smarty");
         return;
       }
       setProfileProgress({ done: 0, total: list.length, ok: 0, fail: 0 });
-      toast.info(`Profiling ${list.length} leads — this may take a few minutes`);
+      toast.info(`Enriching ${list.length} leads via Smarty — this may take a few minutes`);
 
-      // Concurrency = 3 to avoid rate limits but keep things moving
+      // Concurrency = 3
       const queue = [...list];
+      const enriched: string[] = [];
       let ok = 0, fail = 0, done = 0;
       const worker = async () => {
         while (queue.length) {
@@ -65,10 +66,11 @@ const Admin = () => {
           if (!lead) break;
           try {
             const { error: fnErr } = await supabase.functions.invoke("profiler-run", {
-              body: { lead_id: lead.id },
+              body: { lead_id: lead.id, force: true },
             });
             if (fnErr) throw fnErr;
             ok += 1;
+            enriched.push(lead.id);
           } catch (e) {
             fail += 1;
             console.warn("Profiler failed for", lead.id, e);
@@ -79,10 +81,21 @@ const Admin = () => {
         }
       };
       await Promise.all([worker(), worker(), worker()]);
-      toast.success(`Profiled ${ok} leads${fail ? ` · ${fail} failed` : ""}`);
+
+      // Re-score the freshly enriched leads so tier/score/tax exposure
+      // reflect the new Smarty-derived owner type, sale price, and hold time.
+      if (enriched.length) {
+        toast.info(`Scoring ${enriched.length} enriched leads…`);
+        const { error: qErr } = await supabase.functions.invoke("qualifier-run", {
+          body: { lead_ids: enriched, auto_profile: false },
+        });
+        if (qErr) console.warn("Qualifier re-score failed:", qErr);
+      }
+
+      toast.success(`Enriched ${ok} leads${fail ? ` · ${fail} failed` : ""} · tier + score updated`);
       qc.invalidateQueries({ queryKey: ["leads"] });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Profile batch failed");
+      toast.error(e instanceof Error ? e.message : "Enrichment batch failed");
     } finally {
       setProfiling(false);
     }
@@ -147,7 +160,7 @@ const Admin = () => {
           </Button>
           <Button onClick={profileAllUnprofiled} disabled={profiling || running} variant="outline" size="lg" className="font-mono uppercase tracking-wider text-xs">
             {profiling ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
-            {profiling ? `Profiling ${profileProgress.done}/${profileProgress.total}` : "Profile all unprofiled"}
+            {profiling ? `Enriching ${profileProgress.done}/${profileProgress.total}` : "Enrich + score with Smarty"}
           </Button>
           <Button onClick={runScout} disabled={running || profiling || qualifying} size="lg" className="font-mono uppercase tracking-wider text-xs">
             {running ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
