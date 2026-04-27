@@ -632,10 +632,8 @@ const EmptyState = ({
     );
   }
   const tabCopy: Record<TabKey, string> = {
-    candidates: "No active 1031 candidates yet. Click 'Find new leads' or check the All / Cold tabs.",
+    candidates: "No active 1031 candidates yet. Click 'Find new leads' or check the All active leads tab.",
     active: "No leads match your current filters. Try clearing them or switching tabs.",
-    cold: "No cold leads right now — that's a good thing.",
-    disqualified: "Nothing has been filtered out yet.",
   };
   return (
     <div className="p-16 text-center">
