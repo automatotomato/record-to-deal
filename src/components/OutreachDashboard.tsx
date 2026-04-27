@@ -92,6 +92,53 @@ export const OutreachDashboard = () => {
     }
   };
 
+  // Find seller info on every visible lead that's missing contact data.
+  // Operates on the *currently filtered* view so users can target specific tiers/states.
+  const findSellersBulk = async () => {
+    const targets = filtered.filter(
+      (l) => !l.contact_email && !l.contact_phone && !l.mailing_address,
+    );
+    if (!targets.length) {
+      toast.info("Every visible lead already has seller info");
+      return;
+    }
+    setProfiling(true);
+    setProfileProgress({ done: 0, total: targets.length, ok: 0, fail: 0 });
+    toast.info(`Finding sellers for ${targets.length} leads — runs in the background`);
+    try {
+      const queue = [...targets];
+      let ok = 0, fail = 0, done = 0;
+      const worker = async () => {
+        while (queue.length) {
+          const lead = queue.shift();
+          if (!lead) break;
+          try {
+            const { error: fnErr } = await supabase.functions.invoke("profiler-run", {
+              body: { lead_id: lead.id },
+            });
+            if (fnErr) throw fnErr;
+            ok += 1;
+          } catch (e) {
+            fail += 1;
+            console.warn("Profiler failed for", lead.id, e);
+          } finally {
+            done += 1;
+            setProfileProgress({ done, total: targets.length, ok, fail });
+            // Refresh the table every 5 leads so the user sees results stream in
+            if (done % 5 === 0) qc.invalidateQueries({ queryKey: ["leads"] });
+          }
+        }
+      };
+      await Promise.all([worker(), worker(), worker()]);
+      toast.success(`Found seller info for ${ok} leads${fail ? ` · ${fail} failed` : ""}`);
+      qc.invalidateQueries({ queryKey: ["leads"] });
+    } catch (e: any) {
+      toast.error(`Bulk seller lookup failed: ${e.message}`);
+    } finally {
+      setProfiling(false);
+    }
+  };
+
   const exportCsv = () => {
     if (!filtered.length) return;
     const cols = ["tier", "score", "is_urgent", "state", "county", "property_address", "property_city", "owner_name", "owner_type", "sale_price", "sale_date", "capital_gains_estimate", "total_tax_exposure", "contact_email", "contact_phone", "status", "personality_type"];
