@@ -246,10 +246,15 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
             {/* Outreach composer */}
             <Section title="Outreach">
               <div className="flex items-center gap-2 mb-3">
-                <Button size="sm" variant="outline" onClick={draftEmail} disabled={drafting} className="rounded-none font-mono text-[10px] uppercase tracking-wider">
+                <Button size="sm" variant="outline" onClick={() => draftEmail(false)} disabled={drafting} className="rounded-none font-mono text-[10px] uppercase tracking-wider">
                   {drafting ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
                   {lead.personality_type ? "Re-draft with AI" : "Profile + draft email"}
                 </Button>
+                {lead.personality_type && (
+                  <Button size="sm" variant="ghost" onClick={() => draftEmail(true)} disabled={drafting} className="rounded-none font-mono text-[10px] uppercase tracking-wider">
+                    Re-profile seller
+                  </Button>
+                )}
               </div>
 
               <div className="space-y-2">
