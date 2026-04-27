@@ -53,7 +53,7 @@ async function attomEnrich(
     const mailingAddr = owner.mailingaddressoneline ?? owner.mailingAddress?.oneLine ?? null;
 
     const ownerName =
-      o1.fullname ??
+      o1.fullname ||
       [o1.firstnameandmi, o1.lastname].filter(Boolean).join(" ").trim() ||
       null;
     const isCompany =
