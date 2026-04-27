@@ -212,6 +212,7 @@ export const OutreachDashboard = () => {
                   <td className="px-4 py-3">
                     <div className="text-sm">{l.owner_name ?? "—"}</div>
                     <div className="text-[11px] text-muted-foreground font-mono uppercase">{l.owner_type}</div>
+                    <SellerIcons lead={l} />
                   </td>
                   <td className="px-4 py-3 data-cell text-right">{fmtMoney(l.sale_price, { compact: true })}</td>
                   <td className="px-4 py-3 data-cell text-right text-accent font-semibold">{fmtMoney(l.total_tax_exposure, { compact: true })}</td>
