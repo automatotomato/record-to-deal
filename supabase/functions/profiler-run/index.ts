@@ -405,8 +405,8 @@ Return JSON with this exact shape:
   await supabase.from("lead_activities").insert({
     lead_id: leadId,
     kind: "profiler_run",
-    summary: `Profiled owner — completeness ${completeness}%${profile.contact_email ? `, email ${profile.contact_email}` : ", no email found"}`,
-    payload: { sources: sources.slice(0, 10), completeness },
+    summary: `Profiled owner — completeness ${completeness}%${profile.contact_email ? `, email ${profile.contact_email}` : ", no email found"}${mailingFromAssessor ? " · mailing from county" : ""}`,
+    payload: { sources: sources.slice(0, 10), completeness, mailing_from_assessor: mailingFromAssessor },
   });
 
   return new Response(
