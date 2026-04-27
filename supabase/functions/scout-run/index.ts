@@ -389,14 +389,19 @@ Deno.serve(async (req) => {
     leads_found: totalFound,
     errors,
   }).eq("id", runRow.id);
+  };
+
+  // @ts-ignore - EdgeRuntime is provided by Supabase edge runtime
+  if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) {
+    // @ts-ignore
+    EdgeRuntime.waitUntil(work());
+  } else {
+    work().catch((e) => console.error("Background work failed:", e));
+  }
 
   return new Response(
-    JSON.stringify({
-      run_id: runRow.id,
-      counties_scanned: countiesScanned,
-      leads_found: totalFound,
-      errors,
-    }),
-    { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    JSON.stringify({ run_id: runRow.id, status: "running", message: "Scout started in background. Poll scout_runs for results." }),
+    { status: 202, headers: { ...corsHeaders, "Content-Type": "application/json" } },
   );
+});
 });
