@@ -382,8 +382,6 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
               <TouchpointTimeline leadId={leadId} />
             </Section>
 
-            {/* Reference links — public-record sources used to find seller info */}
-            <ReferenceLinks lead={lead} activities={activities} />
 
             {/* Activity */}
             <Section title="Activity">
