@@ -428,6 +428,7 @@ Deno.serve(async (req) => {
   const work = async () => {
   const errors: Array<{ county: string; message: string }> = [];
   let totalFound = 0;
+  let totalUpdated = 0;
   let countiesScanned = 0;
 
   for (const county of counties ?? []) {
@@ -437,21 +438,39 @@ Deno.serve(async (req) => {
     ];
     const hint = source?.hint ??
       `${county.county}, ${county.state} recent property transfers. Extract owner name, address, sale price/date.`;
+    // First-ever run for this county? Cast a wider Firecrawl net (last month).
+    // Subsequent runs only need last week — keeps results fresh and avoids
+    // re-fetching the same cached search results every time.
+    const firecrawlTbs = county.last_run_at ? "qdr:w" : "qdr:m";
 
     try {
       const extracted: ExtractedLead[] = [];
       const sourcesUsed: string[] = [county.parser_key];
 
-      // 1. ATTOM (primary, structured) — only if API key configured and city list known
-      const cities = ATTOM_COUNTY_CITIES[county.parser_key];
-      if (attomKey && cities?.length) {
+      // 1. ATTOM (primary, structured): pull entire county via geoIdV4.
+      if (attomKey) {
         try {
-          const attomLeads = await attomSalesSnapshot(cities, attomKey);
-          if (attomLeads.length) {
-            extracted.push(...attomLeads);
-            sourcesUsed.push("attom");
+          let geoId: string | null = (county as any).attom_geo_id ?? null;
+          if (!geoId) {
+            geoId = await attomLookupCountyGeoId(county.county, attomKey);
+            if (geoId) {
+              await supabase
+                .from("counties")
+                .update({ attom_geo_id: geoId })
+                .eq("id", county.id);
+              console.log(`${county.county}: cached ATTOM geoId ${geoId}`);
+            } else {
+              console.warn(`${county.county}: no ATTOM geoId found`);
+            }
           }
-          console.log(`${county.county}: ATTOM returned ${attomLeads.length} sales`);
+          if (geoId) {
+            const attomLeads = await attomCountySales(geoId, attomKey);
+            if (attomLeads.length) {
+              extracted.push(...attomLeads);
+              sourcesUsed.push("attom");
+            }
+            console.log(`${county.county}: ATTOM returned ${attomLeads.length} sales (geoId ${geoId})`);
+          }
         } catch (ae) {
           const msg = ae instanceof Error ? ae.message : String(ae);
           console.warn(`ATTOM ${county.county} failed:`, msg);
@@ -462,7 +481,7 @@ Deno.serve(async (req) => {
       // 2. Firecrawl (secondary, fills gaps from CRE listing sites)
       for (const q of queries) {
         try {
-          const { leads } = await firecrawlSearchAndExtract(q, hint, firecrawlKey, lovableKey);
+          const { leads } = await firecrawlSearchAndExtract(q, hint, firecrawlKey, lovableKey, firecrawlTbs);
           extracted.push(...leads);
         } catch (qe) {
           const msg = qe instanceof Error ? qe.message : String(qe);
