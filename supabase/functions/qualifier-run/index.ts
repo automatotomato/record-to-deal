@@ -169,10 +169,13 @@ Deno.serve(async (req) => {
   let body: {
     lead_ids?: string[];
     rescore_all?: boolean;
-    auto_profile?: boolean; // fan out Profiler for tier A/B
+    auto_profile?: boolean; // fan out Profiler for ALL scored leads (default true)
+    profile_cap?: number; // max leads to profile in one run (default 50)
     run_id?: string;
   } = {};
   try { body = await req.json(); } catch (_) {}
+  const autoProfile = body.auto_profile !== false; // default true
+  const profileCap = body.profile_cap ?? 50;
 
   // Load target leads
   let q = supabase
