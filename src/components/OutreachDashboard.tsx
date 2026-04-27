@@ -169,8 +169,12 @@ export const OutreachDashboard = () => {
         body: { trigger_kind: "manual" },
       });
       if (error) throw error;
+      const found = data?.leads_found ?? 0;
+      const updated = data?.leads_updated ?? 0;
       toast.success(
-        `Scan started — ${data?.leads_found ?? 0} new leads found so far. Updates will appear automatically.`,
+        updated || found
+          ? `Scan running — ${found} new, ${updated} refreshed so far. Pipeline updates automatically.`
+          : `Scan started. New leads will appear here within 1–2 minutes.`,
         { id: "scout", duration: 6000 },
       );
       qc.invalidateQueries({ queryKey: ["leads"] });
@@ -315,9 +319,16 @@ export const OutreachDashboard = () => {
         {/* Tabs */}
         <div className="px-8 border-b border-border bg-background flex items-center gap-0 overflow-x-auto">
           <TabButton
+            active={tab === "candidates"}
+            onClick={() => { setTab("candidates"); setTierFilter("all"); }}
+            label="1031 Candidates"
+            count={tabCounts.candidates}
+            tooltip="Entity-owned recent sales — the 180-day 1031 clock is ticking. Sorted freshest first."
+          />
+          <TabButton
             active={tab === "active"}
             onClick={() => { setTab("active"); setTierFilter("all"); }}
-            label="Worth pursuing"
+            label="All worth pursuing"
             count={tabCounts.active}
             tooltip="Urgent, hot, warm, and unscored leads — your active pipeline."
           />
@@ -442,7 +453,7 @@ export const OutreachDashboard = () => {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((l) => (
+                {ordered.map((l) => (
                   <tr
                     key={l.id}
                     onClick={() => setSelectedId(l.id)}
@@ -616,6 +627,7 @@ const EmptyState = ({
     );
   }
   const tabCopy: Record<TabKey, string> = {
+    candidates: "No active 1031 candidates yet. Click 'Find new leads' or check the All / Cold tabs.",
     active: "No leads match your current filters. Try clearing them or switching tabs.",
     cold: "No cold leads right now — that's a good thing.",
     disqualified: "Nothing has been filtered out yet.",
