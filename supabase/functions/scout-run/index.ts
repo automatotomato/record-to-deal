@@ -642,6 +642,7 @@ Deno.serve(async (req) => {
     finished_at: new Date().toISOString(),
     counties_scanned: countiesScanned,
     leads_found: totalFound,
+    leads_updated: totalUpdated,
     errors,
   }).eq("id", runRow.id);
 
