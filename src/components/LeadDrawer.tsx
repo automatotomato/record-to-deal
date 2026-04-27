@@ -279,6 +279,9 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
               </div>
             </Section>
 
+            {/* Reference links — public-record sources used to find seller info */}
+            <ReferenceLinks lead={lead} activities={activities} />
+
             {/* Activity */}
             <Section title="Activity">
               {!activities?.length ? <div className="text-xs text-muted-foreground italic">No activity yet.</div> : (
@@ -315,6 +318,102 @@ function mailingFromAssessor(activities: any[] | undefined): boolean {
   const latest = activities.find((a) => a.kind === "profiler_run");
   return !!latest?.payload?.mailing_from_assessor;
 }
+
+// Aggregate every public-record / web URL the Profiler used so the user
+// can verify where the seller info came from.
+const ReferenceLinks = ({ lead, activities }: { lead: any; activities: any[] | undefined }) => {
+  const profilerRuns = (activities ?? []).filter((a) => a.kind === "profiler_run");
+  const sourceUrls: string[] = [];
+  for (const run of profilerRuns) {
+    const s = run?.payload?.sources;
+    if (Array.isArray(s)) sourceUrls.push(...s.filter((u: any) => typeof u === "string" && u.startsWith("http")));
+  }
+  const uniqueSources = Array.from(new Set(sourceUrls)).slice(0, 12);
+
+  // Always-available manual lookup links so the user can dig deeper
+  const manualLinks: { label: string; url: string }[] = [];
+  const state = (lead.state ?? "").toUpperCase();
+  const county = (lead.county ?? "").toLowerCase();
+  const parcel = (lead.parcel_number ?? "").replace(/[^0-9]/g, "");
+  const addr = encodeURIComponent(lead.property_address ?? "");
+  const ownerQ = encodeURIComponent(lead.owner_name ?? "");
+
+  if (state === "CA" && county.includes("los angeles")) {
+    if (parcel.length >= 8) manualLinks.push({ label: "LA County Assessor (parcel)", url: `https://portal.assessor.lacounty.gov/parceldetail/${parcel}` });
+    manualLinks.push({ label: "LA Recorder (deeds)", url: `https://www.lavote.gov/home/county-clerk/property-document-records/property-document-search` });
+  }
+  if (state === "IL" && county.includes("cook")) {
+    if (parcel.length >= 10) manualLinks.push({ label: "Cook County Assessor (PIN)", url: `https://www.cookcountyassessor.com/pin/${parcel}` });
+    manualLinks.push({ label: "Cook County Recorder", url: `https://crs.cookcountyclerkil.gov/` });
+  }
+  if (lead.owner_name) {
+    manualLinks.push({ label: "Search owner on Google", url: `https://www.google.com/search?q=${ownerQ}+${addr}` });
+    manualLinks.push({ label: "Search owner on LinkedIn", url: `https://www.google.com/search?q=site%3Alinkedin.com%2Fin+${ownerQ}` });
+    if (/llc|inc|corp|trust|company|co\.|holdings|properties|partners/i.test(lead.owner_name)) {
+      manualLinks.push({ label: "OpenCorporates lookup", url: `https://opencorporates.com/companies?q=${ownerQ}&jurisdiction_code=us_${state.toLowerCase()}` });
+    }
+  }
+  if (lead.source_record_url) {
+    manualLinks.unshift({ label: "Original deed record", url: lead.source_record_url });
+  }
+
+  if (!uniqueSources.length && !manualLinks.length) return null;
+
+  return (
+    <div className="px-6 py-5 border-b border-border">
+      <div className="kpi-label mb-3">Reference links</div>
+
+      {manualLinks.length > 0 && (
+        <div className="mb-4">
+          <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
+            Public records · Verify manually
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {manualLinks.map((l, i) => (
+              <a
+                key={i}
+                href={l.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 px-2 py-1 bg-secondary hover:bg-accent/10 hover:text-accent font-mono text-[11px] transition-colors"
+              >
+                <ExternalLink className="h-3 w-3" /> {l.label}
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {uniqueSources.length > 0 && (
+        <div>
+          <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
+            Sources used by Profiler
+          </div>
+          <ul className="space-y-1">
+            {uniqueSources.map((url, i) => {
+              let host = url;
+              try { host = new URL(url).hostname.replace(/^www\./, ""); } catch (_) {}
+              return (
+                <li key={i} className="text-xs">
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-accent transition-colors"
+                  >
+                    <ExternalLink className="h-3 w-3 shrink-0" />
+                    <span className="font-mono text-[10px] uppercase tracking-wider w-40 shrink-0 truncate">{host}</span>
+                    <span className="truncate max-w-[260px]">{url}</span>
+                  </a>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
   <div className="px-6 py-5 border-b border-border">
