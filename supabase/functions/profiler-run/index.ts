@@ -331,23 +331,20 @@ Deno.serve(async (req) => {
   const saleDate = s(a.deed_sale_date) ?? s(a.sale_date) ?? s(a.ownership_transfer_date);
   const salePrice = n(a.deed_sale_price) ?? n(a.sale_amount);
   const assessedValue = n(a.assessed_value);
-  const improvementValue = n(a.assessed_improvement_value);
   const ownershipYears = yearsBetween(saleDate);
   const propertyType = mapPropertyType(s(a.land_use_standard) ?? s(a.land_use_group));
   const wealthSignals = extractWealthSignals(a, "smarty.com");
 
-  // Rough capital gains + recapture estimates (refined later)
-  let capitalGainsEstimate: number | null = null;
-  let depreciationRecapture: number | null = null;
-  if (assessedValue && salePrice) {
-    capitalGainsEstimate = Math.max(0, assessedValue - salePrice);
+  // Loud diagnostic: Smarty matched but mailing mapping yielded nothing — surface it
+  if (!mailingAddress) {
+    console.warn(
+      `Profiler: Smarty matched lead ${leadId} but mailing address mapping returned null. ` +
+      `Available mail/contact keys: ${Object.keys(a).filter((k) => k.startsWith("mail") || k.startsWith("contact")).join(",") || "(none)"}`,
+    );
   }
-  if (improvementValue && ownershipYears && ownershipYears > 0) {
-    // rough straight-line depreciation taken (cap at fully depreciated)
-    const yearsCapped = Math.min(ownershipYears, 39);
-    const depTaken = Math.round((improvementValue / 39) * yearsCapped);
-    depreciationRecapture = Math.round(depTaken * 0.25); // 25% recapture rate
-  }
+
+  const { capitalGains: capitalGainsEstimate, recapture: depreciationRecapture } =
+    estimateTaxExposure(a, l.state ?? null, salePrice, ownershipYears);
 
   // 2. AI: build personality profile + draft email using Smarty data as source of truth
   const propertyContext = `
