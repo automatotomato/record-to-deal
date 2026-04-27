@@ -130,13 +130,25 @@ const Admin = () => {
     },
   });
 
-  const { data: runs } = useQuery({
-    queryKey: ["runs"],
+  // Latest scout run, polled live so the user sees a progress bar while a scan is in flight.
+  const { data: latestRun } = useQuery({
+    queryKey: ["latest-scout-run"],
     queryFn: async () => {
-      const { data } = await supabase.from("scout_runs").select("*").order("started_at", { ascending: false }).limit(20);
-      return data ?? [];
+      const { data } = await supabase
+        .from("scout_runs")
+        .select("*")
+        .order("started_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      return data;
+    },
+    refetchInterval: (q) => {
+      const r = (q.state.data as any) ?? null;
+      return r?.status === "running" ? 3000 : false;
     },
   });
+
+  const enabledCount = (counties ?? []).filter((c: any) => c.enabled).length;
 
   const toggle = async (id: string, enabled: boolean) => {
     const { error } = await supabase.from("counties").update({ enabled }).eq("id", id);
