@@ -459,11 +459,8 @@ Deno.serve(async (req) => {
         }
         // Updates run in parallel (fire-and-forget chunks)
         await Promise.all(
-          toUpdate.map((p) =>
-            supabase
-              .from("leads")
-              .update(p)
-              .eq("id", existingByAddr.get(p.property_address)!),
+          toUpdate.map(({ p, id }) =>
+            supabase.from("leads").update(p).eq("id", id),
           ),
         );
       }
