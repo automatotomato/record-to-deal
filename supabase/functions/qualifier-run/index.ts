@@ -134,15 +134,38 @@ function score(lead: Lead): ScoreResult {
   else if (total >= 50) tier = "B";
   else if (total >= 30) tier = "C";
 
-  // Tax exposure — cap gain assumed 60% of sale price (no basis data); recapture
-  // assumed 15% of sale price for held >5y, otherwise 0.
+  // Tax exposure — prefer Smarty-derived values when available (assessed value
+  // gives us the current FMV, sale_price gives us the basis, ownership_years
+  // tells us how much depreciation has been taken).
   const rate = STATE_BLENDED_RATE[lead.state] ?? 0.25;
-  const capGainBase = sp ? Math.round(sp * 0.6) : 0;
-  const capitalGainsEstimate = capGainBase ? Math.round(capGainBase * rate) : null;
-  const depreciationRecapture =
-    sp && (held ?? 0) >= 5 ? Math.round(sp * 0.15 * 0.25) : null;
+  const fmv = lead.assessed_value ?? 0;
+  const basis = sp ?? 0;
+  let capitalGainsEstimate: number | null = null;
+  let depreciationRecapture: number | null = null;
+
+  if (fmv > 0 && basis > 0 && fmv > basis) {
+    // Have both values from Smarty — compute real gain
+    const gain = fmv - basis;
+    capitalGainsEstimate = Math.round(gain * rate);
+  } else if (basis > 0) {
+    // Only have sale price — assume 60% appreciation as fallback
+    capitalGainsEstimate = Math.round(basis * 0.6 * rate);
+  }
+
+  if ((held ?? 0) >= 1 && basis > 0) {
+    // Straight-line depreciation taken (commercial 39y, residential 27.5y)
+    const depYears = Math.min(held ?? 0, 39);
+    const improvementAssumption = basis * 0.7; // assume 70% of basis is improvements
+    const depTaken = (improvementAssumption / 39) * depYears;
+    depreciationRecapture = Math.round(depTaken * 0.25);
+  }
+
   const totalTaxExposure =
     (capitalGainsEstimate ?? 0) + (depreciationRecapture ?? 0) || null;
+
+  if (totalTaxExposure && totalTaxExposure > 500_000) {
+    notes.push(`Est. tax exposure ~$${Math.round(totalTaxExposure / 1000)}k`);
+  }
 
   return {
     score: total,
