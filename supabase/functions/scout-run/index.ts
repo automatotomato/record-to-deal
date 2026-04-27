@@ -398,6 +398,15 @@ Deno.serve(async (req) => {
     leads_found: totalFound,
     errors,
   }).eq("id", runRow.id);
+
+  // Auto-chain: qualify all UNSCORED leads, then auto-profile tier A/B
+  try {
+    await supabase.functions.invoke("qualifier-run", {
+      body: { auto_profile: true, run_id: runRow.id },
+    });
+  } catch (e) {
+    console.warn("Auto-qualifier failed:", e);
+  }
   };
 
   // @ts-ignore - EdgeRuntime is provided by Supabase edge runtime

@@ -8,15 +8,32 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { fmtRelative } from "@/lib/format";
 import { toast } from "sonner";
-import { Loader2, Play, Sparkles } from "lucide-react";
+import { Loader2, Play, Sparkles, Target } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 
 const Admin = () => {
   const { isAdmin, loading } = useAuth();
   const qc = useQueryClient();
   const [running, setRunning] = useState(false);
+  const [qualifying, setQualifying] = useState(false);
   const [profiling, setProfiling] = useState(false);
   const [profileProgress, setProfileProgress] = useState({ done: 0, total: 0, ok: 0, fail: 0 });
+
+  const runQualifier = async () => {
+    setQualifying(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("qualifier-run", {
+        body: { rescore_all: true, auto_profile: true },
+      });
+      if (error) throw error;
+      toast.success(`Scored ${data?.qualified ?? 0} leads · ${data?.tier_a ?? 0} tier A · ${data?.tier_b ?? 0} tier B · profiling top ${data?.auto_profiling ?? 0} in background`);
+      qc.invalidateQueries({ queryKey: ["leads"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Qualifier failed");
+    } finally {
+      setQualifying(false);
+    }
+  };
 
   const profileAllUnprofiled = async () => {
     setProfiling(true);
@@ -123,12 +140,16 @@ const Admin = () => {
           <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-1">Configuration</div>
           <h1 className="font-display text-5xl leading-none">Sources.</h1>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <Button onClick={runQualifier} disabled={qualifying || running} variant="outline" size="lg" className="font-mono uppercase tracking-wider text-xs">
+            {qualifying ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Target className="w-4 h-4 mr-2" />}
+            {qualifying ? "Scoring…" : "Score + auto-profile"}
+          </Button>
           <Button onClick={profileAllUnprofiled} disabled={profiling || running} variant="outline" size="lg" className="font-mono uppercase tracking-wider text-xs">
             {profiling ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
             {profiling ? `Profiling ${profileProgress.done}/${profileProgress.total}` : "Profile all unprofiled"}
           </Button>
-          <Button onClick={runScout} disabled={running || profiling} size="lg" className="font-mono uppercase tracking-wider text-xs">
+          <Button onClick={runScout} disabled={running || profiling || qualifying} size="lg" className="font-mono uppercase tracking-wider text-xs">
             {running ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
             {running ? "Scouting…" : "Run Scout now"}
           </Button>
