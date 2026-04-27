@@ -192,6 +192,17 @@ Deno.serve(async (req) => {
   let body: { county_ids?: string[]; trigger_kind?: string } = {};
   try { body = await req.json(); } catch (_) { /* no body */ }
 
+  // Mark any previous "running" runs older than 2 minutes as failed (stale)
+  await supabase
+    .from("scout_runs")
+    .update({
+      status: "failed",
+      finished_at: new Date().toISOString(),
+      errors: [{ message: "timed out / abandoned" }],
+    })
+    .eq("status", "running")
+    .lt("started_at", new Date(Date.now() - 2 * 60 * 1000).toISOString());
+
   // Create a scout run row
   const { data: runRow, error: runErr } = await supabase
     .from("scout_runs")
