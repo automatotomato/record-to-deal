@@ -15,7 +15,7 @@ import { LeadDrawer } from "./LeadDrawer";
 import { useAuth } from "@/hooks/useAuth";
 
 type Lead = any;
-type TabKey = "candidates" | "active" | "cold" | "disqualified";
+type TabKey = "candidates" | "active";
 
 const STATUS_DOT: Record<string, string> = {
   new: "bg-accent",
@@ -51,9 +51,11 @@ export const OutreachDashboard = () => {
   const { data: leads, isLoading } = useQuery({
     queryKey: ["leads"],
     queryFn: async () => {
+      // Hide cold/disqualified leads — they stay in DB for dedupe but never reach the UI.
       const { data, error } = await supabase
         .from("leads")
         .select("*")
+        .not("tier", "in", "(COLD,DISQUALIFIED)")
         .order("is_urgent", { ascending: false })
         .order("score", { ascending: false })
         .limit(500);
@@ -105,9 +107,7 @@ export const OutreachDashboard = () => {
     if (!leads) return [];
     return leads.filter((l) => {
       if (tab === "candidates" && !isCandidate(l)) return false;
-      if (tab === "active" && (l.tier === "COLD" || l.tier === "DISQUALIFIED")) return false;
-      if (tab === "cold" && l.tier !== "COLD") return false;
-      if (tab === "disqualified" && l.tier !== "DISQUALIFIED") return false;
+      // (cold/disqualified already excluded at the query level)
       if (tierFilter !== "all" && l.tier !== tierFilter) return false;
       if (stateFilter !== "all" && l.state !== stateFilter) return false;
       if (statusFilter === "active" && (l.status === "dead" || l.status === "won")) return false;
@@ -132,11 +132,9 @@ export const OutreachDashboard = () => {
   }, [filtered, tab]);
 
   const tabCounts = useMemo(() => {
-    const c = { candidates: 0, active: 0, cold: 0, disqualified: 0 };
+    const c = { candidates: 0, active: 0 };
     for (const l of leads ?? []) {
-      if (l.tier === "COLD") c.cold += 1;
-      else if (l.tier === "DISQUALIFIED") c.disqualified += 1;
-      else c.active += 1;
+      c.active += 1;
       if (isCandidate(l)) c.candidates += 1;
     }
     return c;
@@ -293,9 +291,9 @@ export const OutreachDashboard = () => {
           {/* KPI strip — 4 client-facing metrics */}
           <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-px bg-border border border-border">
             <Kpi
-              label="Total leads"
+              label="Active leads"
               value={stats.total.toString()}
-              hint="Every property in your pipeline."
+              hint="Worth-pursuing leads in your pipeline (cold and filtered-out leads excluded)."
             />
             <Kpi
               label="Urgent"
@@ -328,23 +326,9 @@ export const OutreachDashboard = () => {
           <TabButton
             active={tab === "active"}
             onClick={() => { setTab("active"); setTierFilter("all"); }}
-            label="All worth pursuing"
+            label="All active leads"
             count={tabCounts.active}
-            tooltip="Urgent, hot, warm, and unscored leads — your active pipeline."
-          />
-          <TabButton
-            active={tab === "cold"}
-            onClick={() => { setTab("cold"); setTierFilter("all"); }}
-            label="Low priority"
-            count={tabCounts.cold}
-            tooltip="Cold leads — limited 1031 indicators. Worth a glance, not a call."
-          />
-          <TabButton
-            active={tab === "disqualified"}
-            onClick={() => { setTab("disqualified"); setTierFilter("all"); }}
-            label="Filtered out"
-            count={tabCounts.disqualified}
-            tooltip="Owner-occupied homes, sales too small, or other non-investment profiles."
+            tooltip="Urgent, hot, warm, and unscored leads — your active pipeline. Cold and filtered-out leads are hidden."
           />
         </div>
 
@@ -391,7 +375,6 @@ export const OutreachDashboard = () => {
                 { v: "URGENT", l: "Urgent" },
                 { v: "HOT", l: "Hot" },
                 { v: "WARM", l: "Warm" },
-                { v: "COLD", l: "Cold" },
                 { v: "UNSCORED", l: "Unscored" },
               ]} />
               <FilterSelect value={stateFilter} onChange={setStateFilter} label="State" options={[
@@ -649,10 +632,8 @@ const EmptyState = ({
     );
   }
   const tabCopy: Record<TabKey, string> = {
-    candidates: "No active 1031 candidates yet. Click 'Find new leads' or check the All / Cold tabs.",
+    candidates: "No active 1031 candidates yet. Click 'Find new leads' or check the All active leads tab.",
     active: "No leads match your current filters. Try clearing them or switching tabs.",
-    cold: "No cold leads right now — that's a good thing.",
-    disqualified: "Nothing has been filtered out yet.",
   };
   return (
     <div className="p-16 text-center">

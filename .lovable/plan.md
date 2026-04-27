@@ -1,64 +1,59 @@
-## What's actually going wrong
+## Two changes
 
-You're right — the Scout is getting weaker each run, and the data isn't framed around 1031 candidates. Three concrete causes:
+### 1) Dashboard: only show worth-pursuing leads
 
-### 1. ATTOM is returning **0 sales every single run**
-Every ATTOM call is returning HTTP 400: `"Address1 and Address2 are required"`. We're calling `/sale/snapshot` with only `address2` (the city). ATTOM's snapshot endpoint requires either a full address pair OR a geo ID (`geoIdV4`) — it's not designed to pull "all sales in a city". So **ATTOM has contributed 0 leads since it was wired in.** That's the entire reason it feels like it's getting worse: we added a "primary source" that returns nothing, and Firecrawl results vary run-to-run.
+Right now COLD and DISQUALIFIED still appear via the "Low priority" / "Filtered out" tabs and the "All worth pursuing" tab. You only want URGENT / HOT / WARM (and unscored, which haven't been judged yet).
 
-The right ATTOM endpoint for "give me recent high-value sales in Clark County, NV" is `/sale/snapshot` with `geoIdV4` (county/CBSA geo IDs from ATTOM's `/area/lookup`), or `/property/snapshot` with a geoId + filters. Address-based snapshot only works one property at a time.
+**OutreachDashboard.tsx changes:**
+- Remove the `cold` and `disqualified` tabs entirely.
+- Tabs become just two: **1031 Candidates** (default, entity-owned recent sales) and **All active leads** (URGENT / HOT / WARM / UNSCORED).
+- The base `useQuery` for leads adds `.not("tier", "in", "(COLD,DISQUALIFIED)")` so cold/disqualified rows never reach the page (and don't inflate the KPI counts).
+- Update KPI strip: "Total leads" becomes "Active leads" — counted from the filtered set.
+- Remove the "Cold" / "Disqualified" options from the Priority filter dropdown.
+- Tax-exposure KPI now sums only active leads (which is what it should already do once cold are excluded).
 
-### 2. Each re-run finds **fewer leads** because Firecrawl returns mostly the same URLs
-Firecrawl `search` with `tbs: qdr:m` (last month) hits the same LoopNet/Crexi pages repeatedly. The dedupe logic then correctly says "already have this lead" and the `leads_found` counter (which only counts **new inserts**) drops. The data is actually fine — the **counter is misleading.** It should also report "updated" and "total active leads in DB" so the user sees the pipeline growing, not shrinking.
+Cold/disqualified leads stay in the database (so the qualifier doesn't re-create them and the scout still dedupes against them) — they're just hidden from the operator view.
 
-### 3. The dashboard doesn't speak "1031 candidate"
-Right now you see status/tier columns. There's no view that says "here are the X owners who just sold appreciated CRE/multifamily and have a 180-day clock ticking" — which is literally the only thing that matters.
+### 2) Expand states + replace scout-runs chart with a progress bar
 
-Current data: **9 URGENT, 2 WARM, 5 COLD, 12 DISQUALIFIED.** Those 9 URGENT (Stephanie Development, GPS LV Business Park, Green Unicorns LLC, etc. — all entity-owned NV CRE sales between $2M–$11M) ARE good 1031 candidates. They're just buried.
+**Expand coverage.** Enable additional metro counties where ATTOM has good CRE coverage. Database migration adds these counties (enabled = true) with parser keys + Firecrawl query templates, and seeds the existing disabled rows or creates new ones:
 
----
+- **AZ** — Maricopa (Phoenix), Pima (Tucson)
+- **CA** — Los Angeles, Orange, San Diego, Riverside
+- **TX** — Harris (Houston), Dallas, Travis (Austin), Bexar (San Antonio)
+- **FL** — Miami-Dade, Broward, Orange (Orlando), Hillsborough (Tampa)
+- **CO** — Denver, Arapahoe
+- **UT** — Salt Lake
+- **WA** — King (Seattle)
+- Keep all 7 NV counties enabled.
 
-## The fix (3 parts, in priority order)
+**`scout-run/index.ts` changes:**
+- Add `COUNTY_SOURCES` entries for each new parser key (same shape as the NV ones — entity-owned CRE / multifamily / industrial / land queries with the residential-site exclusions).
+- Replace the hard-coded NV-only address guard (`looksNonNv`) with a generic check: drop a lead only when `lead.state` is set and doesn't match `county.state`. The existing investor-filter (drop owner-occupied SFR < $750k, drop tiny sales) stays — it's state-agnostic.
+- ATTOM `/area/lookup` already takes a state — pass `county.state` instead of the hard-coded `'NV'`.
 
-### Part 1 — Make ATTOM actually work (biggest impact)
-Replace the broken city-loop with the proper geoId-based call:
+**Replace the scout-runs table on `/admin` with a live progress bar.**
 
-1. On first run per county, look up the ATTOM `geoIdV4` for that NV county via `/area/lookup` (county-level: `geoType=CO`) and cache it on the `counties` row (new column `attom_geo_id`).
-2. Call `/sale/snapshot?geoIdV4={countyGeoId}&minsaleamt=500000&startsalesearchdate=...&endsalesearchdate=...&pagesize=100` — one call per county instead of one per city.
-3. Page through results (ATTOM caps at 100/page).
-4. Filter the response to property classes that matter for 1031: commercial, multifamily ≥4u, industrial, retail, office, hospitality, land. Drop SFR/condo unless price > $1M and owner is an entity.
+The "Recent scout runs" table is removed. In its place, a single live status panel that:
+- Polls `scout_runs` for the most recent row every 3s while it's `status = 'running'` (or subscribes via the existing realtime channel).
+- Shows a `Progress` bar = `counties_scanned / total_enabled_counties`.
+- Shows live counters: `X new · Y refreshed · Z counties scanned`.
+- Shows "Last successful run: 12 min ago · 47 new · 23 refreshed" when idle.
+- If the latest run has `status = 'failed'` with no progress, shows an inline error with a retry button — no table of historical failures cluttering the page.
 
-This single change should take ATTOM from 0 → dozens of structured NV CRE sales per run.
-
-### Part 2 — Make Scout results feel cumulative, not shrinking
-- Track and report **`leads_updated`** alongside `leads_found` in `scout_runs` (new column) so a re-run shows "5 new, 18 refreshed" instead of "5 new" looking like a regression.
-- In the dashboard "Find new leads" toast/result, show: `"Found 5 new + refreshed 18. You now have 28 active 1031 candidates."`
-- Bump Firecrawl `tbs` from `qdr:m` to `qdr:w` on subsequent runs (only pull last week) so we're not re-fetching the same monthly cache. Keep `qdr:m` only for the very first run per county.
-
-### Part 3 — Reframe the dashboard around 1031 candidates
-Restructure the existing tabs (we already have Cold / Disqualified tabs from earlier work) so the primary view is:
-
-- **"1031 Candidates"** (default tab) — `tier IN (URGENT, WARM)` AND `trigger_event IN (sale_recorded, pending_sale)` AND owner is entity (LLC/Corp/Trust). Sorted by `sale_date DESC` so the freshest 180-day clocks float to the top.
-- Each row gets a pill: **"X days into 180-day window"** computed from `sale_date`, color-coded:
-  - 🟢 0–45 days = "Fresh — call this week"
-  - 🟡 46–135 days = "Active window"
-  - 🔴 136–180 days = "Closing fast"
-  - ⚫ >180 = "Window closed"
-- Secondary tabs: **All Leads**, **Cold**, **Disqualified** (existing).
-- A header stat strip: `"X active 1031 candidates · $Y total sale volume · $Z estimated tax exposure"`.
-
-This makes the value of every Scout run obvious: not "how many rows did you scrape" but "how many qualified 1031 conversations are on the table right now."
-
----
+This gives clear feedback while a run is in flight and replaces the noisy failed-runs history that wasn't useful.
 
 ## Files I'll change
-- `supabase/functions/scout-run/index.ts` — replace `attomSalesSnapshot` with geoId-based version, add geoId lookup/cache, track `leads_updated`, tighten Firecrawl time window logic.
-- Migration — add `counties.attom_geo_id text`, add `scout_runs.leads_updated int default 0`.
-- `src/components/OutreachDashboard.tsx` — add "1031 Candidates" as default tab, add 180-day countdown pill, add header stat strip, update toast copy from scout result.
-- `src/lib/format.ts` — add `daysSinceSale` + `windowStatus` helpers.
 
-## What I'm NOT changing (to keep scope tight)
-- Profiler / qualifier logic — those are working.
-- ATTOM enrichment in profiler-run — that path uses address lookup which is correct for a single known property.
-- Auth, RLS, schema beyond the two columns above.
+- **Migration** — insert/enable new counties (AZ, CA, TX, FL, CO, UT, WA) with appropriate parser keys.
+- **`supabase/functions/scout-run/index.ts`** — add `COUNTY_SOURCES` entries for each new parser key, generalize the state guard, pass `county.state` to ATTOM lookup.
+- **`src/components/OutreachDashboard.tsx`** — drop cold/disqualified tabs, exclude them from the query, simplify tier filter, relabel KPI.
+- **`src/pages/Admin.tsx`** — remove the "Recent scout runs" table, add a `ScoutRunStatus` panel with progress bar driven by the latest `scout_runs` row.
+
+## Out of scope (intentionally)
+
+- Profiler / qualifier logic.
+- Adding *every* US county — sticking to top metro counties per state to keep ATTOM/Firecrawl call volume reasonable.
+- Editing the historical scout_runs schema (we just stop displaying the history).
 
 Approve and I'll ship it.

@@ -130,13 +130,25 @@ const Admin = () => {
     },
   });
 
-  const { data: runs } = useQuery({
-    queryKey: ["runs"],
+  // Latest scout run, polled live so the user sees a progress bar while a scan is in flight.
+  const { data: latestRun } = useQuery({
+    queryKey: ["latest-scout-run"],
     queryFn: async () => {
-      const { data } = await supabase.from("scout_runs").select("*").order("started_at", { ascending: false }).limit(20);
-      return data ?? [];
+      const { data } = await supabase
+        .from("scout_runs")
+        .select("*")
+        .order("started_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      return data;
+    },
+    refetchInterval: (q) => {
+      const r = (q.state.data as any) ?? null;
+      return r?.status === "running" ? 3000 : false;
     },
   });
+
+  const enabledCount = (counties ?? []).filter((c: any) => c.enabled).length;
 
   const toggle = async (id: string, enabled: boolean) => {
     const { error } = await supabase.from("counties").update({ enabled }).eq("id", id);
@@ -194,7 +206,7 @@ const Admin = () => {
                     <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{c.parser_key}</td>
                     <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{fmtRelative(c.last_run_at)}</td>
                     <td className="px-4 py-3 text-right">
-                      <Switch checked={c.enabled} onCheckedChange={(v) => toggle(c.id, v)} disabled={!c.parser_key?.startsWith("nv_")} />
+                      <Switch checked={c.enabled} onCheckedChange={(v) => toggle(c.id, v)} />
                     </td>
                   </tr>
                 ))}
@@ -202,45 +214,80 @@ const Admin = () => {
             </table>
           </div>
           <p className="mt-3 text-xs text-muted-foreground italic">
-            Only Nevada counties have parsers wired up. Others are placeholders for future expansion.
+            Toggle counties on/off to control which markets the scout scans on each run.
           </p>
         </section>
 
         <section>
-          <h2 className="kpi-label mb-3">Recent scout runs</h2>
-          <div className="border border-border bg-card">
-            <table className="w-full">
-              <thead className="border-b border-border bg-secondary/50">
-                <tr className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
-                  <th className="text-left px-4 py-2">Started</th>
-                  <th className="text-left px-4 py-2">Trigger</th>
-                  <th className="text-left px-4 py-2">Status</th>
-                  <th className="text-right px-4 py-2">Counties</th>
-                  <th className="text-right px-4 py-2">Found</th>
-                  <th className="text-right px-4 py-2">Qualified</th>
-                  <th className="text-right px-4 py-2">Profiled</th>
-                </tr>
-              </thead>
-              <tbody>
-                {!runs?.length ? (
-                  <tr><td colSpan={7} className="px-4 py-8 text-center text-xs text-muted-foreground italic">No runs yet</td></tr>
-                ) : runs.map((r) => (
-                  <tr key={r.id} className="border-b border-border">
-                    <td className="px-4 py-2 font-mono text-xs">{fmtRelative(r.started_at)}</td>
-                    <td className="px-4 py-2 font-mono text-xs uppercase">{r.trigger_kind}</td>
-                    <td className="px-4 py-2 font-mono text-xs uppercase">{r.status}</td>
-                    <td className="px-4 py-2 font-mono text-sm text-right tabular">{r.counties_scanned}</td>
-                    <td className="px-4 py-2 font-mono text-sm text-right tabular">{r.leads_found}</td>
-                    <td className="px-4 py-2 font-mono text-sm text-right tabular">{r.leads_qualified}</td>
-                    <td className="px-4 py-2 font-mono text-sm text-right tabular">{r.leads_profiled}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <h2 className="kpi-label mb-3">Scout status</h2>
+          <ScoutRunStatus run={latestRun} totalCounties={enabledCount} />
         </section>
       </div>
     </AppShell>
   );
 };
+
+const ScoutRunStatus = ({ run, totalCounties }: { run: any; totalCounties: number }) => {
+  if (!run) {
+    return (
+      <div className="border border-border bg-card p-6 text-sm text-muted-foreground italic">
+        No scans have run yet. Click <span className="font-semibold text-foreground not-italic">Find new leads</span> to start one.
+      </div>
+    );
+  }
+  const isRunning = run.status === "running";
+  const isFailed = run.status === "failed";
+  const scanned = run.counties_scanned ?? 0;
+  const denom = Math.max(totalCounties, scanned, 1);
+  const pct = isRunning ? Math.min(95, Math.round((scanned / denom) * 100)) : 100;
+  const found = run.leads_found ?? 0;
+  const updated = run.leads_updated ?? 0;
+  const elapsed = fmtRelative(run.started_at);
+  const finishedLabel = run.finished_at ? fmtRelative(run.finished_at) : null;
+
+  return (
+    <div className="border border-border bg-card p-6 space-y-4">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-2">
+          {isRunning ? (
+            <Loader2 className="h-4 w-4 animate-spin text-accent" />
+          ) : isFailed ? (
+            <span className="h-2 w-2 rounded-full bg-destructive" />
+          ) : (
+            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+          )}
+          <span className="font-mono text-[11px] uppercase tracking-widest">
+            {isRunning ? "Scanning…" : isFailed ? "Last scan failed" : "Last scan complete"}
+          </span>
+        </div>
+        <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+          {isRunning ? `started ${elapsed}` : finishedLabel ? `finished ${finishedLabel}` : `started ${elapsed}`}
+        </span>
+      </div>
+
+      <Progress value={pct} className="h-1.5" />
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-1">
+        <Stat label="Counties scanned" value={`${scanned}${isRunning ? ` / ${totalCounties}` : ""}`} />
+        <Stat label="New leads" value={found.toString()} accent={found > 0} />
+        <Stat label="Refreshed leads" value={updated.toString()} />
+        <Stat label="Errors" value={(run.errors?.length ?? 0).toString()} muted={!run.errors?.length} />
+      </div>
+
+      {isFailed && (
+        <div className="text-xs text-destructive font-mono pt-2 border-t border-border">
+          Scan didn't complete. Check function logs or try again.
+        </div>
+      )}
+    </div>
+  );
+};
+
+const Stat = ({ label, value, accent, muted }: { label: string; value: string; accent?: boolean; muted?: boolean }) => (
+  <div>
+    <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mb-1">{label}</div>
+    <div className={`font-display text-2xl tabular ${accent ? "text-accent" : muted ? "text-muted-foreground" : ""}`}>{value}</div>
+  </div>
+);
+
 export default Admin;
