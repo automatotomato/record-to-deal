@@ -132,11 +132,9 @@ export const OutreachDashboard = () => {
   }, [filtered, tab]);
 
   const tabCounts = useMemo(() => {
-    const c = { candidates: 0, active: 0, cold: 0, disqualified: 0 };
+    const c = { candidates: 0, active: 0 };
     for (const l of leads ?? []) {
-      if (l.tier === "COLD") c.cold += 1;
-      else if (l.tier === "DISQUALIFIED") c.disqualified += 1;
-      else c.active += 1;
+      c.active += 1;
       if (isCandidate(l)) c.candidates += 1;
     }
     return c;
