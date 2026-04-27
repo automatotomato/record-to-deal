@@ -139,27 +139,10 @@ export const OutreachDashboard = () => {
                 <DropdownMenuItem onClick={exportCsv}>
                   <Download className="h-3 w-3 mr-2" /> Export CSV
                 </DropdownMenuItem>
-                {isAdmin && (
-                  <DropdownMenuItem onClick={findSellersBulk} disabled={profiling}>
-                    {profiling
-                      ? <><Loader2 className="h-3 w-3 mr-2 animate-spin" /> Re-pulling {profileProgress.done}/{profileProgress.total}</>
-                      : <><Sparkles className="h-3 w-3 mr-2" /> Re-pull missing seller info</>}
-                  </DropdownMenuItem>
-                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
         </div>
-
-        {profiling && profileProgress.total > 0 && (
-          <div className="mt-4">
-            <div className="flex justify-between font-mono text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-              <span>Pulling seller info · {profileProgress.ok} ok · {profileProgress.fail} failed</span>
-              <span className="tabular">{profileProgress.done} / {profileProgress.total}</span>
-            </div>
-            <Progress value={(profileProgress.done / profileProgress.total) * 100} className="h-1" />
-          </div>
-        )}
 
         {/* KPI strip */}
         <div className="mt-8 grid grid-cols-6 gap-px bg-border border border-border">
