@@ -14,16 +14,438 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      counties: {
+        Row: {
+          county: string
+          created_at: string
+          enabled: boolean
+          id: string
+          last_run_at: string | null
+          notes: string | null
+          parser_key: string
+          source_url: string | null
+          state: string
+          updated_at: string
+        }
+        Insert: {
+          county: string
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          last_run_at?: string | null
+          notes?: string | null
+          parser_key: string
+          source_url?: string | null
+          state: string
+          updated_at?: string
+        }
+        Update: {
+          county?: string
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          last_run_at?: string | null
+          notes?: string | null
+          parser_key?: string
+          source_url?: string | null
+          state?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      lead_activities: {
+        Row: {
+          actor_id: string | null
+          created_at: string
+          id: string
+          kind: string
+          lead_id: string
+          payload: Json | null
+          summary: string | null
+        }
+        Insert: {
+          actor_id?: string | null
+          created_at?: string
+          id?: string
+          kind: string
+          lead_id: string
+          payload?: Json | null
+          summary?: string | null
+        }
+        Update: {
+          actor_id?: string | null
+          created_at?: string
+          id?: string
+          kind?: string
+          lead_id?: string
+          payload?: Json | null
+          summary?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lead_activities_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      leads: {
+        Row: {
+          assessed_value: number | null
+          assigned_to: string | null
+          capital_gains_estimate: number | null
+          contact_completeness: number | null
+          contact_email: string | null
+          contact_linkedin: string | null
+          contact_phone: string | null
+          county: string
+          county_id: string | null
+          created_at: string
+          data_sources: string[] | null
+          deed_date: string | null
+          depreciation_recapture_est: number | null
+          id: string
+          is_urgent: boolean
+          last_contacted_at: string | null
+          list_date: string | null
+          list_price: number | null
+          lv_property_recommendation: string | null
+          mailing_address: string | null
+          motivation_type: string | null
+          notes: string | null
+          owner_name: string | null
+          owner_type: Database["public"]["Enums"]["owner_type"] | null
+          ownership_years: number | null
+          parcel_number: string | null
+          personality_type: string | null
+          pitch_angle: string | null
+          preferred_channel: string | null
+          profiler_summary: string | null
+          property_address: string | null
+          property_city: string | null
+          property_type: Database["public"]["Enums"]["property_type"] | null
+          property_zip: string | null
+          qualifier_notes: string | null
+          sale_date: string | null
+          sale_price: number | null
+          score: number | null
+          score_breakdown: Json | null
+          scout_confidence: number | null
+          source_record_url: string | null
+          state: string
+          status: Database["public"]["Enums"]["lead_status"]
+          tier: Database["public"]["Enums"]["lead_tier"]
+          total_tax_exposure: number | null
+          trigger_event: Database["public"]["Enums"]["trigger_event"] | null
+          updated_at: string
+          wealth_signals: Json | null
+        }
+        Insert: {
+          assessed_value?: number | null
+          assigned_to?: string | null
+          capital_gains_estimate?: number | null
+          contact_completeness?: number | null
+          contact_email?: string | null
+          contact_linkedin?: string | null
+          contact_phone?: string | null
+          county: string
+          county_id?: string | null
+          created_at?: string
+          data_sources?: string[] | null
+          deed_date?: string | null
+          depreciation_recapture_est?: number | null
+          id?: string
+          is_urgent?: boolean
+          last_contacted_at?: string | null
+          list_date?: string | null
+          list_price?: number | null
+          lv_property_recommendation?: string | null
+          mailing_address?: string | null
+          motivation_type?: string | null
+          notes?: string | null
+          owner_name?: string | null
+          owner_type?: Database["public"]["Enums"]["owner_type"] | null
+          ownership_years?: number | null
+          parcel_number?: string | null
+          personality_type?: string | null
+          pitch_angle?: string | null
+          preferred_channel?: string | null
+          profiler_summary?: string | null
+          property_address?: string | null
+          property_city?: string | null
+          property_type?: Database["public"]["Enums"]["property_type"] | null
+          property_zip?: string | null
+          qualifier_notes?: string | null
+          sale_date?: string | null
+          sale_price?: number | null
+          score?: number | null
+          score_breakdown?: Json | null
+          scout_confidence?: number | null
+          source_record_url?: string | null
+          state: string
+          status?: Database["public"]["Enums"]["lead_status"]
+          tier?: Database["public"]["Enums"]["lead_tier"]
+          total_tax_exposure?: number | null
+          trigger_event?: Database["public"]["Enums"]["trigger_event"] | null
+          updated_at?: string
+          wealth_signals?: Json | null
+        }
+        Update: {
+          assessed_value?: number | null
+          assigned_to?: string | null
+          capital_gains_estimate?: number | null
+          contact_completeness?: number | null
+          contact_email?: string | null
+          contact_linkedin?: string | null
+          contact_phone?: string | null
+          county?: string
+          county_id?: string | null
+          created_at?: string
+          data_sources?: string[] | null
+          deed_date?: string | null
+          depreciation_recapture_est?: number | null
+          id?: string
+          is_urgent?: boolean
+          last_contacted_at?: string | null
+          list_date?: string | null
+          list_price?: number | null
+          lv_property_recommendation?: string | null
+          mailing_address?: string | null
+          motivation_type?: string | null
+          notes?: string | null
+          owner_name?: string | null
+          owner_type?: Database["public"]["Enums"]["owner_type"] | null
+          ownership_years?: number | null
+          parcel_number?: string | null
+          personality_type?: string | null
+          pitch_angle?: string | null
+          preferred_channel?: string | null
+          profiler_summary?: string | null
+          property_address?: string | null
+          property_city?: string | null
+          property_type?: Database["public"]["Enums"]["property_type"] | null
+          property_zip?: string | null
+          qualifier_notes?: string | null
+          sale_date?: string | null
+          sale_price?: number | null
+          score?: number | null
+          score_breakdown?: Json | null
+          scout_confidence?: number | null
+          source_record_url?: string | null
+          state?: string
+          status?: Database["public"]["Enums"]["lead_status"]
+          tier?: Database["public"]["Enums"]["lead_tier"]
+          total_tax_exposure?: number | null
+          trigger_event?: Database["public"]["Enums"]["trigger_event"] | null
+          updated_at?: string
+          wealth_signals?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "leads_county_id_fkey"
+            columns: ["county_id"]
+            isOneToOne: false
+            referencedRelation: "counties"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      outreach_emails: {
+        Row: {
+          body: string
+          created_at: string
+          drafted_by: string | null
+          error: string | null
+          gmail_message_id: string | null
+          id: string
+          lead_id: string
+          sent_at: string | null
+          sent_by: string | null
+          status: string
+          subject: string
+          to_email: string | null
+          updated_at: string
+        }
+        Insert: {
+          body: string
+          created_at?: string
+          drafted_by?: string | null
+          error?: string | null
+          gmail_message_id?: string | null
+          id?: string
+          lead_id: string
+          sent_at?: string | null
+          sent_by?: string | null
+          status?: string
+          subject: string
+          to_email?: string | null
+          updated_at?: string
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          drafted_by?: string | null
+          error?: string | null
+          gmail_message_id?: string | null
+          id?: string
+          lead_id?: string
+          sent_at?: string | null
+          sent_by?: string | null
+          status?: string
+          subject?: string
+          to_email?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "outreach_emails_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          display_name: string | null
+          email: string | null
+          id: string
+        }
+        Insert: {
+          created_at?: string
+          display_name?: string | null
+          email?: string | null
+          id: string
+        }
+        Update: {
+          created_at?: string
+          display_name?: string | null
+          email?: string | null
+          id?: string
+        }
+        Relationships: []
+      }
+      scout_runs: {
+        Row: {
+          counties_scanned: number | null
+          errors: Json | null
+          finished_at: string | null
+          id: string
+          leads_found: number | null
+          leads_profiled: number | null
+          leads_qualified: number | null
+          started_at: string
+          status: Database["public"]["Enums"]["scout_run_status"]
+          trigger_kind: string
+          triggered_by: string | null
+        }
+        Insert: {
+          counties_scanned?: number | null
+          errors?: Json | null
+          finished_at?: string | null
+          id?: string
+          leads_found?: number | null
+          leads_profiled?: number | null
+          leads_qualified?: number | null
+          started_at?: string
+          status?: Database["public"]["Enums"]["scout_run_status"]
+          trigger_kind?: string
+          triggered_by?: string | null
+        }
+        Update: {
+          counties_scanned?: number | null
+          errors?: Json | null
+          finished_at?: string | null
+          id?: string
+          leads_found?: number | null
+          leads_profiled?: number | null
+          leads_qualified?: number | null
+          started_at?: string
+          status?: Database["public"]["Enums"]["scout_run_status"]
+          trigger_kind?: string
+          triggered_by?: string | null
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "agent"
+      lead_status:
+        | "new"
+        | "reviewing"
+        | "contacted"
+        | "replied"
+        | "meeting"
+        | "won"
+        | "dead"
+      lead_tier:
+        | "URGENT"
+        | "HOT"
+        | "WARM"
+        | "COLD"
+        | "DISQUALIFIED"
+        | "UNSCORED"
+      owner_type:
+        | "Individual"
+        | "Joint"
+        | "LLC"
+        | "Trust"
+        | "Corporation"
+        | "Estate"
+        | "Unknown"
+      property_type:
+        | "SFR"
+        | "Multifamily"
+        | "Commercial"
+        | "Land"
+        | "Mixed"
+        | "Unknown"
+      scout_run_status: "running" | "success" | "partial" | "failed"
+      trigger_event:
+        | "sale_recorded"
+        | "pending_sale"
+        | "listing_aged"
+        | "commercial_listing"
+        | "probate"
+        | "llc_dissolution"
+        | "divorce"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +572,45 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "agent"],
+      lead_status: [
+        "new",
+        "reviewing",
+        "contacted",
+        "replied",
+        "meeting",
+        "won",
+        "dead",
+      ],
+      lead_tier: ["URGENT", "HOT", "WARM", "COLD", "DISQUALIFIED", "UNSCORED"],
+      owner_type: [
+        "Individual",
+        "Joint",
+        "LLC",
+        "Trust",
+        "Corporation",
+        "Estate",
+        "Unknown",
+      ],
+      property_type: [
+        "SFR",
+        "Multifamily",
+        "Commercial",
+        "Land",
+        "Mixed",
+        "Unknown",
+      ],
+      scout_run_status: ["running", "success", "partial", "failed"],
+      trigger_event: [
+        "sale_recorded",
+        "pending_sale",
+        "listing_aged",
+        "commercial_listing",
+        "probate",
+        "llc_dissolution",
+        "divorce",
+      ],
+    },
   },
 } as const
