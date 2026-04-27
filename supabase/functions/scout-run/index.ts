@@ -415,21 +415,29 @@ Deno.serve(async (req) => {
       }
 
       if (payloads.length) {
-        // Bulk fetch existing matches in one query
-        const addresses = payloads.map((p) => p.property_address).filter(Boolean) as string[];
+        // Bulk fetch ALL existing leads in this county and dedupe in-memory
+        // by normalized address OR parcel number (more robust than SQL .in()).
+        const norm = (s: string | null | undefined) =>
+          (s ?? "").toString().trim().toUpperCase().replace(/\s+/g, " ").replace(/[.,]/g, "");
         const { data: existing } = await supabase
           .from("leads")
           .select("id, property_address, parcel_number")
-          .eq("county_id", county.id)
-          .or(
-            addresses.length
-              ? `property_address.in.(${addresses.map((a) => `"${a.replace(/"/g, '\\"')}"`).join(",")})`
-              : "id.is.null",
-          );
-        const existingByAddr = new Map((existing ?? []).map((r) => [r.property_address, r.id]));
+          .eq("county_id", county.id);
+        const byAddr = new Map<string, string>();
+        const byParcel = new Map<string, string>();
+        for (const r of existing ?? []) {
+          const a = norm(r.property_address);
+          const p = norm(r.parcel_number);
+          if (a) byAddr.set(a, r.id);
+          if (p) byParcel.set(p, r.id);
+        }
+        const matchId = (p: typeof payloads[number]) =>
+          byParcel.get(norm(p.parcel_number)) ?? byAddr.get(norm(p.property_address));
 
-        const toInsert = payloads.filter((p) => !existingByAddr.has(p.property_address));
-        const toUpdate = payloads.filter((p) => existingByAddr.has(p.property_address));
+        const toInsert = payloads.filter((p) => !matchId(p));
+        const toUpdate = payloads
+          .map((p) => ({ p, id: matchId(p) }))
+          .filter((x): x is { p: typeof payloads[number]; id: string } => !!x.id);
 
         if (toInsert.length) {
           const { data: inserted, error: insErr } = await supabase
