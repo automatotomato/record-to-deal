@@ -3,14 +3,19 @@ import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fmtMoney, fmtDate, fmtRelative, tierColor, daysSince } from "@/lib/format";
-import { Loader2, Sparkles, AlertCircle, ExternalLink, Mail, Phone, Linkedin } from "lucide-react";
+import { Loader2, Sparkles, AlertCircle, ExternalLink, Mail, Phone, Linkedin, Send, RefreshCw, Building2 } from "lucide-react";
 import { toast } from "sonner";
+import { TouchpointTimeline } from "./TouchpointTimeline";
+import { NextActionEditor } from "./NextActionEditor";
 
 export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () => void }) => {
   const qc = useQueryClient();
   const [drafting, setDrafting] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [recipientOverride, setRecipientOverride] = useState("");
 
   const { data: lead, isLoading } = useQuery({
     queryKey: ["lead", leadId],
@@ -54,6 +59,32 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
       toast.error(`Draft failed: ${e.message}`, { id: "draft" });
     } finally {
       setDrafting(false);
+    }
+  };
+
+  const sendEmail = async (emailRow: any, lead: any) => {
+    const to = recipientOverride.trim() || emailRow.to_email || lead.decision_maker_email || lead.contact_email;
+    if (!to) { toast.error("Add a recipient email first"); return; }
+    setSending(true);
+    toast.loading("Sending from your Gmail…", { id: "send" });
+    try {
+      const { data, error } = await supabase.functions.invoke("send-outreach-email", {
+        body: { email_id: emailRow.id, to_email: to },
+      });
+      if (error) throw error;
+      if ((data as any)?.error === "gmail_not_connected") {
+        toast.error("Connect your Gmail account first (Connectors → Google Mail)", { id: "send", duration: 8000 });
+      } else {
+        toast.success("Sent ✓", { id: "send" });
+      }
+      qc.invalidateQueries({ queryKey: ["emails", leadId] });
+      qc.invalidateQueries({ queryKey: ["touchpoints", leadId] });
+      qc.invalidateQueries({ queryKey: ["lead", leadId] });
+      qc.invalidateQueries({ queryKey: ["leads"] });
+    } catch (e: any) {
+      toast.error(`Send failed: ${e.message}`, { id: "send" });
+    } finally {
+      setSending(false);
     }
   };
 

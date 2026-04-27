@@ -459,6 +459,15 @@ Deno.serve(async (req) => {
   const { capitalGains: capitalGainsEstimate, recapture: depreciationRecapture } =
     estimateTaxExposure(a, l.state ?? null, salePrice, ownershipYears);
 
+  // 1.5 Decision-maker enrichment chain — only runs when keys are present
+  const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY");
+  const hunterKey = Deno.env.get("HUNTER_API_KEY");
+  const enrichment = await enrichDecisionMaker({
+    ownerName, ownerType, propertyAddress: l.property_address ?? null,
+    city: l.property_city ?? null, state: l.state ?? null,
+    firecrawlKey, hunterKey, lovableKey,
+  });
+
   // 2. AI: build personality profile + draft email using Smarty data as source of truth
   const propertyContext = `
 Property: ${l.property_address ?? "?"} · ${l.property_city ?? ""}, ${l.state ?? ""} ${l.property_zip ?? ""}
@@ -478,6 +487,11 @@ ${(Array.isArray(a.financial_history) ? a.financial_history : []).slice(0, 5).ma
   const r = m as Record<string, unknown>;
   return `  ${i + 1}. $${n(r.mortgage_amount)?.toLocaleString() ?? "?"} ${s(r.mortgage_type) ?? ""} from ${s(r.lender_name) ?? "?"} on ${s(r.mortgage_recording_date) ?? "?"}`;
 }).join("\n") || "  (none)"}
+
+Decision maker (best guess): ${enrichment.decisionMakerName ?? "unknown"}${enrichment.decisionMakerRole ? ` (${enrichment.decisionMakerRole})` : ""}
+Likely email: ${enrichment.decisionMakerEmail ?? "unknown"}
+LinkedIn: ${enrichment.decisionMakerLinkedIn ?? "unknown"}
+News / web mentions: ${enrichment.newsSnippets.slice(0, 3).join(" | ") || "none"}
 `.trim();
 
   const aiResp = await fetch(AI_URL, {
@@ -531,11 +545,13 @@ Return JSON with this exact shape:
   let profile: Record<string, string> = {};
   try { profile = JSON.parse(content); } catch (_) { /* ignore */ }
 
-  // Contact completeness: Smarty gives us mailing address reliably (50pts).
-  // Email/phone/linkedin would come from a future skip-tracing step.
+  // Contact completeness: mailing address (50pts), owner name (20pts),
+  // decision-maker email (20pts), phone or LinkedIn (10pts)
   let completeness = 0;
   if (mailingAddress) completeness += 50;
   if (ownerName) completeness += 20;
+  if (enrichment.decisionMakerEmail) completeness += 20;
+  if (enrichment.decisionMakerPhone || enrichment.decisionMakerLinkedIn) completeness += 10;
 
   const updates: Record<string, unknown> = {
     smarty_key: smartyKey,
@@ -551,8 +567,19 @@ Return JSON with this exact shape:
     depreciation_recapture_est: depreciationRecapture,
     total_tax_exposure:
       ((capitalGainsEstimate ?? 0) + (depreciationRecapture ?? 0)) || null,
-    wealth_signals: wealthSignals,
+    wealth_signals: [...wealthSignals, ...enrichment.newsSnippets.map((sig) => ({ signal: sig, source: "firecrawl" }))],
     contact_completeness: completeness,
+    contact_email: enrichment.decisionMakerEmail ?? null,
+    contact_phone: enrichment.decisionMakerPhone ?? null,
+    contact_linkedin: enrichment.decisionMakerLinkedIn ?? null,
+    decision_maker_name: enrichment.decisionMakerName ?? null,
+    decision_maker_role: enrichment.decisionMakerRole ?? null,
+    decision_maker_email: enrichment.decisionMakerEmail ?? null,
+    decision_maker_phone: enrichment.decisionMakerPhone ?? null,
+    decision_maker_linkedin: enrichment.decisionMakerLinkedIn ?? null,
+    entity_registry_url: enrichment.entityRegistryUrl ?? null,
+    enrichment_confidence: enrichment.confidence,
+    enrichment_payload: enrichment.payload,
     personality_type: profile.personality_type ?? null,
     motivation_type: profile.motivation_type ?? null,
     preferred_channel: profile.preferred_channel ?? null,
@@ -562,6 +589,7 @@ Return JSON with this exact shape:
     data_sources: Array.from(new Set([
       ...(l as unknown as { data_sources?: string[] }).data_sources ?? [],
       enrichSource === "attom" ? "attomdata.com" : "smarty.com",
+      ...enrichment.sources,
     ])),
   };
 
@@ -588,7 +616,7 @@ Return JSON with this exact shape:
         lead_id: leadId,
         subject: profile.email_subject,
         body: profile.email_body,
-        to_email: null, // Smarty doesn't supply email; needs skip-trace
+        to_email: enrichment.decisionMakerEmail ?? null,
         status: "draft",
       })
       .select("id")
@@ -628,3 +656,279 @@ Return JSON with this exact shape:
     { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
   );
 });
+
+// =====================================================================
+// Decision-maker enrichment chain
+// =====================================================================
+// Tries, in order:
+//   1. Firecrawl search the state Secretary of State business registry for
+//      the LLC/Corp name → extract registered agent + officers (free).
+//   2. Hunter.io domain search if we can guess a company website.
+//   3. Firecrawl search "<name> linkedin" + "<name> news" for LinkedIn URL
+//      and recent press mentions (wealth/timing signals).
+//   4. Lovable AI to extract the highest-confidence email/phone/LinkedIn
+//      from the scraped HTML when regex misses them.
+// All layers are optional and degrade gracefully when keys are missing.
+
+interface EnrichmentResult {
+  decisionMakerName: string | null;
+  decisionMakerRole: string | null;
+  decisionMakerEmail: string | null;
+  decisionMakerPhone: string | null;
+  decisionMakerLinkedIn: string | null;
+  entityRegistryUrl: string | null;
+  newsSnippets: string[];
+  confidence: number;
+  sources: string[];
+  payload: Record<string, unknown>;
+}
+
+const EMPTY_ENRICHMENT: EnrichmentResult = {
+  decisionMakerName: null,
+  decisionMakerRole: null,
+  decisionMakerEmail: null,
+  decisionMakerPhone: null,
+  decisionMakerLinkedIn: null,
+  entityRegistryUrl: null,
+  newsSnippets: [],
+  confidence: 0,
+  sources: [],
+  payload: {},
+};
+
+const FIRECRAWL_V2 = "https://api.firecrawl.dev/v2";
+
+// Extract a likely company website / domain from owner name + scraped pages.
+function pickDomain(html: string, ownerName: string | null): string | null {
+  // 1) explicit "Website: …" lines
+  const m1 = html.match(/website[:\s]*<[^>]*?href="(https?:\/\/[^"]+)"/i);
+  if (m1) {
+    try { return new URL(m1[1]).hostname.replace(/^www\./, ""); } catch (_) {}
+  }
+  // 2) any non-social link
+  const links = Array.from(html.matchAll(/href="(https?:\/\/[^"]+)"/g)).map((m) => m[1]);
+  const slug = (ownerName ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  for (const url of links) {
+    try {
+      const h = new URL(url).hostname.replace(/^www\./, "");
+      if (/(linkedin|facebook|twitter|instagram|google|maps|youtube|wikipedia|opencorporates|secretary)/i.test(h)) continue;
+      if (slug && h.replace(/[^a-z0-9]/g, "").includes(slug.slice(0, 6))) return h;
+    } catch (_) {}
+  }
+  return null;
+}
+
+function firstMatch(re: RegExp, s: string): string | null {
+  const m = s.match(re);
+  return m ? m[0] : null;
+}
+
+async function fcSearch(query: string, key: string, limit = 5, scrape = true) {
+  try {
+    const resp = await fetch(`${FIRECRAWL_V2}/search`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query, limit,
+        scrapeOptions: scrape ? { formats: ["markdown"] } : undefined,
+      }),
+    });
+    if (!resp.ok) {
+      console.warn(`Firecrawl search ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+      return [];
+    }
+    const data = await resp.json();
+    const arr = data?.data ?? data?.web ?? [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) {
+    console.warn("Firecrawl search threw:", e);
+    return [];
+  }
+}
+
+async function hunterDomainSearch(domain: string, key: string) {
+  try {
+    const r = await fetch(
+      `https://api.hunter.io/v2/domain-search?domain=${encodeURIComponent(domain)}&api_key=${key}&limit=5`,
+    );
+    if (!r.ok) {
+      console.warn(`Hunter ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      return null;
+    }
+    return await r.json();
+  } catch (e) {
+    console.warn("Hunter threw:", e);
+    return null;
+  }
+}
+
+async function aiExtractContact(blob: string, lovableKey: string): Promise<{
+  email: string | null; phone: string | null; linkedin: string | null;
+  name: string | null; role: string | null;
+} | null> {
+  try {
+    const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${lovableKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash",
+        messages: [
+          { role: "system", content: "Extract contact info from the text. Return ONLY JSON. Use null when unsure — do not invent." },
+          { role: "user", content: `Find the most likely PRIMARY decision-maker behind this property owner. Return JSON:
+{"name": string|null, "role": string|null, "email": string|null, "phone": string|null, "linkedin": string|null}
+
+Source text:
+${blob.slice(0, 8000)}` },
+        ],
+        response_format: { type: "json_object" },
+      }),
+    });
+    if (!r.ok) { await r.text(); return null; }
+    const data = await r.json();
+    return JSON.parse(data?.choices?.[0]?.message?.content ?? "{}");
+  } catch (e) {
+    console.warn("AI extract threw:", e);
+    return null;
+  }
+}
+
+async function enrichDecisionMaker(args: {
+  ownerName: string | null;
+  ownerType: string;
+  propertyAddress: string | null;
+  city: string | null;
+  state: string | null;
+  firecrawlKey: string | undefined;
+  hunterKey: string | undefined;
+  lovableKey: string;
+}): Promise<EnrichmentResult> {
+  const { ownerName, ownerType, city, state, firecrawlKey, hunterKey, lovableKey } = args;
+  if (!ownerName) return EMPTY_ENRICHMENT;
+
+  const result: EnrichmentResult = { ...EMPTY_ENRICHMENT, payload: {} };
+  const isEntity = ownerType !== "Individual";
+
+  // 1) State SoS / OpenCorporates search via Firecrawl (entity unmask)
+  if (firecrawlKey && isEntity && state) {
+    const stateName = STATE_NAMES[state] ?? state;
+    const sosResults = await fcSearch(
+      `"${ownerName}" site:opencorporates.com OR ${stateName} secretary of state business search`,
+      firecrawlKey, 3, true,
+    );
+    const html = sosResults.map((r: any) => `${r.url}\n${r.markdown ?? ""}`).join("\n---\n");
+    if (html) {
+      result.payload.sos_html = html.slice(0, 2000);
+      result.sources.push("firecrawl:sos");
+      const ocUrl = sosResults.find((r: any) => /opencorporates\.com/.test(r.url ?? ""))?.url;
+      if (ocUrl) result.entityRegistryUrl = ocUrl;
+      // Try to lift a managing-member / officer name out of the page
+      const officerMatch = html.match(/(?:Manager|Managing Member|President|CEO|Officer|Registered Agent)[\s:]+([A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/);
+      if (officerMatch) {
+        result.decisionMakerName = officerMatch[1];
+        result.decisionMakerRole = officerMatch[0].split(/[\s:]+/)[0];
+        result.confidence += 25;
+      }
+    }
+  } else if (!isEntity) {
+    // For individual owners, the owner IS the decision maker
+    result.decisionMakerName = ownerName;
+    result.decisionMakerRole = "Owner";
+    result.confidence += 20;
+  }
+
+  const targetName = result.decisionMakerName ?? ownerName;
+
+  // 2) Firecrawl LinkedIn + news search
+  if (firecrawlKey && targetName) {
+    const liResults = await fcSearch(
+      `"${targetName}" ${city ?? ""} ${state ?? ""} site:linkedin.com/in`,
+      firecrawlKey, 3, false,
+    );
+    const liUrl = liResults.find((r: any) => /linkedin\.com\/in\//.test(r.url ?? ""))?.url;
+    if (liUrl) {
+      result.decisionMakerLinkedIn = liUrl;
+      result.confidence += 15;
+      result.sources.push("firecrawl:linkedin");
+    }
+    const newsResults = await fcSearch(
+      `"${targetName}" ${city ?? ""} (real estate OR investor OR sold OR acquired)`,
+      firecrawlKey, 4, false,
+    );
+    result.newsSnippets = newsResults.slice(0, 4)
+      .map((r: any) => r.title ? `${r.title}` : null)
+      .filter(Boolean) as string[];
+    if (result.newsSnippets.length) result.sources.push("firecrawl:news");
+  }
+
+  // 3) Hunter.io domain search if we can guess a company website
+  if (hunterKey && firecrawlKey && isEntity) {
+    // Try to find a company website by scraping the SoS page text
+    const probe = await fcSearch(`"${ownerName}" website`, firecrawlKey, 2, true);
+    const blob = probe.map((r: any) => `${r.url}\n${r.markdown ?? ""}`).join("\n");
+    const domain = pickDomain(blob, ownerName);
+    if (domain) {
+      const hunter = await hunterDomainSearch(domain, hunterKey);
+      const emails = hunter?.data?.emails as Array<any> | undefined;
+      if (emails?.length) {
+        // Prefer decision-maker-ish titles
+        const ranked = [...emails].sort((a, b) => {
+          const score = (e: any) => /owner|principal|manager|president|ceo|founder|partner/i.test(`${e.position ?? ""} ${e.seniority ?? ""}`) ? 1 : 0;
+          return score(b) - score(a);
+        });
+        const pick = ranked[0];
+        result.decisionMakerEmail = pick.value ?? null;
+        if (!result.decisionMakerName && (pick.first_name || pick.last_name)) {
+          result.decisionMakerName = `${pick.first_name ?? ""} ${pick.last_name ?? ""}`.trim();
+        }
+        if (!result.decisionMakerRole && pick.position) result.decisionMakerRole = pick.position;
+        result.payload.hunter_company = hunter?.data?.organization;
+        result.payload.hunter_domain = domain;
+        result.confidence += pick.confidence ? Math.min(30, Math.round(pick.confidence / 3)) : 15;
+        result.sources.push("hunter.io");
+      }
+    }
+  }
+
+  // 4) AI fallback on whatever we scraped if email is still missing
+  if (!result.decisionMakerEmail && firecrawlKey && targetName) {
+    const probe = await fcSearch(
+      `"${targetName}" ${city ?? ""} ${state ?? ""} contact email`,
+      firecrawlKey, 3, true,
+    );
+    const blob = probe.map((r: any) => `${r.url}\n${r.markdown ?? ""}`).join("\n---\n");
+    if (blob) {
+      // Regex first
+      const email = firstMatch(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/, blob);
+      const phone = firstMatch(/\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/, blob);
+      if (email) { result.decisionMakerEmail = email; result.confidence += 10; result.sources.push("firecrawl:contact-page"); }
+      if (phone) { result.decisionMakerPhone = phone; result.confidence += 5; }
+      if (!email || !phone) {
+        const ai = await aiExtractContact(blob, lovableKey);
+        if (ai) {
+          if (!result.decisionMakerEmail && ai.email) { result.decisionMakerEmail = ai.email; result.confidence += 8; result.sources.push("ai:extract"); }
+          if (!result.decisionMakerPhone && ai.phone) { result.decisionMakerPhone = ai.phone; result.confidence += 4; }
+          if (!result.decisionMakerLinkedIn && ai.linkedin) { result.decisionMakerLinkedIn = ai.linkedin; result.confidence += 5; }
+          if (!result.decisionMakerName && ai.name) result.decisionMakerName = ai.name;
+          if (!result.decisionMakerRole && ai.role) result.decisionMakerRole = ai.role;
+        }
+      }
+    }
+  }
+
+  result.confidence = Math.min(100, result.confidence);
+  return result;
+}
+
+const STATE_NAMES: Record<string, string> = {
+  AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
+  CO: "Colorado", CT: "Connecticut", DE: "Delaware", FL: "Florida", GA: "Georgia",
+  HI: "Hawaii", ID: "Idaho", IL: "Illinois", IN: "Indiana", IA: "Iowa",
+  KS: "Kansas", KY: "Kentucky", LA: "Louisiana", ME: "Maine", MD: "Maryland",
+  MA: "Massachusetts", MI: "Michigan", MN: "Minnesota", MS: "Mississippi", MO: "Missouri",
+  MT: "Montana", NE: "Nebraska", NV: "Nevada", NH: "New Hampshire", NJ: "New Jersey",
+  NM: "New Mexico", NY: "New York", NC: "North Carolina", ND: "North Dakota", OH: "Ohio",
+  OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania", RI: "Rhode Island", SC: "South Carolina",
+  SD: "South Dakota", TN: "Tennessee", TX: "Texas", UT: "Utah", VT: "Vermont",
+  VA: "Virginia", WA: "Washington", WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming",
+  DC: "District of Columbia",
+};

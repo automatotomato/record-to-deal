@@ -1,1 +1,16 @@
 project_id = "bebakfrptkmjcaqursui"
+
+[functions.scout-run]
+verify_jwt = false
+
+[functions.qualifier-run]
+verify_jwt = false
+
+[functions.profiler-run]
+verify_jwt = false
+
+[functions.poll-email-replies]
+verify_jwt = false
+
+[functions.send-outreach-email]
+verify_jwt = true
