@@ -12,7 +12,99 @@ const corsHeaders = {
 
 const SMARTY_LOOKUP = "https://us-property.api.smarty.com/lookup";
 const SMARTY_SEARCH = "https://us-property.api.smarty.com/search";
+const ATTOM_BASE = "https://api.gateway.attomdata.com/propertyapi/v1.0.0";
 const AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
+
+// --- ATTOM enrichment ---------------------------------------------------
+// Returns a SmartyAttrs-shaped object so downstream mapping/estimator code
+// works unchanged. ATTOM gives us richer NV coverage than Smarty.
+async function attomEnrich(
+  street: string,
+  city: string | null,
+  state: string | null,
+  apiKey: string,
+): Promise<{ attrs: SmartyAttrs; sources: string[] } | null> {
+  const params = new URLSearchParams({ address1: street });
+  if (city && state) params.set("address2", `${city}, ${state}`);
+  else if (state) params.set("address2", state);
+  try {
+    const r = await fetch(`${ATTOM_BASE}/property/expandedprofile?${params}`, {
+      headers: { Accept: "application/json", apikey: apiKey },
+    });
+    if (!r.ok) {
+      console.warn(`ATTOM expandedprofile ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      return null;
+    }
+    const data = await r.json();
+    const p = data?.property?.[0];
+    if (!p) return null;
+
+    const owner = p.owner ?? {};
+    const o1 = owner.owner1 ?? {};
+    const sale = p.sale ?? {};
+    const assessment = p.assessment ?? {};
+    const assessed = assessment.assessed ?? {};
+    const market = assessment.market ?? {};
+    const tax = assessment.tax ?? {};
+    const mortgage = assessment.mortgage ?? {};
+    const summary = p.summary ?? {};
+    const building = p.building ?? {};
+    const lot = p.lot ?? {};
+    const mailingAddr = owner.mailingaddressoneline ?? owner.mailingAddress?.oneLine ?? null;
+
+    const ownerName =
+      o1.fullname ||
+      [o1.firstnameandmi, o1.lastname].filter(Boolean).join(" ").trim() ||
+      null;
+    const isCompany =
+      (o1.lastname && /\b(LLC|INC|CORP|TRUST|COMPANY|LP|LLP|HOLDINGS)\b/i.test(o1.lastname)) ||
+      (ownerName && /\b(LLC|INC|CORP|TRUST|COMPANY|LP|LLP|HOLDINGS)\b/i.test(ownerName));
+
+    // Fold mailing one-liner into the mail_* fields the rest of the code reads
+    const attrs: SmartyAttrs = {
+      owner_full_name: ownerName,
+      ownership_type: isCompany ? "company" : "individual",
+      company_flag: isCompany ? "owner_is_company" : null,
+      mail_full_address: mailingAddr,
+      mail_city: owner.mailingaddresscity ?? null,
+      mail_state: owner.mailingaddressstate ?? null,
+      mail_zipcode: owner.mailingaddresszip ?? null,
+      deed_sale_price: sale?.amount?.saleamt ?? null,
+      deed_sale_date: sale?.salesearchdate ?? sale?.amount?.salerecdate ?? null,
+      assessed_value: assessed?.assdttlvalue ?? null,
+      assessed_improvement_value: assessed?.assdimprvalue ?? null,
+      market_value: market?.mktttlvalue ?? null,
+      tax_billed_amount: tax?.taxamt ?? null,
+      land_use_standard: summary?.propclass ?? summary?.propsubtype ?? null,
+      land_use_group: summary?.proptype ?? null,
+      building_sqft: building?.size?.bldgsize ?? building?.size?.universalsize ?? null,
+      year_built: summary?.yearbuilt ?? building?.summary?.yearbuiltrenov ?? null,
+      acres: lot?.lotsize1 ?? null,
+      owner_occupancy_status:
+        summary?.absenteeInd === "ABSENTEE" || summary?.absenteeInd === "ABSENTEE_OWNER"
+          ? "not_owner_occupied"
+          : null,
+      financial_history: mortgage?.amount
+        ? [{
+            mortgage_amount: mortgage.amount,
+            mortgage_type: mortgage.loantype ?? null,
+            lender_name: mortgage.lender?.lastname ?? mortgage.lender?.fullname ?? null,
+            mortgage_recording_date: mortgage.date ?? null,
+          }]
+        : [],
+    };
+    return {
+      attrs,
+      sources: [
+        "attomdata.com",
+        p.identifier?.attomId ? `attom_id:${p.identifier.attomId}` : null,
+      ].filter(Boolean) as string[],
+    };
+  } catch (e) {
+    console.warn("ATTOM enrich failed:", e);
+    return null;
+  }
+}
 
 interface Lead {
   id: string;
@@ -233,10 +325,11 @@ Deno.serve(async (req) => {
   const smartyId = Deno.env.get("SMARTY_AUTH_ID");
   const smartyToken = Deno.env.get("SMARTY_AUTH_TOKEN");
   const lovableKey = Deno.env.get("LOVABLE_API_KEY");
+  const attomKey = Deno.env.get("ATTOM_API_KEY");
 
-  if (!smartyId || !smartyToken || !lovableKey) {
+  if (!lovableKey || (!attomKey && (!smartyId || !smartyToken))) {
     return new Response(
-      JSON.stringify({ error: "SMARTY_AUTH_ID, SMARTY_AUTH_TOKEN, or LOVABLE_API_KEY not configured" }),
+      JSON.stringify({ error: "ATTOM_API_KEY or SMARTY credentials, plus LOVABLE_API_KEY, must be configured" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
@@ -287,33 +380,53 @@ Deno.serve(async (req) => {
 
   const l = lead as Lead;
 
-  // 1. Pull from Smarty: prefer cached smarty_key, fall back to address search
+  // 1. Try ATTOM first (best NV coverage), fall back to Smarty.
   let smarty: SmartyRecord | null = null;
-  if (l.smarty_key) {
-    smarty = await smartyByKey(l.smarty_key, smartyId, smartyToken);
-  }
-  if (!smarty && l.property_address) {
-    smarty = await smartyByAddress(
+  let enrichSource: "attom" | "smarty" | null = null;
+  let extraSources: string[] = [];
+
+  if (attomKey && l.property_address) {
+    const attom = await attomEnrich(
       l.property_address,
       l.property_city ?? null,
       l.state ?? null,
-      l.property_zip ?? null,
-      smartyId,
-      smartyToken,
+      attomKey,
     );
+    if (attom) {
+      smarty = { smarty_key: l.smarty_key ?? undefined, attributes: attom.attrs };
+      enrichSource = "attom";
+      extraSources = attom.sources;
+    }
+  }
+
+  if (!smarty && smartyId && smartyToken) {
+    if (l.smarty_key) {
+      smarty = await smartyByKey(l.smarty_key, smartyId, smartyToken);
+    }
+    if (!smarty && l.property_address) {
+      smarty = await smartyByAddress(
+        l.property_address,
+        l.property_city ?? null,
+        l.state ?? null,
+        l.property_zip ?? null,
+        smartyId,
+        smartyToken,
+      );
+    }
+    if (smarty) enrichSource = "smarty";
   }
 
   if (!smarty || !smarty.attributes) {
     await supabase.from("lead_activities").insert({
       lead_id: leadId,
       kind: "profiler_run",
-      summary: "Smarty returned no match for this property",
-      payload: { source: "smarty", matched: false },
+      summary: "No property match found in ATTOM or Smarty",
+      payload: { source: "none", matched: false },
     });
     return new Response(
       JSON.stringify({
         ok: false,
-        error: "Smarty returned no property match",
+        error: "No property match in ATTOM or Smarty",
         lead_id: leadId,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -446,7 +559,10 @@ Return JSON with this exact shape:
     pitch_angle: profile.pitch_angle ?? null,
     lv_property_recommendation: profile.lv_property_recommendation ?? null,
     profiler_summary: profile.profiler_summary ?? null,
-    data_sources: Array.from(new Set([...(l as unknown as { data_sources?: string[] }).data_sources ?? [], "smarty.com"])),
+    data_sources: Array.from(new Set([
+      ...(l as unknown as { data_sources?: string[] }).data_sources ?? [],
+      enrichSource === "attom" ? "attomdata.com" : "smarty.com",
+    ])),
   };
 
   const { error: updErr } = await supabase.from("leads").update(updates).eq("id", leadId);
@@ -481,18 +597,17 @@ Return JSON with this exact shape:
     emailId = emailRow?.id ?? null;
   }
 
-  // Activity log with Smarty source URLs
-  const sources = [
-    `https://smarty.com/products/apis/us-property-data-api`,
-    smartyKey ? `smarty_key:${smartyKey}` : null,
-  ].filter(Boolean) as string[];
+  // Activity log
+  const sources = enrichSource === "attom"
+    ? ["https://api.developer.attomdata.com/", ...extraSources]
+    : ["https://smarty.com/products/apis/us-property-data-api", smartyKey ? `smarty_key:${smartyKey}` : null].filter(Boolean) as string[];
 
   await supabase.from("lead_activities").insert({
     lead_id: leadId,
     kind: "profiler_run",
-    summary: `Profiled via Smarty — ${ownerName ?? "owner"}, mailing ${mailingAddress ? "✓" : "✗"}, ${wealthSignals.length} wealth signals`,
+    summary: `Profiled via ${enrichSource?.toUpperCase() ?? "?"} — ${ownerName ?? "owner"}, mailing ${mailingAddress ? "✓" : "✗"}, ${wealthSignals.length} wealth signals`,
     payload: {
-      source: "smarty",
+      source: enrichSource,
       smarty_key: smartyKey,
       sources,
       completeness,
