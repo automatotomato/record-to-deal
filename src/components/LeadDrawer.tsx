@@ -37,19 +37,6 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
     },
   });
 
-  // Pre-fill email form from latest draft
-  useEffect(() => {
-    if (!lead) return;
-    const latestDraft = emails?.find((e: any) => e.status === "draft");
-    if (latestDraft) {
-      setEmailSubject(latestDraft.subject);
-      setEmailBody(latestDraft.body);
-      setToEmail(latestDraft.to_email ?? lead.contact_email ?? "");
-    } else {
-      setToEmail(lead.contact_email ?? "");
-    }
-  }, [lead, emails]);
-
   const draftEmail = async (force = false) => {
     setDrafting(true);
     toast.loading(force ? "Re-profiling seller…" : "Profiling lead and drafting outreach…", { id: "draft" });
@@ -67,29 +54,6 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
       toast.error(`Draft failed: ${e.message}`, { id: "draft" });
     } finally {
       setDrafting(false);
-    }
-  };
-
-  const sendEmail = async () => {
-    if (!toEmail) { toast.error("No recipient email"); return; }
-    if (!emailSubject || !emailBody) { toast.error("Subject and body required"); return; }
-    setSending(true);
-    toast.loading("Sending via Gmail…", { id: "send" });
-    try {
-      const { data, error } = await supabase.functions.invoke("send-outreach-email", {
-        body: { lead_id: leadId, to: toEmail, subject: emailSubject, body: emailBody },
-      });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      toast.success("Sent!", { id: "send" });
-      qc.invalidateQueries({ queryKey: ["lead", leadId] });
-      qc.invalidateQueries({ queryKey: ["emails", leadId] });
-      qc.invalidateQueries({ queryKey: ["activities", leadId] });
-      qc.invalidateQueries({ queryKey: ["leads"] });
-    } catch (e: any) {
-      toast.error(`Send failed: ${e.message}`, { id: "send" });
-    } finally {
-      setSending(false);
     }
   };
 
