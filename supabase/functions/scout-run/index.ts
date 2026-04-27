@@ -252,6 +252,7 @@ async function firecrawlSearchAndExtract(
   hint: string,
   apiKey: string,
   lovableKey: string,
+  tbs: string = "qdr:w",
 ): Promise<{ leads: ExtractedLead[]; sourceUrls: string[] }> {
   // Step 1: Firecrawl search with markdown scrape (no LLM extraction here -
   // doing it inline blows past the edge function timeout).
@@ -264,7 +265,7 @@ async function firecrawlSearchAndExtract(
     body: JSON.stringify({
       query,
       limit: 4,
-      tbs: "qdr:m",
+      tbs,
       scrapeOptions: { onlyMainContent: true, formats: ["markdown"] },
     }),
   });
