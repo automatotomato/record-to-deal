@@ -105,7 +105,7 @@ async function firecrawlSearchAndExtract(
     },
     body: JSON.stringify({
       query,
-      limit: 6,
+      limit: 4,
       tbs: "qdr:m", // last month
       scrapeOptions: {
         onlyMainContent: true,
