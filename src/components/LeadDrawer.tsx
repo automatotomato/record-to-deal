@@ -14,6 +14,8 @@ import { NextActionEditor } from "./NextActionEditor";
 export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () => void }) => {
   const qc = useQueryClient();
   const [drafting, setDrafting] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [recipientOverride, setRecipientOverride] = useState("");
 
   const { data: lead, isLoading } = useQuery({
     queryKey: ["lead", leadId],
