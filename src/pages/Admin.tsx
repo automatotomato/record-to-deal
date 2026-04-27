@@ -118,16 +118,33 @@ const Admin = () => {
 
   return (
     <AppShell>
-      <div className="px-8 py-6 border-b border-border bg-card flex items-end justify-between gap-4">
+      <div className="px-8 py-6 border-b border-border bg-card flex items-end justify-between gap-4 flex-wrap">
         <div>
           <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-1">Configuration</div>
           <h1 className="font-display text-5xl leading-none">Sources.</h1>
         </div>
-        <Button onClick={runScout} disabled={running} size="lg" className="font-mono uppercase tracking-wider text-xs">
-          {running ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
-          {running ? "Scouting…" : "Run Scout now"}
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button onClick={profileAllUnprofiled} disabled={profiling || running} variant="outline" size="lg" className="font-mono uppercase tracking-wider text-xs">
+            {profiling ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
+            {profiling ? `Profiling ${profileProgress.done}/${profileProgress.total}` : "Profile all unprofiled"}
+          </Button>
+          <Button onClick={runScout} disabled={running || profiling} size="lg" className="font-mono uppercase tracking-wider text-xs">
+            {running ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
+            {running ? "Scouting…" : "Run Scout now"}
+          </Button>
+        </div>
       </div>
+
+      {profiling && profileProgress.total > 0 && (
+        <div className="px-8 py-4 border-b border-border bg-secondary/30">
+          <div className="flex items-center justify-between mb-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+            <span>Profiling owners · {profileProgress.ok} ok · {profileProgress.fail} failed</span>
+            <span className="tabular">{profileProgress.done} / {profileProgress.total}</span>
+          </div>
+          <Progress value={(profileProgress.done / profileProgress.total) * 100} className="h-1" />
+        </div>
+      )}
+
 
       <div className="p-8 space-y-10">
         <section>
