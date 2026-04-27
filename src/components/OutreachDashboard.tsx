@@ -4,15 +4,56 @@ import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { fmtMoney, fmtRelative, tierColor, windowStatus } from "@/lib/format";
-import { Loader2, Plus, Download, AlertCircle, Search, Mail, Phone, Linkedin, Home, Settings2, SlidersHorizontal, X, Clock } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { fmtMoney, fmtRelative, windowStatus } from "@/lib/format";
+import {
+  Loader2,
+  Plus,
+  Download,
+  AlertCircle,
+  Search,
+  Mail,
+  Phone,
+  Linkedin,
+  Home,
+  Settings2,
+  SlidersHorizontal,
+  X,
+  Clock,
+} from "lucide-react";
 import { toast } from "sonner";
 import { LeadDrawer } from "./LeadDrawer";
-
 import { useAuth } from "@/hooks/useAuth";
+import { cn } from "@/lib/utils";
 
 type Lead = any;
 type TabKey = "candidates" | "active";
@@ -37,6 +78,23 @@ const STATUS_LABEL: Record<string, string> = {
   dead: "Dead",
 };
 
+const tierBadgeClasses = (tier: string) => {
+  switch (tier) {
+    case "URGENT":
+      return "bg-urgent text-urgent-foreground hover:bg-urgent/90 border-transparent";
+    case "HOT":
+      return "bg-hot text-hot-foreground hover:bg-hot/90 border-transparent";
+    case "WARM":
+      return "bg-warm text-warm-foreground hover:bg-warm/90 border-transparent";
+    case "COLD":
+      return "bg-cold text-cold-foreground hover:bg-cold/90 border-transparent";
+    case "DISQUALIFIED":
+      return "bg-disqualified text-disqualified-foreground border-transparent";
+    default:
+      return "bg-muted text-muted-foreground border-transparent";
+  }
+};
+
 export const OutreachDashboard = () => {
   const { isAdmin } = useAuth();
   const qc = useQueryClient();
@@ -51,7 +109,6 @@ export const OutreachDashboard = () => {
   const { data: leads, isLoading } = useQuery({
     queryKey: ["leads"],
     queryFn: async () => {
-      // Hide cold/disqualified leads — they stay in DB for dedupe but never reach the UI.
       const { data, error } = await supabase
         .from("leads")
         .select("*")
@@ -64,7 +121,6 @@ export const OutreachDashboard = () => {
     },
   });
 
-  // Last successful scout run, for the "last refreshed" indicator
   const { data: lastRun } = useQuery({
     queryKey: ["last-scout-run"],
     queryFn: async () => {
@@ -78,9 +134,9 @@ export const OutreachDashboard = () => {
     },
   });
 
-  // Realtime updates
   useEffect(() => {
-    const ch = supabase.channel("leads-feed")
+    const ch = supabase
+      .channel("leads-feed")
       .on("postgres_changes", { event: "*", schema: "public", table: "leads" }, () => {
         qc.invalidateQueries({ queryKey: ["leads"] });
       })
@@ -88,13 +144,11 @@ export const OutreachDashboard = () => {
         qc.invalidateQueries({ queryKey: ["last-scout-run"] });
       })
       .subscribe();
-    return () => { supabase.removeChannel(ch); };
+    return () => {
+      supabase.removeChannel(ch);
+    };
   }, [qc]);
 
-  // A lead qualifies as a true 1031 candidate when:
-  //  - it's a real opportunity (not COLD/DISQUALIFIED)
-  //  - the trigger is a recent or pending sale (the 180-day clock applies)
-  //  - the owner looks like an investor entity (LLC/Corp/Trust/etc.)
   const isCandidate = (l: Lead) => {
     if (l.tier === "COLD" || l.tier === "DISQUALIFIED") return false;
     const trig = (l.trigger_event ?? "").toLowerCase();
@@ -107,7 +161,6 @@ export const OutreachDashboard = () => {
     if (!leads) return [];
     return leads.filter((l) => {
       if (tab === "candidates" && !isCandidate(l)) return false;
-      // (cold/disqualified already excluded at the query level)
       if (tierFilter !== "all" && l.tier !== tierFilter) return false;
       if (stateFilter !== "all" && l.state !== stateFilter) return false;
       if (statusFilter === "active" && (l.status === "dead" || l.status === "won")) return false;
@@ -121,7 +174,6 @@ export const OutreachDashboard = () => {
     });
   }, [leads, tab, tierFilter, stateFilter, statusFilter, search]);
 
-  // For "1031 Candidates" tab, sort freshest sale first so closing-window leads bubble up.
   const ordered = useMemo(() => {
     if (tab !== "candidates") return filtered;
     return [...filtered].sort((a, b) => {
@@ -189,7 +241,12 @@ export const OutreachDashboard = () => {
       toast.error("Nothing to export with the current filters.");
       return;
     }
-    const cols = ["tier", "score", "is_urgent", "state", "county", "property_address", "property_city", "owner_name", "owner_type", "sale_price", "sale_date", "capital_gains_estimate", "total_tax_exposure", "contact_email", "contact_phone", "status", "personality_type"];
+    const cols = [
+      "tier", "score", "is_urgent", "state", "county", "property_address",
+      "property_city", "owner_name", "owner_type", "sale_price", "sale_date",
+      "capital_gains_estimate", "total_tax_exposure", "contact_email",
+      "contact_phone", "status", "personality_type",
+    ];
     const rows = [cols.join(",")];
     for (const l of filtered) {
       rows.push(cols.map((c) => JSON.stringify(l[c] ?? "")).join(","));
@@ -197,7 +254,8 @@ export const OutreachDashboard = () => {
     const blob = new Blob([rows.join("\n")], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url; a.download = `1031-leads-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.href = url;
+    a.download = `1031-leads-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -211,294 +269,305 @@ export const OutreachDashboard = () => {
 
   return (
     <TooltipProvider delayDuration={150}>
-      <div className="min-h-screen">
+      <div className="p-6 md:p-8 space-y-6 max-w-[1600px] mx-auto">
         {/* Header */}
-        <header className="border-b border-border px-8 pt-6 pb-5 bg-card">
-          <div className="flex items-end justify-between gap-6 flex-wrap">
-            <div>
-              <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-1">
-                1031 Outreach Pipeline
-              </div>
-              <h1 className="font-display text-5xl leading-none">The Desk.</h1>
-              <p className="text-xs text-muted-foreground font-mono mt-2">
-                <span className="tabular">{stats.total}</span> leads
-                {stats.urgent > 0 && (
-                  <> · <span className="text-urgent">{stats.urgent} urgent</span></>
-                )}
-                {lastRefreshed && (
-                  <> · last scan {fmtRelative(lastRefreshed)}</>
-                )}
-              </p>
-            </div>
+        <div className="flex items-start justify-between gap-6 flex-wrap">
+          <div className="space-y-1">
+            <h1 className="font-display text-4xl md:text-5xl leading-none tracking-tight">
+              The Desk
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              <span className="tabular font-medium text-foreground">{stats.total}</span> active leads
+              {stats.urgent > 0 && (
+                <> · <span className="text-urgent font-medium">{stats.urgent} urgent</span></>
+              )}
+              {lastRefreshed && <> · last scan {fmtRelative(lastRefreshed)}</>}
+            </p>
+          </div>
 
-            <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={exportCsv}
+                  disabled={!filtered.length}
+                >
+                  <Download className="h-4 w-4" /> Export
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Download visible leads as CSV</TooltipContent>
+            </Tooltip>
+
+            {isAdmin && (
+              <Button asChild variant="outline" size="sm">
+                <Link to="/admin">
+                  <Settings2 className="h-4 w-4" /> Sources
+                </Link>
+              </Button>
+            )}
+
+            {isAdmin && (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={exportCsv}
-                    disabled={!filtered.length}
-                    className="rounded-none font-mono uppercase text-[10px] tracking-wider h-9"
-                  >
-                    <Download className="h-3 w-3 mr-1.5" /> Export CSV
+                  <Button onClick={runScout} disabled={running} size="sm">
+                    {running ? (
+                      <><Loader2 className="h-4 w-4 animate-spin" /> Scanning…</>
+                    ) : (
+                      <><Plus className="h-4 w-4" /> Find new leads</>
+                    )}
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Download the visible leads as a spreadsheet</TooltipContent>
+                <TooltipContent>
+                  Scans Nevada county records for fresh investment property sales (1–2 min)
+                </TooltipContent>
               </Tooltip>
-
-              {isAdmin && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      asChild
-                      variant="outline"
-                      size="sm"
-                      className="rounded-none font-mono uppercase text-[10px] tracking-wider h-9"
-                    >
-                      <Link to="/admin">
-                        <Settings2 className="h-3 w-3 mr-1.5" /> Sources
-                      </Link>
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Manage the counties Scout monitors</TooltipContent>
-                </Tooltip>
-              )}
-
-              {isAdmin && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      onClick={runScout}
-                      disabled={running}
-                      className="rounded-none bg-accent text-accent-foreground hover:bg-accent/90 font-mono uppercase text-[11px] tracking-wider h-9 px-4"
-                    >
-                      {running ? (
-                        <><Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" /> Scanning…</>
-                      ) : (
-                        <><Plus className="h-3.5 w-3.5 mr-2" /> Find new leads</>
-                      )}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    Scans Nevada county records for fresh investment property sales (1–2 min)
-                  </TooltipContent>
-                </Tooltip>
-              )}
-            </div>
-          </div>
-
-          {/* KPI strip — 4 client-facing metrics */}
-          <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-px bg-border border border-border">
-            <Kpi
-              label="Active leads"
-              value={stats.total.toString()}
-              hint="Worth-pursuing leads in your pipeline (cold and filtered-out leads excluded)."
-            />
-            <Kpi
-              label="Urgent"
-              value={stats.urgent.toString()}
-              accent={stats.urgent > 0}
-              hint="Sold in the last 30 days — the 1031 clock is ticking."
-            />
-            <Kpi
-              label="Hot leads"
-              value={stats.hot.toString()}
-              hint="Strongest 1031 candidates. Reach out first."
-            />
-            <Kpi
-              label="Pipeline tax exposure"
-              value={fmtMoney(stats.tax, { compact: true })}
-              hint="Combined estimated tax bill across all leads — how much a 1031 could defer."
-            />
-          </div>
-        </header>
-
-        {/* Tabs */}
-        <div className="px-8 border-b border-border bg-background flex items-center gap-0 overflow-x-auto">
-          <TabButton
-            active={tab === "candidates"}
-            onClick={() => { setTab("candidates"); setTierFilter("all"); }}
-            label="1031 Candidates"
-            count={tabCounts.candidates}
-            tooltip="Entity-owned recent sales — the 180-day 1031 clock is ticking. Sorted freshest first."
-          />
-          <TabButton
-            active={tab === "active"}
-            onClick={() => { setTab("active"); setTierFilter("all"); }}
-            label="All active leads"
-            count={tabCounts.active}
-            tooltip="Urgent, hot, warm, and unscored leads — your active pipeline. Cold and filtered-out leads are hidden."
-          />
-        </div>
-
-        {/* Search + filter bar */}
-        <div className="px-8 py-3 border-b border-border bg-background flex flex-wrap items-center gap-3">
-          <div className="relative flex-1 min-w-[240px] max-w-lg">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by owner, address, or city"
-              className="rounded-none pl-8 font-mono text-xs h-9"
-            />
-            {search && (
-              <button
-                onClick={() => setSearch("")}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                aria-label="Clear search"
-              >
-                <X className="h-3 w-3" />
-              </button>
             )}
           </div>
-
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="rounded-none font-mono uppercase text-[10px] tracking-wider h-9 relative"
-              >
-                <SlidersHorizontal className="h-3 w-3 mr-1.5" />
-                Filters
-                {activeFilterCount > 0 && (
-                  <span className="ml-2 inline-flex items-center justify-center h-4 min-w-4 px-1 bg-accent text-accent-foreground text-[10px] tabular rounded-sm">
-                    {activeFilterCount}
-                  </span>
-                )}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="start" className="w-72 rounded-none p-4 space-y-3">
-              <FilterSelect value={tierFilter} onChange={setTierFilter} label="Priority" options={[
-                { v: "all", l: "All priorities" },
-                { v: "URGENT", l: "Urgent" },
-                { v: "HOT", l: "Hot" },
-                { v: "WARM", l: "Warm" },
-                { v: "UNSCORED", l: "Unscored" },
-              ]} />
-              <FilterSelect value={stateFilter} onChange={setStateFilter} label="State" options={[
-                { v: "all", l: "All states" },
-                ...states.map((s) => ({ v: s, l: s })),
-              ]} />
-              <FilterSelect value={statusFilter} onChange={setStatusFilter} label="Workflow" options={[
-                { v: "active", l: "Active (default)" },
-                { v: "all", l: "All statuses" },
-                { v: "new", l: "New" },
-                { v: "contacted", l: "Contacted" },
-                { v: "replied", l: "Replied" },
-                { v: "won", l: "Won" },
-                { v: "dead", l: "Dead" },
-              ]} />
-              {activeFilterCount > 0 && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={clearFilters}
-                  className="w-full rounded-none font-mono uppercase text-[10px] tracking-wider"
-                >
-                  Reset filters
-                </Button>
-              )}
-            </PopoverContent>
-          </Popover>
-
-          <div className="ml-auto font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-            Showing {filtered.length} of {leads?.length ?? 0}
-          </div>
         </div>
 
-        {/* Lead table */}
-        <div className="overflow-auto">
-          {isLoading ? (
-            <div className="p-12 text-center text-xs font-mono uppercase tracking-widest text-muted-foreground">
-              <Loader2 className="h-4 w-4 mx-auto mb-2 animate-spin" />Loading desk…
-            </div>
-          ) : filtered.length === 0 ? (
-            <EmptyState
-              onRun={isAdmin ? runScout : undefined}
-              running={running}
-              hasLeads={(leads?.length ?? 0) > 0}
-              tab={tab}
-            />
-          ) : (
-            <table className="w-full">
-              <thead className="bg-secondary/50 border-b border-border sticky top-0">
-                <tr className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
-                  <Th>Priority</Th>
-                  <Th>Property</Th>
-                  <Th>Owner</Th>
-                  <Th>Owner mailing</Th>
-                  <Th right>Sale price</Th>
-                  <Th right>Tax exposure</Th>
-                  <Th>Last sale</Th>
-                  <Th>Status</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {ordered.map((l) => (
-                  <tr
-                    key={l.id}
-                    onClick={() => setSelectedId(l.id)}
-                    className="border-b border-border hover:bg-secondary/40 cursor-pointer transition-colors"
+        {/* KPI cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <KpiCard
+            label="Active leads"
+            value={stats.total.toString()}
+            hint="Worth-pursuing leads in your pipeline (cold and filtered-out leads excluded)."
+          />
+          <KpiCard
+            label="Urgent"
+            value={stats.urgent.toString()}
+            accent={stats.urgent > 0}
+            hint="Sold in the last 30 days — the 1031 clock is ticking."
+          />
+          <KpiCard
+            label="Hot leads"
+            value={stats.hot.toString()}
+            hint="Strongest 1031 candidates. Reach out first."
+          />
+          <KpiCard
+            label="Pipeline tax exposure"
+            value={fmtMoney(stats.tax, { compact: true })}
+            hint="Combined estimated tax bill across all leads — how much a 1031 could defer."
+          />
+        </div>
+
+        {/* Tabs + toolbar */}
+        <Card>
+          <CardHeader className="space-y-4 pb-4">
+            <Tabs value={tab} onValueChange={(v) => { setTab(v as TabKey); setTierFilter("all"); }}>
+              <TabsList>
+                <TabsTrigger value="candidates" className="gap-2">
+                  1031 Candidates
+                  <Badge variant="secondary" className="tabular">{tabCounts.candidates}</Badge>
+                </TabsTrigger>
+                <TabsTrigger value="active" className="gap-2">
+                  All active
+                  <Badge variant="secondary" className="tabular">{tabCounts.active}</Badge>
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="relative flex-1 min-w-[240px] max-w-md">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search owner, address, or city"
+                  className="pl-9 h-9"
+                />
+                {search && (
+                  <button
+                    onClick={() => setSearch("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    aria-label="Clear search"
                   >
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1.5">
-                        {l.is_urgent && <AlertCircle className="h-3 w-3 text-urgent" />}
-                        <span className={`tier-pill ${tierColor(l.tier)}`}>{l.tier}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="text-sm">{l.property_address ?? "Unknown address"}</div>
-                      <div className="text-[11px] text-muted-foreground font-mono">
-                        {l.property_city}, {l.state} · {l.property_type}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="text-sm font-medium">{l.owner_name ?? "—"}</div>
-                      <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mt-0.5">
-                        {l.owner_type ?? "Unknown"}
-                      </div>
-                      <SellerIcons lead={l} />
-                    </td>
-                    <td className="px-4 py-3 max-w-[220px]">
-                      {l.mailing_address ? (
-                        <div
-                          className="text-[11px] font-mono leading-snug text-muted-foreground"
-                          title={l.mailing_address}
-                        >
-                          {l.mailing_address}
-                        </div>
-                      ) : (
-                        <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground/60 px-1.5 py-0.5 bg-muted">
-                          no address yet
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 data-cell text-right">
-                      {fmtMoney(l.sale_price, { compact: true })}
-                    </td>
-                    <td className="px-4 py-3 data-cell text-right text-accent font-semibold">
-                      {fmtMoney(l.total_tax_exposure, { compact: true })}
-                    </td>
-                    <td className="px-4 py-3 data-cell text-muted-foreground">
-                      <div>{fmtRelative(l.sale_date)}</div>
-                      <WindowPill saleDate={l.sale_date} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1.5">
-                        <span className={`inline-block h-1.5 w-1.5 rounded-full ${STATUS_DOT[l.status] ?? "bg-muted-foreground/40"}`} />
-                        <span className="text-[11px] text-muted-foreground">
-                          {STATUS_LABEL[l.status] ?? l.status}
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-9">
+                    <SlidersHorizontal className="h-4 w-4" />
+                    Filters
+                    {activeFilterCount > 0 && (
+                      <Badge variant="secondary" className="ml-1 tabular">
+                        {activeFilterCount}
+                      </Badge>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-72 p-4 space-y-3">
+                  <FilterSelect
+                    value={tierFilter}
+                    onChange={setTierFilter}
+                    label="Priority"
+                    options={[
+                      { v: "all", l: "All priorities" },
+                      { v: "URGENT", l: "Urgent" },
+                      { v: "HOT", l: "Hot" },
+                      { v: "WARM", l: "Warm" },
+                      { v: "UNSCORED", l: "Unscored" },
+                    ]}
+                  />
+                  <FilterSelect
+                    value={stateFilter}
+                    onChange={setStateFilter}
+                    label="State"
+                    options={[
+                      { v: "all", l: "All states" },
+                      ...states.map((s) => ({ v: s, l: s })),
+                    ]}
+                  />
+                  <FilterSelect
+                    value={statusFilter}
+                    onChange={setStatusFilter}
+                    label="Workflow"
+                    options={[
+                      { v: "active", l: "Active (default)" },
+                      { v: "all", l: "All statuses" },
+                      { v: "new", l: "New" },
+                      { v: "contacted", l: "Contacted" },
+                      { v: "replied", l: "Replied" },
+                      { v: "won", l: "Won" },
+                      { v: "dead", l: "Dead" },
+                    ]}
+                  />
+                  {activeFilterCount > 0 && (
+                    <Button variant="ghost" size="sm" onClick={clearFilters} className="w-full">
+                      Reset filters
+                    </Button>
+                  )}
+                </PopoverContent>
+              </Popover>
+
+              <div className="ml-auto text-xs text-muted-foreground tabular">
+                Showing {filtered.length} of {leads?.length ?? 0}
+              </div>
+            </div>
+
+            {activeFilterCount > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {tierFilter !== "all" && (
+                  <FilterChip label={`Priority: ${tierFilter}`} onClear={() => setTierFilter("all")} />
+                )}
+                {stateFilter !== "all" && (
+                  <FilterChip label={`State: ${stateFilter}`} onClear={() => setStateFilter("all")} />
+                )}
+                {statusFilter !== "active" && (
+                  <FilterChip label={`Status: ${statusFilter}`} onClear={() => setStatusFilter("active")} />
+                )}
+              </div>
+            )}
+          </CardHeader>
+
+          <CardContent className="p-0">
+            {isLoading ? (
+              <div className="p-6 space-y-3">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <Skeleton key={i} className="h-12 w-full" />
                 ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+              </div>
+            ) : filtered.length === 0 ? (
+              <EmptyState
+                onRun={isAdmin ? runScout : undefined}
+                running={running}
+                hasLeads={(leads?.length ?? 0) > 0}
+                tab={tab}
+              />
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/40 hover:bg-muted/40">
+                      <TableHead>Priority</TableHead>
+                      <TableHead>Property</TableHead>
+                      <TableHead>Owner</TableHead>
+                      <TableHead>Mailing</TableHead>
+                      <TableHead className="text-right">Sale price</TableHead>
+                      <TableHead className="text-right">Tax exposure</TableHead>
+                      <TableHead>Last sale</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {ordered.map((l) => (
+                      <TableRow
+                        key={l.id}
+                        onClick={() => setSelectedId(l.id)}
+                        className="cursor-pointer"
+                      >
+                        <TableCell>
+                          <div className="flex items-center gap-1.5">
+                            {l.is_urgent && <AlertCircle className="h-3.5 w-3.5 text-urgent shrink-0" />}
+                            <Badge className={cn("uppercase tracking-wider text-[10px]", tierBadgeClasses(l.tier))}>
+                              {l.tier}
+                            </Badge>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="text-sm font-medium">
+                            {l.property_address ?? "Unknown address"}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {l.property_city}, {l.state} · {l.property_type}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="text-sm font-medium">{l.owner_name ?? "—"}</div>
+                          <div className="text-[11px] text-muted-foreground uppercase tracking-wide">
+                            {l.owner_type ?? "Unknown"}
+                          </div>
+                          <SellerIcons lead={l} />
+                        </TableCell>
+                        <TableCell className="max-w-[220px]">
+                          {l.mailing_address ? (
+                            <div
+                              className="text-xs text-muted-foreground leading-snug"
+                              title={l.mailing_address}
+                            >
+                              {l.mailing_address}
+                            </div>
+                          ) : (
+                            <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">
+                              no address
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right tabular font-mono text-sm">
+                          {fmtMoney(l.sale_price, { compact: true })}
+                        </TableCell>
+                        <TableCell className="text-right tabular font-mono text-sm font-semibold text-accent">
+                          {fmtMoney(l.total_tax_exposure, { compact: true })}
+                        </TableCell>
+                        <TableCell>
+                          <div className="text-xs text-muted-foreground">{fmtRelative(l.sale_date)}</div>
+                          <WindowPill saleDate={l.sale_date} />
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={cn(
+                                "inline-block h-1.5 w-1.5 rounded-full",
+                                STATUS_DOT[l.status] ?? "bg-muted-foreground/40",
+                              )}
+                            />
+                            <span className="text-xs text-muted-foreground">
+                              {STATUS_LABEL[l.status] ?? l.status}
+                            </span>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         {selectedId && <LeadDrawer leadId={selectedId} onClose={() => setSelectedId(null)} />}
       </div>
@@ -506,61 +575,76 @@ export const OutreachDashboard = () => {
   );
 };
 
-const Kpi = ({ label, value, accent, hint }: { label: string; value: string; accent?: boolean; hint?: string }) => {
+const KpiCard = ({
+  label,
+  value,
+  accent,
+  hint,
+}: {
+  label: string;
+  value: string;
+  accent?: boolean;
+  hint?: string;
+}) => {
   const inner = (
-    <div className="bg-card p-4 h-full">
-      <div className="kpi-label">{label}</div>
-      <div className={`mt-1 font-display text-3xl tabular ${accent ? "text-accent" : ""}`}>{value}</div>
-    </div>
+    <Card className="h-full">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          {label}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className={cn("font-display text-3xl tabular leading-none", accent && "text-accent")}>
+          {value}
+        </div>
+      </CardContent>
+    </Card>
   );
   if (!hint) return inner;
   return (
     <Tooltip>
-      <TooltipTrigger asChild><div className="cursor-help">{inner}</div></TooltipTrigger>
-      <TooltipContent side="bottom" className="max-w-xs">{hint}</TooltipContent>
+      <TooltipTrigger asChild>
+        <div className="cursor-help">{inner}</div>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="max-w-xs">
+        {hint}
+      </TooltipContent>
     </Tooltip>
   );
 };
 
-const TabButton = ({
-  active, onClick, label, count, tooltip,
-}: { active: boolean; onClick: () => void; label: string; count: number; tooltip: string }) => (
-  <Tooltip>
-    <TooltipTrigger asChild>
-      <button
-        onClick={onClick}
-        className={`px-4 py-3 font-mono text-[10px] uppercase tracking-[0.2em] border-b-2 -mb-px transition-colors whitespace-nowrap ${
-          active
-            ? "border-accent text-foreground"
-            : "border-transparent text-muted-foreground hover:text-foreground"
-        }`}
-      >
-        {label} <span className="ml-1 tabular text-muted-foreground">({count})</span>
-      </button>
-    </TooltipTrigger>
-    <TooltipContent side="bottom" className="max-w-xs">{tooltip}</TooltipContent>
-  </Tooltip>
-);
-
-const Th = ({ children, right }: { children: React.ReactNode; right?: boolean }) => (
-  <th className={`px-4 py-2 font-medium ${right ? "text-right" : "text-left"}`}>{children}</th>
+const FilterChip = ({ label, onClear }: { label: string; onClear: () => void }) => (
+  <Badge variant="secondary" className="gap-1 pr-1">
+    {label}
+    <button
+      onClick={onClear}
+      className="ml-0.5 inline-flex items-center justify-center rounded-sm hover:bg-background/60 p-0.5"
+      aria-label={`Clear ${label}`}
+    >
+      <X className="h-3 w-3" />
+    </button>
+  </Badge>
 );
 
 const WindowPill = ({ saleDate }: { saleDate?: string | null }) => {
   const w = windowStatus(saleDate);
   if (!w) return null;
   const tone =
-    w.tone === "fresh" ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-    : w.tone === "active" ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
-    : w.tone === "closing" ? "bg-red-500/20 text-red-600 dark:text-red-400"
-    : w.tone === "expired" ? "bg-muted text-muted-foreground/60"
-    : "bg-muted text-muted-foreground";
+    w.tone === "fresh"
+      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/20"
+      : w.tone === "active"
+      ? "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/20"
+      : w.tone === "closing"
+      ? "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/20"
+      : w.tone === "expired"
+      ? "bg-muted text-muted-foreground/70 border-transparent"
+      : "bg-muted text-muted-foreground border-transparent";
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className={`mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider ${tone}`}>
+        <Badge variant="outline" className={cn("mt-1 gap-1 font-normal text-[10px]", tone)}>
           <Clock className="h-2.5 w-2.5" /> {w.label}
-        </span>
+        </Badge>
       </TooltipTrigger>
       <TooltipContent>1031 exchange clock: 180 days from sale to close on a replacement property.</TooltipContent>
     </Tooltip>
@@ -575,32 +659,50 @@ const SellerIcons = ({ lead }: { lead: any }) => {
     { icon: <Home className="h-3 w-3" />, on: !!lead.mailing_address, label: "Mailing", value: lead.mailing_address },
   ];
   return (
-    <div className="mt-1.5 flex items-center gap-1.5">
+    <div className="mt-1.5 flex items-center gap-1">
       {items.map((it, i) => (
-        <span
-          key={i}
-          title={it.on && it.value ? `${it.label}: ${it.value}` : `${it.label} missing`}
-          className={`inline-flex items-center justify-center h-4 w-4 ${it.on ? "text-accent" : "text-muted-foreground/30"}`}
-        >
-          {it.icon}
-        </span>
+        <Tooltip key={i}>
+          <TooltipTrigger asChild>
+            <span
+              className={cn(
+                "inline-flex items-center justify-center h-5 w-5 rounded-sm",
+                it.on ? "text-accent bg-accent/10" : "text-muted-foreground/30",
+              )}
+            >
+              {it.icon}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-xs">
+            {it.on && it.value ? `${it.label}: ${it.value}` : `${it.label} missing`}
+          </TooltipContent>
+        </Tooltip>
       ))}
     </div>
   );
 };
 
 const FilterSelect = ({
-  value, onChange, label, options,
-}: { value: string; onChange: (v: string) => void; label: string; options: { v: string; l: string }[] }) => (
-  <div className="space-y-1">
-    <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
+  value,
+  onChange,
+  label,
+  options,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  label: string;
+  options: { v: string; l: string }[];
+}) => (
+  <div className="space-y-1.5">
+    <span className="text-xs font-medium text-muted-foreground">{label}</span>
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className="rounded-none h-9 w-full font-mono text-xs">
+      <SelectTrigger className="h-9 w-full">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
         {options.map((o) => (
-          <SelectItem key={o.v} value={o.v} className="font-mono text-xs">{o.l}</SelectItem>
+          <SelectItem key={o.v} value={o.v}>
+            {o.l}
+          </SelectItem>
         ))}
       </SelectContent>
     </Select>
@@ -608,23 +710,27 @@ const FilterSelect = ({
 );
 
 const EmptyState = ({
-  onRun, running, hasLeads, tab,
-}: { onRun?: () => void; running: boolean; hasLeads: boolean; tab: TabKey }) => {
+  onRun,
+  running,
+  hasLeads,
+  tab,
+}: {
+  onRun?: () => void;
+  running: boolean;
+  hasLeads: boolean;
+  tab: TabKey;
+}) => {
   if (!hasLeads) {
     return (
       <div className="p-16 text-center">
-        <div className="font-display text-4xl mb-3">No leads yet.</div>
+        <div className="font-display text-3xl mb-3">No leads yet.</div>
         <div className="text-sm text-muted-foreground max-w-md mx-auto mb-6 leading-relaxed">
           Click <span className="font-semibold text-foreground">Find new leads</span> to scan Nevada
           county records for recent investment property sales. This usually takes 1–2 minutes.
         </div>
         {onRun && (
-          <Button
-            onClick={onRun}
-            disabled={running}
-            className="rounded-none bg-accent text-accent-foreground hover:bg-accent/90 font-mono uppercase text-xs tracking-wider h-10 px-5"
-          >
-            {running ? <Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" /> : <Plus className="h-3.5 w-3.5 mr-2" />}
+          <Button onClick={onRun} disabled={running}>
+            {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
             Find new leads
           </Button>
         )}
@@ -632,12 +738,12 @@ const EmptyState = ({
     );
   }
   const tabCopy: Record<TabKey, string> = {
-    candidates: "No active 1031 candidates yet. Click 'Find new leads' or check the All active leads tab.",
+    candidates: "No active 1031 candidates yet. Click 'Find new leads' or check the All active tab.",
     active: "No leads match your current filters. Try clearing them or switching tabs.",
   };
   return (
     <div className="p-16 text-center">
-      <div className="font-display text-3xl mb-2">No matches.</div>
+      <div className="font-display text-2xl mb-2">No matches.</div>
       <div className="text-sm text-muted-foreground max-w-md mx-auto">{tabCopy[tab]}</div>
     </div>
   );
