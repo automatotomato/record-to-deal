@@ -52,6 +52,10 @@ export const OutreachDashboard = () => {
   const filtered = useMemo(() => {
     if (!leads) return [];
     return leads.filter((l) => {
+      // Tab gating
+      if (tab === "active" && (l.tier === "COLD" || l.tier === "DISQUALIFIED")) return false;
+      if (tab === "cold" && l.tier !== "COLD") return false;
+      if (tab === "disqualified" && l.tier !== "DISQUALIFIED") return false;
       if (tierFilter !== "all" && l.tier !== tierFilter) return false;
       if (stateFilter !== "all" && l.state !== stateFilter) return false;
       if (statusFilter === "active" && (l.status === "dead" || l.status === "won")) return false;
@@ -63,7 +67,17 @@ export const OutreachDashboard = () => {
       }
       return true;
     });
-  }, [leads, tierFilter, stateFilter, statusFilter, search]);
+  }, [leads, tab, tierFilter, stateFilter, statusFilter, search]);
+
+  const tabCounts = useMemo(() => {
+    const c = { active: 0, cold: 0, disqualified: 0 };
+    for (const l of leads ?? []) {
+      if (l.tier === "COLD") c.cold += 1;
+      else if (l.tier === "DISQUALIFIED") c.disqualified += 1;
+      else c.active += 1;
+    }
+    return c;
+  }, [leads]);
 
   const stats = useMemo(() => {
     if (!leads) return { total: 0, urgent: 0, hot: 0, avgScore: 0, tax: 0, quality: 0 };
