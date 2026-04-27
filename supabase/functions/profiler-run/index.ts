@@ -46,6 +46,103 @@ interface ContactProfile {
   email_body?: string;
 }
 
+async function firecrawlScrape(
+  url: string,
+  apiKey: string,
+): Promise<{ markdown: string; url: string } | null> {
+  try {
+    const resp = await fetch(`${FIRECRAWL_V2}/scrape`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        url,
+        formats: ["markdown"],
+        onlyMainContent: true,
+        waitFor: 3000,
+      }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      console.warn(`Assessor scrape ${resp.status} for ${url}`);
+      return null;
+    }
+    const md =
+      (data?.data?.markdown as string) ??
+      (data?.markdown as string) ??
+      "";
+    if (!md) return null;
+    return { markdown: md.slice(0, 8000), url };
+  } catch (e) {
+    console.warn("Assessor scrape failed:", e);
+    return null;
+  }
+}
+
+// Try to fetch the official county assessor record for the property.
+// Returns { corpus, source } when successful, null otherwise.
+async function fetchCountyAssessor(
+  lead: Lead,
+  apiKey: string,
+): Promise<{ corpus: string; source: string } | null> {
+  const state = (lead.state ?? "").toUpperCase();
+  const county = (lead.county ?? "").toLowerCase();
+  const parcelRaw = (lead.parcel_number ?? "").trim();
+  const parcelDigits = parcelRaw.replace(/[^0-9]/g, "");
+
+  // LA County
+  if (state === "CA" && county.includes("los angeles")) {
+    if (parcelDigits.length >= 8) {
+      const direct = await firecrawlScrape(
+        `https://portal.assessor.lacounty.gov/parceldetail/${parcelDigits}`,
+        apiKey,
+      );
+      if (direct?.markdown) return { corpus: direct.markdown, source: direct.url };
+    }
+    if (lead.property_address) {
+      const search = await firecrawlSearch(
+        `"${lead.property_address}" site:assessor.lacounty.gov`,
+        apiKey,
+        2,
+      );
+      if (search.corpus) return { corpus: search.corpus.slice(0, 8000), source: search.sources[0] ?? "assessor.lacounty.gov" };
+    }
+    return null;
+  }
+
+  // Cook County
+  if (state === "IL" && county.includes("cook")) {
+    if (parcelDigits.length >= 10) {
+      const direct = await firecrawlScrape(
+        `https://www.cookcountyassessor.com/pin/${parcelDigits}`,
+        apiKey,
+      );
+      if (direct?.markdown) return { corpus: direct.markdown, source: direct.url };
+    }
+    if (lead.property_address) {
+      const search = await firecrawlSearch(
+        `"${lead.property_address}" site:cookcountyassessor.com`,
+        apiKey,
+        2,
+      );
+      if (search.corpus) return { corpus: search.corpus.slice(0, 8000), source: search.sources[0] ?? "cookcountyassessor.com" };
+    }
+    return null;
+  }
+
+  // Generic fallback for any other county
+  if (lead.property_address || parcelRaw) {
+    const q = parcelRaw
+      ? `"${parcelRaw}" ${lead.county ?? ""} county assessor mailing address`
+      : `"${lead.property_address}" ${lead.county ?? ""} ${state} assessor mailing address taxpayer`;
+    const search = await firecrawlSearch(q, apiKey, 3);
+    if (search.corpus) return { corpus: search.corpus.slice(0, 8000), source: search.sources[0] ?? "assessor" };
+  }
+  return null;
+}
+
 async function firecrawlSearch(
   query: string,
   apiKey: string,
