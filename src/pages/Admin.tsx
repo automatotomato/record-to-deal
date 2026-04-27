@@ -194,7 +194,7 @@ const Admin = () => {
                     <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{c.parser_key}</td>
                     <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{fmtRelative(c.last_run_at)}</td>
                     <td className="px-4 py-3 text-right">
-                      <Switch checked={c.enabled} onCheckedChange={(v) => toggle(c.id, v)} disabled={!["clark_county", "washoe_county"].includes(c.parser_key)} />
+                      <Switch checked={c.enabled} onCheckedChange={(v) => toggle(c.id, v)} disabled={!c.parser_key?.startsWith("nv_")} />
                     </td>
                   </tr>
                 ))}
@@ -202,7 +202,7 @@ const Admin = () => {
             </table>
           </div>
           <p className="mt-3 text-xs text-muted-foreground italic">
-            Only Clark and Washoe counties (Nevada) have parsers wired up. Others are placeholders for future expansion.
+            Only Nevada counties have parsers wired up. Others are placeholders for future expansion.
           </p>
         </section>
 
