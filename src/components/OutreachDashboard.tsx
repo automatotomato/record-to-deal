@@ -291,9 +291,9 @@ export const OutreachDashboard = () => {
           {/* KPI strip — 4 client-facing metrics */}
           <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-px bg-border border border-border">
             <Kpi
-              label="Total leads"
+              label="Active leads"
               value={stats.total.toString()}
-              hint="Every property in your pipeline."
+              hint="Worth-pursuing leads in your pipeline (cold and filtered-out leads excluded)."
             />
             <Kpi
               label="Urgent"
