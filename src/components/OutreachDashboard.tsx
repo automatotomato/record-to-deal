@@ -563,6 +563,27 @@ const Th = ({ children, right }: { children: React.ReactNode; right?: boolean })
   <th className={`px-4 py-2 font-medium ${right ? "text-right" : "text-left"}`}>{children}</th>
 );
 
+const WindowPill = ({ saleDate }: { saleDate?: string | null }) => {
+  const w = windowStatus(saleDate);
+  if (!w) return null;
+  const tone =
+    w.tone === "fresh" ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+    : w.tone === "active" ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+    : w.tone === "closing" ? "bg-red-500/20 text-red-600 dark:text-red-400"
+    : w.tone === "expired" ? "bg-muted text-muted-foreground/60"
+    : "bg-muted text-muted-foreground";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className={`mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider ${tone}`}>
+          <Clock className="h-2.5 w-2.5" /> {w.label}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>1031 exchange clock: 180 days from sale to close on a replacement property.</TooltipContent>
+    </Tooltip>
+  );
+};
+
 const SellerIcons = ({ lead }: { lead: any }) => {
   const items: { icon: React.ReactNode; on: boolean; label: string; value?: string }[] = [
     { icon: <Mail className="h-3 w-3" />, on: !!lead.contact_email, label: "Email", value: lead.contact_email },
