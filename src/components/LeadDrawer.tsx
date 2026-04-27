@@ -300,11 +300,7 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
 
             {/* Next action — quick CRM follow-up */}
             <Section title="Next action">
-              <NextActionEditor
-                leadId={leadId}
-                nextAction={lead.next_action}
-                nextActionAt={lead.next_action_at}
-              />
+              <NextActionEditor lead={lead} />
             </Section>
 
             {/* Touchpoint timeline — CRM activity feed */}
