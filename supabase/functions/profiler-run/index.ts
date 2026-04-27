@@ -247,12 +247,27 @@ Deno.serve(async (req) => {
     queries.push(`"${l.property_address}" ${cityState} owner contact`);
   }
 
-  // Run searches in parallel (cap to 4 to stay within timeout)
-  const searchResults = await Promise.all(
-    queries.slice(0, 4).map((q) => firecrawlSearch(q, firecrawlKey, 4)),
-  );
+  // 1. Fetch the official county assessor record FIRST (highest-trust source).
+  // 2. Fan out web searches in parallel (cap to 4) for owner contact info.
+  const [assessor, searchResults] = await Promise.all([
+    fetchCountyAssessor(l, firecrawlKey),
+    Promise.all(queries.slice(0, 4).map((q) => firecrawlSearch(q, firecrawlKey, 4))),
+  ]);
   const corpus = searchResults.map((r) => r.corpus).filter(Boolean).join("\n\n===\n\n");
-  const sources = Array.from(new Set(searchResults.flatMap((r) => r.sources)));
+  const sources = Array.from(new Set([
+    ...(assessor ? [assessor.source] : []),
+    ...searchResults.flatMap((r) => r.sources),
+  ]));
+  const assessorBlock = assessor
+    ? `=== OFFICIAL COUNTY ASSESSOR RECORD (TRUSTED — prefer this for mailing_address and taxpayer name) ===
+Source: ${assessor.source}
+
+${assessor.corpus}
+
+=== END OFFICIAL RECORD ===
+
+`
+    : "";
 
   // AI: extract contact + profile + draft email in one pass
   const propertyContext = `
