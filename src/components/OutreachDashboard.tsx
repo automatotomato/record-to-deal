@@ -7,15 +7,15 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { fmtMoney, fmtRelative, tierColor } from "@/lib/format";
-import { Loader2, Plus, Download, AlertCircle, Search, Mail, Phone, Linkedin, Home, Settings2, SlidersHorizontal, X } from "lucide-react";
+import { fmtMoney, fmtRelative, tierColor, windowStatus } from "@/lib/format";
+import { Loader2, Plus, Download, AlertCircle, Search, Mail, Phone, Linkedin, Home, Settings2, SlidersHorizontal, X, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { LeadDrawer } from "./LeadDrawer";
 
 import { useAuth } from "@/hooks/useAuth";
 
 type Lead = any;
-type TabKey = "active" | "cold" | "disqualified";
+type TabKey = "candidates" | "active" | "cold" | "disqualified";
 
 const STATUS_DOT: Record<string, string> = {
   new: "bg-accent",
