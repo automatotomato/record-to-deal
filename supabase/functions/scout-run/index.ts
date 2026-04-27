@@ -616,11 +616,14 @@ Deno.serve(async (req) => {
           }
         }
         // Updates run in parallel (fire-and-forget chunks)
-        await Promise.all(
-          toUpdate.map(({ p, id }) =>
-            supabase.from("leads").update(p).eq("id", id),
-          ),
-        );
+        if (toUpdate.length) {
+          totalUpdated += toUpdate.length;
+          await Promise.all(
+            toUpdate.map(({ p, id }) =>
+              supabase.from("leads").update(p).eq("id", id),
+            ),
+          );
+        }
       }
 
       await supabase
