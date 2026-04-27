@@ -96,7 +96,7 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
   };
 
   const updateStatus = async (status: string) => {
-    await supabase.from("leads").update({ status }).eq("id", leadId);
+    await supabase.from("leads").update({ status: status as any }).eq("id", leadId);
     await supabase.from("lead_activities").insert({ lead_id: leadId, kind: "status_change", summary: `Status → ${status}` });
     qc.invalidateQueries({ queryKey: ["lead", leadId] });
     qc.invalidateQueries({ queryKey: ["leads"] });
