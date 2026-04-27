@@ -539,7 +539,45 @@ const ContactPill = ({ icon, value, link }: { icon: React.ReactNode; value?: str
   );
 };
 
-// Human-readable labels for each scoring factor
+const ContactRow = ({ icon, value, field, lead, link }: { icon: React.ReactNode; value?: string | null; field: string; lead: any; link?: boolean }) => {
+  const conf = lead?.discovery_confidence_by_field?.[field];
+  if (!value) {
+    return (
+      <div className="flex items-center gap-2 text-xs">
+        <span className="inline-flex items-center gap-1 px-2 py-1 bg-muted text-muted-foreground font-mono text-[10px] uppercase tracking-wider">
+          {icon} missing
+        </span>
+      </div>
+    );
+  }
+  const href = link
+    ? (value.startsWith("http") ? value : `https://${value}`)
+    : null;
+  const display = value.length > 40 ? value.slice(0, 40) + "…" : value;
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      {href ? (
+        <a href={href} target="_blank" rel="noopener" className="inline-flex items-center gap-1 px-2 py-1 bg-secondary hover:bg-accent/10 font-mono">
+          {icon} {display}
+        </a>
+      ) : (
+        <span className="inline-flex items-center gap-1 px-2 py-1 bg-secondary font-mono">{icon} {display}</span>
+      )}
+      {conf && (
+        <span
+          title={`Source: ${conf.source}`}
+          className={`font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 ${
+            conf.score >= 70 ? "bg-accent text-accent-foreground"
+              : conf.score >= 45 ? "bg-warm/20 text-warm"
+              : "bg-muted text-muted-foreground"
+          }`}
+        >
+          {conf.source} · {conf.score}%
+        </span>
+      )}
+    </div>
+  );
+};
 const SCORE_LABELS: Record<string, { label: string; help: string }> = {
   high_tax_state: { label: "High-tax origin state", help: "Owners in high-tax states have the strongest motivation to defer gains via 1031." },
   investment_property: { label: "Investment property type", help: "Multifamily/commercial/industrial qualify for 1031; primary residences do not." },
