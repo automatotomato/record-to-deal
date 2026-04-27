@@ -61,6 +61,31 @@ function score(lead: Lead): ScoreResult {
   const breakdown: Record<string, number> = {};
   const notes: string[] = [];
 
+  const ownerType = lead.owner_type ?? "Unknown";
+  const propertyType = lead.property_type ?? "Unknown";
+  const sp = lead.sale_price ?? 0;
+  const addr = (lead.property_address ?? "").toUpperCase();
+  const isCondoOrApt = /\b(APT|UNIT|#|STE|SUITE)\b/.test(addr);
+
+  // --- HARD DISQUALIFIERS ---
+  // Owner-occupied SFR / starter condo = homeowner, not 1031 candidate
+  const isLikelyHomeowner =
+    (propertyType === "SFR" && ownerType === "Individual" && sp > 0 && sp < 750_000) ||
+    (isCondoOrApt && ownerType === "Individual" && sp > 0 && sp < 1_000_000);
+  if (isLikelyHomeowner) {
+    return {
+      score: 0,
+      tier: "DISQUALIFIED",
+      is_urgent: false,
+      capital_gains_estimate: null,
+      depreciation_recapture_est: null,
+      total_tax_exposure: null,
+      ownership_years: lead.ownership_years ?? null,
+      score_breakdown: { homeowner_filter: 0 },
+      qualifier_notes: "Auto-disqualified: owner-occupied residential under threshold",
+    };
+  }
+
   // 1) High-tax origin state — biggest single signal
   if (HIGH_TAX_STATES.has(lead.state)) {
     breakdown.high_tax_state = 25;
@@ -69,15 +94,14 @@ function score(lead: Lead): ScoreResult {
 
   // 2) Property type — investment assets are 1031-eligible, primary homes are not
   const investmentTypes = new Set(["Multifamily", "Commercial", "Industrial", "Mixed", "Land"]);
-  if (investmentTypes.has(lead.property_type ?? "")) {
+  if (investmentTypes.has(propertyType)) {
     breakdown.investment_property = 20;
-  } else if (lead.property_type === "SFR") {
+  } else if (propertyType === "SFR") {
     breakdown.investment_property = 8;
     notes.push("SFR — only qualifies if rental, not primary residence");
   }
 
   // 3) Owner type — entities almost always investment-held
-  const ownerType = lead.owner_type ?? "Unknown";
   if (ownerType === "LLC" || ownerType === "Corporation") {
     breakdown.entity_owner = 15;
   } else if (ownerType === "Trust" || ownerType === "Estate") {
@@ -88,7 +112,6 @@ function score(lead: Lead): ScoreResult {
   }
 
   // 4) Sale price — bigger sale = bigger tax bill = more 1031 leverage
-  const sp = lead.sale_price ?? 0;
   if (sp >= 5_000_000) breakdown.sale_size = 20;
   else if (sp >= 2_000_000) breakdown.sale_size = 15;
   else if (sp >= 1_000_000) breakdown.sale_size = 10;
@@ -133,7 +156,12 @@ function score(lead: Lead): ScoreResult {
   if (total >= 70) tier = "HOT";
   else if (total >= 50) tier = "WARM";
   else if (total >= 30) tier = "COLD";
-  if (isUrgent && total >= 50) tier = "URGENT";
+  // URGENT requires real investor signal — not just a recent residential sale
+  const investorSignal =
+    ownerType === "LLC" || ownerType === "Corporation" || ownerType === "Trust" ||
+    investmentTypes.has(propertyType) ||
+    sp >= 1_000_000;
+  if (isUrgent && total >= 50 && investorSignal) tier = "URGENT";
 
   // Tax exposure — prefer Smarty-derived values when available (assessed value
   // gives us the current FMV, sale_price gives us the basis, ownership_years

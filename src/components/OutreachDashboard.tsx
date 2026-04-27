@@ -67,13 +67,16 @@ export const OutreachDashboard = () => {
   }, [leads, tierFilter, stateFilter, statusFilter, search]);
 
   const stats = useMemo(() => {
-    if (!leads) return { total: 0, urgent: 0, hot: 0, avgScore: 0, tax: 0 };
+    if (!leads) return { total: 0, urgent: 0, hot: 0, avgScore: 0, tax: 0, quality: 0 };
     const urgent = leads.filter((l) => l.is_urgent).length;
     const hot = leads.filter((l) => l.tier === "HOT").length;
     const scored = leads.filter((l) => l.score > 0);
     const avgScore = scored.length ? Math.round(scored.reduce((s, l) => s + l.score, 0) / scored.length) : 0;
     const tax = leads.reduce((s, l) => s + (l.total_tax_exposure ?? 0), 0);
-    return { total: leads.length, urgent, hot, avgScore, tax };
+    const qualifiable = leads.filter((l) => l.tier !== "DISQUALIFIED" && l.tier !== "UNSCORED");
+    const complete = qualifiable.filter((l) => l.owner_name && l.mailing_address && l.total_tax_exposure);
+    const quality = qualifiable.length ? Math.round((complete.length / qualifiable.length) * 100) : 0;
+    return { total: leads.length, urgent, hot, avgScore, tax, quality };
   }, [leads]);
 
   const runScout = async () => {
@@ -208,12 +211,13 @@ export const OutreachDashboard = () => {
         )}
 
         {/* KPI strip */}
-        <div className="mt-8 grid grid-cols-5 gap-px bg-border border border-border">
+        <div className="mt-8 grid grid-cols-6 gap-px bg-border border border-border">
           <Kpi label="Total leads" value={stats.total.toString()} />
           <Kpi label="Urgent (≤30d)" value={stats.urgent.toString()} accent={stats.urgent > 0} />
           <Kpi label="Hot tier" value={stats.hot.toString()} />
           <Kpi label="Avg score" value={stats.avgScore.toString()} />
           <Kpi label="Tax exposure" value={fmtMoney(stats.tax, { compact: true })} />
+          <Kpi label="Data quality" value={`${stats.quality}%`} accent={stats.quality > 0 && stats.quality < 80} />
         </div>
       </header>
 

@@ -14,56 +14,60 @@ const FIRECRAWL_V2 = "https://api.firecrawl.dev/v2";
 // Source URLs (public, no login). These are the landing/search pages we ask
 // Firecrawl to render + extract structured records from. The county row
 // `source_url` overrides this when present.
-// One focused query per county to stay within edge function timeout (~60s).
+//
+// Strategy: target CRE deal sources (LoopNet sold comps, Crexi, RealCapital)
+// and assessor portals — explicitly EXCLUDE Zillow/Trulia/Realtor/Auction.com
+// because those are owner-occupied MLS listings, not investor transfers.
+const NV_EXCLUSIONS =
+  "-site:zillow.com -site:trulia.com -site:realtor.com -site:redfin.com -site:auction.com -site:movoto.com -site:homes.com";
+
 const COUNTY_SOURCES: Record<string, { queries: string[]; hint: string }> = {
   nv_clark: {
     queries: [
-      "Las Vegas Clark County NV multifamily OR commercial OR retail property recently sold owner LLC 2026",
+      `Las Vegas Clark County NV multifamily OR commercial OR retail OR industrial sold "$" LLC 2026 ${NV_EXCLUSIONS}`,
+      `site:loopnet.com Las Vegas OR Henderson sold 2025 OR 2026`,
+      `site:crexi.com "Clark County" OR "Las Vegas" sold`,
     ],
     hint:
-      "Recent Clark County, Nevada (Las Vegas, Henderson, North Las Vegas, Paradise, Summerlin) property transfers — multifamily, commercial, retail, industrial, or investment SFR. Extract owner name (LLC preferred), property address, sale price, sale/deed date.",
+      "Recent Clark County, Nevada (Las Vegas, Henderson, North Las Vegas, Paradise, Summerlin, Spring Valley, Sunrise Manor) INVESTMENT property transfers — multifamily ≥4-units, commercial, retail, industrial, NNN, office. Skip single-family condos and apartments under 4 units. Owner should be an LLC/Corp/Trust where possible. Extract owner name, property address, sale price (≥$500k), sale/deed date.",
   },
   nv_washoe: {
     queries: [
-      "Reno Sparks Washoe County NV commercial OR multifamily property recently sold owner LLC 2026",
+      `Reno Sparks Washoe County NV commercial OR multifamily OR industrial sold "$" LLC 2026 ${NV_EXCLUSIONS}`,
+      `site:loopnet.com Reno OR Sparks sold`,
     ],
     hint:
-      "Recent Washoe County, Nevada (Reno, Sparks, Incline Village) property transfers — commercial, multifamily, industrial. Extract owner name, address, sale price, date.",
+      "Recent Washoe County, Nevada (Reno, Sparks, Incline Village) commercial, multifamily ≥4-units, industrial, hospitality transfers. Owner should be entity. Skip single-family. Extract owner name, address, sale price (≥$500k), date.",
   },
   nv_carson_city: {
     queries: [
-      "Carson City Nevada commercial OR multifamily property recently sold owner LLC 2026",
+      `Carson City Nevada commercial OR multifamily OR industrial sold "$" LLC 2026 ${NV_EXCLUSIONS}`,
     ],
-    hint:
-      "Recent Carson City, Nevada commercial / multifamily / investment property transfers. Extract owner name, address, sale price, date.",
+    hint: "Carson City, NV commercial, industrial, multifamily ≥4-units transfers. Skip residential homes. Extract owner, address, price ≥$500k, date.",
   },
   nv_douglas: {
     queries: [
-      "Douglas County Nevada Minden Gardnerville Stateline commercial property sold owner LLC 2026",
+      `Douglas County Nevada Minden Gardnerville Stateline commercial OR hospitality OR multifamily sold LLC 2026 ${NV_EXCLUSIONS}`,
     ],
-    hint:
-      "Recent Douglas County, NV (Minden, Gardnerville, Stateline / Lake Tahoe south shore) commercial, hospitality, multifamily transfers. Extract owner, address, price, date.",
+    hint: "Douglas County, NV (Minden, Gardnerville, Stateline / South Lake Tahoe) commercial, hospitality, multifamily ≥4-units transfers. Entity-owned only. Extract owner, address, price ≥$500k, date.",
   },
   nv_lyon: {
     queries: [
-      "Lyon County Nevada Fernley Yerington Dayton commercial OR industrial property sold owner LLC 2026",
+      `Lyon County Nevada Fernley Yerington Dayton industrial OR commercial sold LLC 2026 ${NV_EXCLUSIONS}`,
     ],
-    hint:
-      "Recent Lyon County, NV (Fernley, Yerington, Dayton, Silver Springs) industrial, commercial, multifamily transfers. Extract owner, address, price, date.",
+    hint: "Lyon County, NV (Fernley, Dayton, Yerington) industrial, commercial, large-acreage transfers. Skip residential. Extract owner, address, price ≥$500k, date.",
   },
   nv_nye: {
     queries: [
-      "Nye County Nevada Pahrump commercial OR land property sold owner LLC 2026",
+      `Nye County Nevada Pahrump commercial OR land OR industrial sold LLC 2026 ${NV_EXCLUSIONS}`,
     ],
-    hint:
-      "Recent Nye County, NV (Pahrump, Tonopah) commercial, land, and multifamily transfers. Extract owner, address, price, date.",
+    hint: "Nye County, NV (Pahrump, Tonopah) commercial, industrial, large land transfers. Skip residential homes. Extract owner, address, price ≥$500k, date.",
   },
   nv_elko: {
     queries: [
-      "Elko County Nevada commercial OR industrial property sold owner LLC 2026",
+      `Elko County Nevada commercial OR industrial OR ranch sold LLC 2026 ${NV_EXCLUSIONS}`,
     ],
-    hint:
-      "Recent Elko County, NV (Elko, Spring Creek, Wells) commercial, industrial, ranch transfers. Extract owner, address, price, date.",
+    hint: "Elko County, NV commercial, industrial, ranch / large-acreage transfers. Skip residential homes. Extract owner, address, price ≥$500k, date.",
   },
 };
 
@@ -334,23 +338,50 @@ Deno.serve(async (req) => {
       // Build payloads, dedupe in-batch first
       const seen = new Set<string>();
       const payloads = [];
+      let droppedNonNv = 0;
+      let droppedHomeowner = 0;
+      let droppedTooSmall = 0;
       for (const lead of extracted) {
         if (!lead.property_address && !lead.parcel_number) continue;
         const key = `${lead.parcel_number ?? ""}|${lead.property_address ?? ""}`;
         if (seen.has(key)) continue;
         seen.add(key);
+
+        // --- HARD STATE GUARD: drop anything that doesn't look Nevada ---
+        const addrBlob = `${lead.property_address ?? ""} ${lead.property_city ?? ""}`.toUpperCase();
+        const looksNonNv = /\b(IL|ILLINOIS|CHICAGO|CA|CALIFORNIA|TX|TEXAS|FL|FLORIDA|NY|NEW YORK|DOLTON|EVANSTON|WILMETTE|SKOKIE|NILES|HOFFMAN ESTATES|WHEELING)\b/.test(addrBlob);
+        if (county.state === "NV" && looksNonNv) {
+          droppedNonNv += 1;
+          continue;
+        }
+
+        // --- INVESTOR FILTER: drop owner-occupied SFR/condo/small sales ---
+        const isCondoOrApt = /\b(APT|UNIT|#|STE|SUITE)\b/.test(addrBlob);
+        const ownerType = inferOwnerType(lead.owner_name);
+        const propLower = (lead.property_type ?? "").toLowerCase();
+        const looksResidential = propLower.includes("single") || propLower.includes("sfr") || propLower === "" || isCondoOrApt;
+        const price = lead.sale_price ?? 0;
+        if (looksResidential && ownerType === "Individual" && price > 0 && price < 750_000) {
+          droppedHomeowner += 1;
+          continue;
+        }
+        // Skip tiny sales we can't make a 1031 case for, unless owner is clearly entity
+        if (price > 0 && price < 250_000 && ownerType === "Individual") {
+          droppedTooSmall += 1;
+          continue;
+        }
+
         payloads.push({
           county_id: county.id,
           state: county.state,
           county: county.county,
           owner_name: lead.owner_name ?? null,
-          owner_type: inferOwnerType(lead.owner_name),
+          owner_type: ownerType,
           property_address: lead.property_address ?? null,
           property_city: lead.property_city ?? null,
           property_zip: lead.property_zip ?? null,
           parcel_number: lead.parcel_number ?? null,
           property_type: ((): string => {
-            // Map LLM outputs to the property_type enum (no Industrial/Office/Retail)
             const raw = (lead.property_type ?? "Unknown").toString();
             const valid = ["SFR", "Multifamily", "Commercial", "Land", "Mixed", "Unknown"];
             if (valid.includes(raw)) return raw;
@@ -378,6 +409,9 @@ Deno.serve(async (req) => {
           data_sources: ["firecrawl_search", county.parser_key],
           scout_confidence: 55,
         });
+      }
+      if (droppedNonNv || droppedHomeowner || droppedTooSmall) {
+        console.log(`${county.county}: filtered out ${droppedNonNv} non-NV, ${droppedHomeowner} homeowner, ${droppedTooSmall} small`);
       }
 
       if (payloads.length) {

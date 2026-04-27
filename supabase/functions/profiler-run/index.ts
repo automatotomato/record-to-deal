@@ -119,17 +119,64 @@ function n(v: unknown): number | null {
 }
 
 function buildMailingAddress(a: SmartyAttrs): string | null {
-  const street = s(a.contact_full_address);
-  const unit = s(a.contact_unit_designator);
-  const city = s(a.contact_city);
-  const state = s(a.contact_state);
-  const zip = s(a.contact_zip);
-  const zip4 = s(a.contact_zip4);
+  // Smarty's principal license uses `mail_*` for the owner's mailing address.
+  // The legacy `contact_*` fields are kept as a fallback for older responses.
+  const street =
+    s(a.mail_full_address) ??
+    s(a.mail_street) ??
+    s(a.contact_full_address) ??
+    s(a.contact_street);
+  const unit = s(a.mail_unit_designator) ?? s(a.contact_unit_designator);
+  const city = s(a.mail_city) ?? s(a.contact_city);
+  const state = s(a.mail_state) ?? s(a.contact_state);
+  const zip = s(a.mail_zipcode) ?? s(a.mail_zip) ?? s(a.contact_zip);
+  const zip4 = s(a.mail_zip4) ?? s(a.contact_zip4);
   if (!street && !city) return null;
   const line1 = [street, unit].filter(Boolean).join(" ");
   const line2 = [city, state].filter(Boolean).join(", ");
   const zipFull = zip ? (zip4 ? `${zip}-${zip4}` : zip) : "";
   return [line1, [line2, zipFull].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+}
+
+// Real cap-gains + recapture estimator. Uses a state-blended rate and only
+// returns numbers when we actually have basis + current value — never fabricated.
+const STATE_BLENDED_RATE: Record<string, number> = {
+  CA: 0.37, NY: 0.348, NJ: 0.348, OR: 0.337, MN: 0.336, HI: 0.349,
+  MA: 0.288, CT: 0.308, VT: 0.328, MD: 0.296, IL: 0.288, DC: 0.323,
+  TX: 0.238, FL: 0.238, NV: 0.238, WA: 0.238,
+};
+
+function estimateTaxExposure(
+  a: SmartyAttrs,
+  state: string | null,
+  currentSalePrice: number | null,
+  ownershipYears: number | null,
+): { capitalGains: number | null; recapture: number | null } {
+  const rate = STATE_BLENDED_RATE[state ?? ""] ?? 0.25;
+  const priorPrice = n(a.prior_sale_amount) ?? n(a.previous_sale_amount);
+  const assessedTotal = n(a.assessed_value);
+  const improvement = n(a.assessed_improvement_value);
+  const market = n(a.market_value) ?? n(a.market_value_year);
+  const basis = priorPrice ?? (assessedTotal ? Math.round(assessedTotal * 0.85) : null);
+  const current = currentSalePrice ?? market ?? assessedTotal;
+
+  let capitalGains: number | null = null;
+  if (basis && current && current > basis) {
+    const sellingCosts = current * 0.06;
+    const gain = current - basis - sellingCosts;
+    if (gain > 0) capitalGains = Math.round(gain * rate);
+  }
+
+  let recapture: number | null = null;
+  if (improvement && ownershipYears && ownershipYears > 0) {
+    const isResidential = ((s(a.land_use_standard) ?? "").toLowerCase().includes("multi") ||
+      (s(a.land_use_standard) ?? "").toLowerCase().includes("apart"));
+    const depLife = isResidential ? 27.5 : 39;
+    const yearsCapped = Math.min(ownershipYears, depLife);
+    const depTaken = (improvement / depLife) * yearsCapped;
+    recapture = Math.round(depTaken * 0.25);
+  }
+  return { capitalGains, recapture };
 }
 
 function mapPropertyType(landUse: string | null): string {
@@ -284,23 +331,20 @@ Deno.serve(async (req) => {
   const saleDate = s(a.deed_sale_date) ?? s(a.sale_date) ?? s(a.ownership_transfer_date);
   const salePrice = n(a.deed_sale_price) ?? n(a.sale_amount);
   const assessedValue = n(a.assessed_value);
-  const improvementValue = n(a.assessed_improvement_value);
   const ownershipYears = yearsBetween(saleDate);
   const propertyType = mapPropertyType(s(a.land_use_standard) ?? s(a.land_use_group));
   const wealthSignals = extractWealthSignals(a, "smarty.com");
 
-  // Rough capital gains + recapture estimates (refined later)
-  let capitalGainsEstimate: number | null = null;
-  let depreciationRecapture: number | null = null;
-  if (assessedValue && salePrice) {
-    capitalGainsEstimate = Math.max(0, assessedValue - salePrice);
+  // Loud diagnostic: Smarty matched but mailing mapping yielded nothing — surface it
+  if (!mailingAddress) {
+    console.warn(
+      `Profiler: Smarty matched lead ${leadId} but mailing address mapping returned null. ` +
+      `Available mail/contact keys: ${Object.keys(a).filter((k) => k.startsWith("mail") || k.startsWith("contact")).join(",") || "(none)"}`,
+    );
   }
-  if (improvementValue && ownershipYears && ownershipYears > 0) {
-    // rough straight-line depreciation taken (cap at fully depreciated)
-    const yearsCapped = Math.min(ownershipYears, 39);
-    const depTaken = Math.round((improvementValue / 39) * yearsCapped);
-    depreciationRecapture = Math.round(depTaken * 0.25); // 25% recapture rate
-  }
+
+  const { capitalGains: capitalGainsEstimate, recapture: depreciationRecapture } =
+    estimateTaxExposure(a, l.state ?? null, salePrice, ownershipYears);
 
   // 2. AI: build personality profile + draft email using Smarty data as source of truth
   const propertyContext = `
@@ -393,7 +437,7 @@ Return JSON with this exact shape:
     capital_gains_estimate: capitalGainsEstimate,
     depreciation_recapture_est: depreciationRecapture,
     total_tax_exposure:
-      (capitalGainsEstimate ?? 0) * 0.20 + (depreciationRecapture ?? 0) || null,
+      ((capitalGainsEstimate ?? 0) + (depreciationRecapture ?? 0)) || null,
     wealth_signals: wealthSignals,
     contact_completeness: completeness,
     personality_type: profile.personality_type ?? null,
