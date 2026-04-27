@@ -262,6 +262,8 @@ export const OutreachDashboard = () => {
                 <Th>Score</Th>
                 <Th>Property</Th>
                 <Th>Owner</Th>
+                <Th>Type</Th>
+                <Th>Mailing address</Th>
                 <Th right>Sale price</Th>
                 <Th right>Tax exposure</Th>
                 <Th>Sold</Th>
@@ -284,9 +286,22 @@ export const OutreachDashboard = () => {
                     <div className="text-[11px] text-muted-foreground font-mono">{l.property_city}, {l.state} · {l.property_type}</div>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="text-sm">{l.owner_name ?? "—"}</div>
-                    <div className="text-[11px] text-muted-foreground font-mono uppercase">{l.owner_type}</div>
+                    <div className="text-sm font-medium">{l.owner_name ?? "—"}</div>
                     <SellerIcons lead={l} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className="font-mono text-[10px] uppercase tracking-wider px-1.5 py-0.5 bg-secondary">
+                      {l.owner_type ?? "—"}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 max-w-[220px]">
+                    {l.mailing_address ? (
+                      <div className="text-[11px] font-mono leading-snug text-muted-foreground" title={l.mailing_address}>
+                        {l.mailing_address}
+                      </div>
+                    ) : (
+                      <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground/50">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-3 data-cell text-right">{fmtMoney(l.sale_price, { compact: true })}</td>
                   <td className="px-4 py-3 data-cell text-right text-accent font-semibold">{fmtMoney(l.total_tax_exposure, { compact: true })}</td>
