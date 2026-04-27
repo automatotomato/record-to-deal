@@ -140,12 +140,16 @@ const Admin = () => {
           <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-1">Configuration</div>
           <h1 className="font-display text-5xl leading-none">Sources.</h1>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <Button onClick={runQualifier} disabled={qualifying || running} variant="outline" size="lg" className="font-mono uppercase tracking-wider text-xs">
+            {qualifying ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Target className="w-4 h-4 mr-2" />}
+            {qualifying ? "Scoring…" : "Score + auto-profile"}
+          </Button>
           <Button onClick={profileAllUnprofiled} disabled={profiling || running} variant="outline" size="lg" className="font-mono uppercase tracking-wider text-xs">
             {profiling ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
             {profiling ? `Profiling ${profileProgress.done}/${profileProgress.total}` : "Profile all unprofiled"}
           </Button>
-          <Button onClick={runScout} disabled={running || profiling} size="lg" className="font-mono uppercase tracking-wider text-xs">
+          <Button onClick={runScout} disabled={running || profiling || qualifying} size="lg" className="font-mono uppercase tracking-wider text-xs">
             {running ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
             {running ? "Scouting…" : "Run Scout now"}
           </Button>
