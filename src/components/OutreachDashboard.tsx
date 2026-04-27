@@ -499,7 +499,8 @@ export const OutreachDashboard = () => {
                       {fmtMoney(l.total_tax_exposure, { compact: true })}
                     </td>
                     <td className="px-4 py-3 data-cell text-muted-foreground">
-                      {fmtRelative(l.sale_date)}
+                      <div>{fmtRelative(l.sale_date)}</div>
+                      <WindowPill saleDate={l.sale_date} />
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5">
