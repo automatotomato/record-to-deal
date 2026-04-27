@@ -408,14 +408,11 @@ const SCORE_LABELS: Record<string, { label: string; help: string }> = {
 };
 
 const TIER_DESCRIPTIONS: Record<string, string> = {
-  A: "Tier A — top-priority 1031 candidate. Multiple strong signals (high-tax state, recent sale, large basis, entity owner). Reach out immediately.",
-  B: "Tier B — strong candidate. Most key 1031 markers present, worth a personalized outreach.",
-  C: "Tier C — qualified but not urgent. Some 1031 indicators; nurture and re-evaluate when fresh data arrives.",
-  D: "Tier D — weak fit. Few 1031 markers — primary residence, small sale, or low-tax state. Skip or recycle later.",
-  HOT: "Hot lead — recently scored as a top-tier 1031 candidate.",
   URGENT: "Urgent — sale closed inside the 45-day 1031 identification window.",
+  HOT: "Hot lead — top-priority 1031 candidate. Reach out immediately.",
   WARM: "Warm — qualified candidate worth nurturing.",
   COLD: "Cold — limited 1031 indicators.",
+  DISQUALIFIED: "Disqualified — owner-occupied residential or other non-investment profile.",
   UNSCORED: "Not yet scored. Run the qualifier from the Admin page.",
 };
 
