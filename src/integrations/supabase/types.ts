@@ -133,6 +133,7 @@ export type Database = {
           score: number | null
           score_breakdown: Json | null
           scout_confidence: number | null
+          smarty_key: string | null
           source_record_url: string | null
           state: string
           status: Database["public"]["Enums"]["lead_status"]
@@ -183,6 +184,7 @@ export type Database = {
           score?: number | null
           score_breakdown?: Json | null
           scout_confidence?: number | null
+          smarty_key?: string | null
           source_record_url?: string | null
           state: string
           status?: Database["public"]["Enums"]["lead_status"]
@@ -233,6 +235,7 @@ export type Database = {
           score?: number | null
           score_breakdown?: Json | null
           scout_confidence?: number | null
+          smarty_key?: string | null
           source_record_url?: string | null
           state?: string
           status?: Database["public"]["Enums"]["lead_status"]
