@@ -5,12 +5,36 @@ import { Navigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Switch } from "@/components/ui/switch";
+import { Button } from "@/components/ui/button";
 import { fmtRelative } from "@/lib/format";
 import { toast } from "sonner";
+import { Loader2, Play } from "lucide-react";
 
 const Admin = () => {
   const { isAdmin, loading } = useAuth();
   const qc = useQueryClient();
+  const [running, setRunning] = useState(false);
+
+  const runScout = async () => {
+    setRunning(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("scout-run", {
+        body: { trigger_kind: "manual" },
+      });
+      if (error) throw error;
+      toast.success(`Scout complete — ${data?.leads_found ?? 0} new leads from ${data?.counties_scanned ?? 0} counties`);
+      if (data?.errors?.length) {
+        toast.warning(`${data.errors.length} county error(s) — see run log`);
+      }
+      qc.invalidateQueries({ queryKey: ["runs"] });
+      qc.invalidateQueries({ queryKey: ["counties"] });
+      qc.invalidateQueries({ queryKey: ["leads"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Scout failed");
+    } finally {
+      setRunning(false);
+    }
+  };
 
   const { data: counties } = useQuery({
     queryKey: ["counties"],
