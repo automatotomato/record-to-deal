@@ -330,20 +330,6 @@ export const OutreachDashboard = () => {
             count={tabCounts.active}
             tooltip="Urgent, hot, warm, and unscored leads — your active pipeline."
           />
-          <TabButton
-            active={tab === "cold"}
-            onClick={() => { setTab("cold"); setTierFilter("all"); }}
-            label="Low priority"
-            count={tabCounts.cold}
-            tooltip="Cold leads — limited 1031 indicators. Worth a glance, not a call."
-          />
-          <TabButton
-            active={tab === "disqualified"}
-            onClick={() => { setTab("disqualified"); setTierFilter("all"); }}
-            label="Filtered out"
-            count={tabCounts.disqualified}
-            tooltip="Owner-occupied homes, sales too small, or other non-investment profiles."
-          />
         </div>
 
         {/* Search + filter bar */}
