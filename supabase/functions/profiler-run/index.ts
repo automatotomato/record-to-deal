@@ -559,7 +559,10 @@ Return JSON with this exact shape:
     pitch_angle: profile.pitch_angle ?? null,
     lv_property_recommendation: profile.lv_property_recommendation ?? null,
     profiler_summary: profile.profiler_summary ?? null,
-    data_sources: Array.from(new Set([...(l as unknown as { data_sources?: string[] }).data_sources ?? [], "smarty.com"])),
+    data_sources: Array.from(new Set([
+      ...(l as unknown as { data_sources?: string[] }).data_sources ?? [],
+      enrichSource === "attom" ? "attomdata.com" : "smarty.com",
+    ])),
   };
 
   const { error: updErr } = await supabase.from("leads").update(updates).eq("id", leadId);
