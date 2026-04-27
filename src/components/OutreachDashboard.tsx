@@ -170,6 +170,27 @@ export const OutreachDashboard = () => {
         </div>
       </header>
 
+      {/* Tabs */}
+      <div className="px-8 border-b border-border bg-background flex items-center gap-0">
+        {([
+          { k: "active", l: "Active leads", c: tabCounts.active },
+          { k: "cold", l: "Cold", c: tabCounts.cold },
+          { k: "disqualified", l: "Disqualified", c: tabCounts.disqualified },
+        ] as const).map((t) => (
+          <button
+            key={t.k}
+            onClick={() => { setTab(t.k); setTierFilter("all"); }}
+            className={`px-4 py-3 font-mono text-[10px] uppercase tracking-[0.2em] border-b-2 -mb-px transition-colors ${
+              tab === t.k
+                ? "border-accent text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {t.l} <span className="ml-1 tabular text-muted-foreground">({t.c})</span>
+          </button>
+        ))}
+      </div>
+
       {/* Filters */}
       <div className="px-8 py-4 border-b border-border bg-background flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[200px] max-w-sm">
