@@ -1,64 +1,62 @@
-## Goal
 
-Make seller/owner contact info appear automatically on every property the Scout discovers — not just Tier A/B — and pull the official mailing address from the county assessor record so direct-mail outreach is reliable.
+# Why the dashboard fields are blank
 
-## Changes
+The qualifier function is producing tier letters `"A" / "B" / "C" / "D"`, but the database `lead_tier` enum only accepts `URGENT / HOT / WARM / COLD / DISQUALIFIED / UNSCORED`. Every score update has been silently failing with:
 
-### 1. Profiler edge function — add county assessor lookup
-File: `supabase/functions/profiler-run/index.ts`
+```
+invalid input value for enum lead_tier: "C"
+```
 
-Before the existing Firecrawl web searches, run a targeted scrape of the county assessor parcel page when we have a `parcel_number` or `property_address`:
+That is why **tier, score, tax exposure, owner, and mailing all show "—"** — the qualifier never successfully writes anything, so the profiler is never triggered for the leads.
 
-- **LA County** (`assessor.lacounty.gov`) — query by AIN (parcel number) or address; extract the `Mail Address` block.
-- **Cook County** (`cookcountyassessor.com`) — query by PIN or address; extract the `Mailing Address` and `Taxpayer Name` fields.
-- Generic fallback for other counties: Firecrawl search `"<parcel>" site:<county-assessor-domain>` and let the AI extract the mailing block.
+This is a real bug, not a workflow problem. Once it's fixed, the existing scout chain (scout → qualifier → profiler → re-score) will populate everything in one click.
 
-Feed the assessor result into the AI prompt as a separate, **trusted** source block ("OFFICIAL COUNTY RECORD — prefer this for mailing_address and taxpayer name"). The AI already returns `mailing_address`; we just give it a stronger signal and stop relying on guesses.
+# What I'll change
 
-Also bump `contact_completeness` scoring to add +10 when we have a verified `mailing_address` from the assessor (so direct-mail-only leads still register as partially profiled).
+## 1. Fix the tier enum bug (the actual root cause)
 
-### 2. Qualifier — auto-profile EVERY lead, not just Tier A/B
-File: `supabase/functions/qualifier-run/index.ts`
+In `supabase/functions/qualifier-run/index.ts`, map the internal letters to the real enum values:
 
-Currently lines ~228–240 fan out Profiler only for Tier A+B (capped at 25). Change to:
-- Fan out Profiler for **every** scored lead (all tiers).
-- Process in batches of 3 in parallel to respect Firecrawl rate limits.
-- Cap per-run at 50 (configurable via request body) so a huge Scout run doesn't blow the function timeout — overflow gets picked up on the next run since they remain "unprofiled".
-- Keep `auto_profile` flag default = true.
+| Score    | Tier            |
+|----------|-----------------|
+| ≥ 70     | `HOT`           |
+| ≥ 50     | `WARM`          |
+| ≥ 30     | `COLD`          |
+| < 30     | `DISQUALIFIED`  |
+| `is_urgent` && score ≥ 50 | `URGENT` (overrides) |
 
-### 3. Scout → Qualifier chain stays the same
-`scout-run` already calls `qualifier-run` on completion, so flipping the qualifier to auto-profile-all means **every newly discovered lead gets seller info pulled automatically**. No change needed in scout.
+Update all internal `tierA` / `tierB` references to `tierHot` / `tierWarm` / `tierUrgent` so the profiler fan-out keeps working.
 
-### 4. Outreach dashboard — surface seller info on the row
-File: `src/components/OutreachDashboard.tsx`
+## 2. Collapse the workflow to **one** button
 
-Add a compact "Seller" column (or merge into existing owner column) showing:
-- Owner name + a small icon row: ✉ if `contact_email`, ☎ if `contact_phone`, in if `contact_linkedin`, 🏠 if `mailing_address`.
-- Greyed-out icons when missing; colored when present.
-- Hover tooltip shows the actual value.
+Right now you have:
+- Outreach: "Run Scout" + the overflow menu ("Re-enrich visible", "Export CSV")
+- Sources (Admin): "Run Scout now", "Enrich + score with Smarty", checkboxes for counties
 
-This makes it obvious at a glance which leads have full contact data vs. need a manual re-profile.
+I'll simplify to a single primary button on Outreach: **"Find new leads"**.
 
-### 5. Lead drawer — dedicated "Seller / Owner" section
-File: `src/components/LeadDrawer.tsx`
+That button runs the full chain end-to-end:
+```
+scout-run  →  qualifier-run  →  profiler-run (Smarty)  →  qualifier-run (re-score)
+```
 
-Group the existing scattered contact fields into one clearly-labeled **Seller Information** card at the top of the drawer with:
-- Owner name + type (Individual / LLC / Trust)
-- Mailing address (with "from county records" badge when sourced from assessor)
-- Email · Phone · LinkedIn (clickable)
-- Contact completeness bar
-- "Re-profile" button to re-run if data is stale
+Live progress shows: `Scouting Nevada → Scoring 12 leads → Pulling owner data 5/12 → Done · 12 new leads`.
 
-## Technical notes
+On the Sources/Admin page I'll remove the "Enrich + score with Smarty" button entirely — it's now redundant. Sources keeps only the county on/off checkboxes (configuration, not actions).
 
-- LA assessor portal: `https://portal.assessor.lacounty.gov/parceldetail/<AIN>` — Firecrawl scrape with `formats: ['markdown']`, `onlyMainContent: true`.
-- Cook assessor: `https://www.cookcountyassessor.com/pin/<PIN>` — same pattern.
-- Both pages render server-side enough that Firecrawl markdown captures the mailing block reliably.
-- Add a 3-second `waitFor` to handle any JS rendering.
-- If assessor scrape fails (404, timeout), silently fall through to web-search-only path — never block the Profiler run.
-- Throttling: Profiler calls Firecrawl ~5 times per lead; with 50 leads × parallelism 3, expect ~80s of wall time, which fits inside the 150s edge-function limit.
+## 3. Clear the stale broken leads + re-run
 
-## Out of scope (ask after this lands)
+After deploying the fix, I'll:
+- Delete the existing leads (they all have `tier=UNSCORED` because the writes failed)
+- Trigger one fresh scout run so you see the dashboard fully populated within ~60 seconds
 
-- Secretary of State LLC principal lookup (you didn't pick this option).
-- Skip-tracing services (BatchSkipTracing, Spokeo) — those are paid APIs we can add later if web-only profiling has too low a hit rate.
+# Files affected
+
+- `supabase/functions/qualifier-run/index.ts` — tier enum mapping fix
+- `src/components/OutreachDashboard.tsx` — single "Find new leads" button with inline progress
+- `src/pages/Admin.tsx` — remove redundant "Enrich + score with Smarty" button
+- Database: clear stale leads, kick off one scout run
+
+# What you'll see after
+
+One button. Click it. ~60 seconds later every row has a tier badge, a score, an owner name, a mailing address, and a tax exposure number.
