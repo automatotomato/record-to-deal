@@ -375,7 +375,6 @@ export const OutreachDashboard = () => {
                 { v: "URGENT", l: "Urgent" },
                 { v: "HOT", l: "Hot" },
                 { v: "WARM", l: "Warm" },
-                { v: "COLD", l: "Cold" },
                 { v: "UNSCORED", l: "Unscored" },
               ]} />
               <FilterSelect value={stateFilter} onChange={setStateFilter} label="State" options={[
