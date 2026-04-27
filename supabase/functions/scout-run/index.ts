@@ -14,16 +14,28 @@ const FIRECRAWL_V2 = "https://api.firecrawl.dev/v2";
 // Source URLs (public, no login). These are the landing/search pages we ask
 // Firecrawl to render + extract structured records from. The county row
 // `source_url` overrides this when present.
-const COUNTY_SOURCES: Record<string, { url: string; hint: string }> = {
+// Per-county search queries. Firecrawl /search returns recent web results
+// (listings, news, aggregator pages) which we then ask the LLM extractor to
+// normalize into lead records. This works far better than scraping county
+// recorder portals directly (which require sessions, CAPTCHAs, etc.).
+const COUNTY_SOURCES: Record<string, { queries: string[]; hint: string }> = {
   la_county_recorder: {
-    url: "https://www.lavote.gov/home/recorder/real-estate-records/grantor-grantee-index",
+    queries: [
+      "Los Angeles County recently sold multifamily property owner LLC",
+      "Los Angeles commercial real estate recent sale 2026",
+      "Los Angeles apartment building sold owner long-term hold",
+    ],
     hint:
-      "Los Angeles County Registrar-Recorder grantor/grantee deed index. Extract recently recorded GRANT DEEDs and TRUST TRANSFER DEEDs.",
+      "Recent Los Angeles County (CA) property transfers — multifamily, commercial, or investment SFR. Extract owner name, address, sale price/date when visible.",
   },
   cook_county_recorder: {
-    url: "https://crs.cookcountyclerkil.gov/Search/Disclaimer?st=/Search/Result",
+    queries: [
+      "Cook County Illinois recently sold multifamily property owner LLC",
+      "Chicago commercial real estate recent sale 2026",
+      "Chicago apartment building sold owner long-term hold",
+    ],
     hint:
-      "Cook County Clerk recordings search. Extract recently recorded WARRANTY DEEDs and TRUSTEES DEEDs.",
+      "Recent Cook County (IL) / Chicago property transfers — multifamily, commercial, or investment SFR. Extract owner name, address, sale price/date when visible.",
   },
 };
 
