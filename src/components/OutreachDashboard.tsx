@@ -9,7 +9,7 @@ import { Loader2, Play, Download, AlertCircle, Search, Mail, Phone, Linkedin, Ho
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuLabel } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { LeadDrawer } from "./LeadDrawer";
-import { Progress } from "@/components/ui/progress";
+
 import { useAuth } from "@/hooks/useAuth";
 
 type Lead = any;
