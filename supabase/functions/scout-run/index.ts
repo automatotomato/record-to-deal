@@ -318,7 +318,16 @@ Deno.serve(async (req) => {
           sale_price: lead.sale_price ?? null,
           sale_date: lead.sale_date ?? null,
           deed_date: lead.deed_date ?? lead.sale_date ?? null,
-          trigger_event: lead.trigger_event ?? "recent_sale",
+          trigger_event: ((): string => {
+            const map: Record<string, string> = {
+              recent_sale: "sale_recorded",
+              listed_for_sale: "commercial_listing",
+              long_hold_owner: "listing_aged",
+              trust_transfer: "probate",
+              off_market_signal: "pending_sale",
+            };
+            return map[lead.trigger_event ?? ""] ?? "sale_recorded";
+          })(),
           source_record_url: lead.source_record_url ?? null,
           data_sources: ["firecrawl_search", county.parser_key],
           scout_confidence: 55,
