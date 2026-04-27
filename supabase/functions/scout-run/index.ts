@@ -408,6 +408,26 @@ Deno.serve(async (req) => {
 
     try {
       const extracted: ExtractedLead[] = [];
+      const sourcesUsed: string[] = [county.parser_key];
+
+      // 1. ATTOM (primary, structured) — only if API key configured and city list known
+      const cities = ATTOM_COUNTY_CITIES[county.parser_key];
+      if (attomKey && cities?.length) {
+        try {
+          const attomLeads = await attomSalesSnapshot(cities, attomKey);
+          if (attomLeads.length) {
+            extracted.push(...attomLeads);
+            sourcesUsed.push("attom");
+          }
+          console.log(`${county.county}: ATTOM returned ${attomLeads.length} sales`);
+        } catch (ae) {
+          const msg = ae instanceof Error ? ae.message : String(ae);
+          console.warn(`ATTOM ${county.county} failed:`, msg);
+          errors.push({ county: county.county, message: `attom: ${msg}` });
+        }
+      }
+
+      // 2. Firecrawl (secondary, fills gaps from CRE listing sites)
       for (const q of queries) {
         try {
           const { leads } = await firecrawlSearchAndExtract(q, hint, firecrawlKey, lovableKey);
@@ -418,8 +438,9 @@ Deno.serve(async (req) => {
           errors.push({ county: county.county, message: `query "${q}": ${msg}` });
         }
       }
+      if (extracted.length) sourcesUsed.push("firecrawl_search");
       countiesScanned += 1;
-      console.log(`${county.county}: extracted ${extracted.length} candidate leads`);
+      console.log(`${county.county}: extracted ${extracted.length} total candidate leads`);
 
       // Build payloads, dedupe in-batch first
       const seen = new Set<string>();
