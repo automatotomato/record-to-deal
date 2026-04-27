@@ -325,10 +325,11 @@ Deno.serve(async (req) => {
   const smartyId = Deno.env.get("SMARTY_AUTH_ID");
   const smartyToken = Deno.env.get("SMARTY_AUTH_TOKEN");
   const lovableKey = Deno.env.get("LOVABLE_API_KEY");
+  const attomKey = Deno.env.get("ATTOM_API_KEY");
 
-  if (!smartyId || !smartyToken || !lovableKey) {
+  if (!lovableKey || (!attomKey && (!smartyId || !smartyToken))) {
     return new Response(
-      JSON.stringify({ error: "SMARTY_AUTH_ID, SMARTY_AUTH_TOKEN, or LOVABLE_API_KEY not configured" }),
+      JSON.stringify({ error: "ATTOM_API_KEY or SMARTY credentials, plus LOVABLE_API_KEY, must be configured" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
