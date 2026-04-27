@@ -545,11 +545,13 @@ Return JSON with this exact shape:
   let profile: Record<string, string> = {};
   try { profile = JSON.parse(content); } catch (_) { /* ignore */ }
 
-  // Contact completeness: Smarty gives us mailing address reliably (50pts).
-  // Email/phone/linkedin would come from a future skip-tracing step.
+  // Contact completeness: mailing address (50pts), owner name (20pts),
+  // decision-maker email (20pts), phone or LinkedIn (10pts)
   let completeness = 0;
   if (mailingAddress) completeness += 50;
   if (ownerName) completeness += 20;
+  if (enrichment.decisionMakerEmail) completeness += 20;
+  if (enrichment.decisionMakerPhone || enrichment.decisionMakerLinkedIn) completeness += 10;
 
   const updates: Record<string, unknown> = {
     smarty_key: smartyKey,
@@ -565,8 +567,19 @@ Return JSON with this exact shape:
     depreciation_recapture_est: depreciationRecapture,
     total_tax_exposure:
       ((capitalGainsEstimate ?? 0) + (depreciationRecapture ?? 0)) || null,
-    wealth_signals: wealthSignals,
+    wealth_signals: [...wealthSignals, ...enrichment.newsSnippets.map((sig) => ({ signal: sig, source: "firecrawl" }))],
     contact_completeness: completeness,
+    contact_email: enrichment.decisionMakerEmail ?? null,
+    contact_phone: enrichment.decisionMakerPhone ?? null,
+    contact_linkedin: enrichment.decisionMakerLinkedIn ?? null,
+    decision_maker_name: enrichment.decisionMakerName ?? null,
+    decision_maker_role: enrichment.decisionMakerRole ?? null,
+    decision_maker_email: enrichment.decisionMakerEmail ?? null,
+    decision_maker_phone: enrichment.decisionMakerPhone ?? null,
+    decision_maker_linkedin: enrichment.decisionMakerLinkedIn ?? null,
+    entity_registry_url: enrichment.entityRegistryUrl ?? null,
+    enrichment_confidence: enrichment.confidence,
+    enrichment_payload: enrichment.payload,
     personality_type: profile.personality_type ?? null,
     motivation_type: profile.motivation_type ?? null,
     preferred_channel: profile.preferred_channel ?? null,
@@ -576,6 +589,7 @@ Return JSON with this exact shape:
     data_sources: Array.from(new Set([
       ...(l as unknown as { data_sources?: string[] }).data_sources ?? [],
       enrichSource === "attom" ? "attomdata.com" : "smarty.com",
+      ...enrichment.sources,
     ])),
   };
 
