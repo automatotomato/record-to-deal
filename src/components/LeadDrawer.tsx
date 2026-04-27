@@ -205,19 +205,8 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
               )}
             </Section>
 
-            {/* Score breakdown */}
-            {lead.score_breakdown && (
-              <Section title="Score breakdown">
-                <div className="space-y-1">
-                  {Object.entries(lead.score_breakdown as Record<string, number>).map(([k, v]) => (
-                    <div key={k} className="flex justify-between font-mono text-xs">
-                      <span className="text-muted-foreground uppercase tracking-wider">{k.replace(/_/g, " ")}</span>
-                      <span className="tabular font-semibold">+{v}</span>
-                    </div>
-                  ))}
-                </div>
-              </Section>
-            )}
+            {/* Why this tier — readable score + tax breakdown */}
+            <ScoreExplanation lead={lead} />
 
             {/* Profile */}
             {lead.personality_type && (
