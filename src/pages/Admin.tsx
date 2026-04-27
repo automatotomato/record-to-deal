@@ -8,12 +8,68 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { fmtRelative } from "@/lib/format";
 import { toast } from "sonner";
-import { Loader2, Play } from "lucide-react";
+import { Loader2, Play, Sparkles } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
 
 const Admin = () => {
   const { isAdmin, loading } = useAuth();
   const qc = useQueryClient();
   const [running, setRunning] = useState(false);
+  const [profiling, setProfiling] = useState(false);
+  const [profileProgress, setProfileProgress] = useState({ done: 0, total: 0, ok: 0, fail: 0 });
+
+  const profileAllUnprofiled = async () => {
+    setProfiling(true);
+    setProfileProgress({ done: 0, total: 0, ok: 0, fail: 0 });
+    try {
+      // Unprofiled = no contact_email AND no personality_type
+      const { data: leads, error } = await supabase
+        .from("leads")
+        .select("id, property_address, owner_name")
+        .is("contact_email", null)
+        .is("personality_type", null)
+        .order("created_at", { ascending: false })
+        .limit(200);
+      if (error) throw error;
+      const list = leads ?? [];
+      if (!list.length) {
+        toast.info("No unprofiled leads found");
+        return;
+      }
+      setProfileProgress({ done: 0, total: list.length, ok: 0, fail: 0 });
+      toast.info(`Profiling ${list.length} leads — this may take a few minutes`);
+
+      // Concurrency = 3 to avoid rate limits but keep things moving
+      const queue = [...list];
+      let ok = 0, fail = 0, done = 0;
+      const worker = async () => {
+        while (queue.length) {
+          const lead = queue.shift();
+          if (!lead) break;
+          try {
+            const { error: fnErr } = await supabase.functions.invoke("profiler-run", {
+              body: { lead_id: lead.id },
+            });
+            if (fnErr) throw fnErr;
+            ok += 1;
+          } catch (e) {
+            fail += 1;
+            console.warn("Profiler failed for", lead.id, e);
+          } finally {
+            done += 1;
+            setProfileProgress({ done, total: list.length, ok, fail });
+          }
+        }
+      };
+      await Promise.all([worker(), worker(), worker()]);
+      toast.success(`Profiled ${ok} leads${fail ? ` · ${fail} failed` : ""}`);
+      qc.invalidateQueries({ queryKey: ["leads"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Profile batch failed");
+    } finally {
+      setProfiling(false);
+    }
+  };
 
   const runScout = async () => {
     setRunning(true);
@@ -62,16 +118,33 @@ const Admin = () => {
 
   return (
     <AppShell>
-      <div className="px-8 py-6 border-b border-border bg-card flex items-end justify-between gap-4">
+      <div className="px-8 py-6 border-b border-border bg-card flex items-end justify-between gap-4 flex-wrap">
         <div>
           <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-1">Configuration</div>
           <h1 className="font-display text-5xl leading-none">Sources.</h1>
         </div>
-        <Button onClick={runScout} disabled={running} size="lg" className="font-mono uppercase tracking-wider text-xs">
-          {running ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
-          {running ? "Scouting…" : "Run Scout now"}
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button onClick={profileAllUnprofiled} disabled={profiling || running} variant="outline" size="lg" className="font-mono uppercase tracking-wider text-xs">
+            {profiling ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
+            {profiling ? `Profiling ${profileProgress.done}/${profileProgress.total}` : "Profile all unprofiled"}
+          </Button>
+          <Button onClick={runScout} disabled={running || profiling} size="lg" className="font-mono uppercase tracking-wider text-xs">
+            {running ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
+            {running ? "Scouting…" : "Run Scout now"}
+          </Button>
+        </div>
       </div>
+
+      {profiling && profileProgress.total > 0 && (
+        <div className="px-8 py-4 border-b border-border bg-secondary/30">
+          <div className="flex items-center justify-between mb-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+            <span>Profiling owners · {profileProgress.ok} ok · {profileProgress.fail} failed</span>
+            <span className="tabular">{profileProgress.done} / {profileProgress.total}</span>
+          </div>
+          <Progress value={(profileProgress.done / profileProgress.total) * 100} className="h-1" />
+        </div>
+      )}
+
 
       <div className="p-8 space-y-10">
         <section>
