@@ -13,7 +13,8 @@ const corsHeaders = {
 const SMARTY_LOOKUP = "https://us-property.api.smarty.com/lookup";
 const SMARTY_SEARCH = "https://us-property.api.smarty.com/search";
 const ATTOM_BASE = "https://api.gateway.attomdata.com/propertyapi/v1.0.0";
-const AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
+const AI_URL = "https://api.openai.com/v1/chat/completions";
+const AI_MODEL = "gpt-4o-mini";
 
 // --- ATTOM enrichment ---------------------------------------------------
 // Returns a SmartyAttrs-shaped object so downstream mapping/estimator code
@@ -324,12 +325,12 @@ Deno.serve(async (req) => {
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const smartyId = Deno.env.get("SMARTY_AUTH_ID");
   const smartyToken = Deno.env.get("SMARTY_AUTH_TOKEN");
-  const lovableKey = Deno.env.get("LOVABLE_API_KEY");
+  const lovableKey = Deno.env.get("OPENAI_API_KEY");
   const attomKey = Deno.env.get("ATTOM_API_KEY");
 
   if (!lovableKey || (!attomKey && (!smartyId || !smartyToken))) {
     return new Response(
-      JSON.stringify({ error: "ATTOM_API_KEY or SMARTY credentials, plus LOVABLE_API_KEY, must be configured" }),
+      JSON.stringify({ error: "ATTOM_API_KEY or SMARTY credentials, plus OPENAI_API_KEY, must be configured" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
@@ -501,7 +502,7 @@ News / web mentions: ${enrichment.newsSnippets.slice(0, 3).join(" | ") || "none"
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "google/gemini-2.5-flash",
+      model: AI_MODEL,
       messages: [
         {
           role: "system",
@@ -767,11 +768,11 @@ async function aiExtractContact(blob: string, lovableKey: string): Promise<{
   name: string | null; role: string | null;
 } | null> {
   try {
-    const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const r = await fetch(AI_URL, {
       method: "POST",
       headers: { Authorization: `Bearer ${lovableKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: AI_MODEL,
         messages: [
           { role: "system", content: "Extract contact info from the text. Return ONLY JSON. Use null when unsure — do not invent." },
           { role: "user", content: `Find the most likely PRIMARY decision-maker behind this property owner. Return JSON:
