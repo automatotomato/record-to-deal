@@ -1,0 +1,285 @@
+import { useEffect, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { fmtMoney, fmtDate, fmtRelative, tierColor, daysSince } from "@/lib/format";
+import { Loader2, Sparkles, Send, AlertCircle, ExternalLink, Mail, Phone, Linkedin } from "lucide-react";
+import { toast } from "sonner";
+
+export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () => void }) => {
+  const qc = useQueryClient();
+  const [drafting, setDrafting] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [emailSubject, setEmailSubject] = useState("");
+  const [emailBody, setEmailBody] = useState("");
+  const [toEmail, setToEmail] = useState("");
+
+  const { data: lead, isLoading } = useQuery({
+    queryKey: ["lead", leadId],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("leads").select("*").eq("id", leadId).single();
+      if (error) throw error;
+      return data as any;
+    },
+  });
+
+  const { data: activities } = useQuery({
+    queryKey: ["activities", leadId],
+    queryFn: async () => {
+      const { data } = await supabase.from("lead_activities").select("*").eq("lead_id", leadId).order("created_at", { ascending: false }).limit(50);
+      return data ?? [];
+    },
+  });
+
+  const { data: emails } = useQuery({
+    queryKey: ["emails", leadId],
+    queryFn: async () => {
+      const { data } = await supabase.from("outreach_emails").select("*").eq("lead_id", leadId).order("created_at", { ascending: false });
+      return data ?? [];
+    },
+  });
+
+  // Pre-fill email form from latest draft
+  useEffect(() => {
+    if (!lead) return;
+    const latestDraft = emails?.find((e: any) => e.status === "draft");
+    if (latestDraft) {
+      setEmailSubject(latestDraft.subject);
+      setEmailBody(latestDraft.body);
+      setToEmail(latestDraft.to_email ?? lead.contact_email ?? "");
+    } else {
+      setToEmail(lead.contact_email ?? "");
+    }
+  }, [lead, emails]);
+
+  const draftEmail = async () => {
+    setDrafting(true);
+    toast.loading("Profiling lead and drafting outreach…", { id: "draft" });
+    try {
+      const { data, error } = await supabase.functions.invoke("profiler-run", { body: { lead_id: leadId } });
+      if (error) throw error;
+      toast.success("Draft ready", { id: "draft" });
+      qc.invalidateQueries({ queryKey: ["lead", leadId] });
+      qc.invalidateQueries({ queryKey: ["emails", leadId] });
+    } catch (e: any) {
+      toast.error(`Draft failed: ${e.message}`, { id: "draft" });
+    } finally {
+      setDrafting(false);
+    }
+  };
+
+  const sendEmail = async () => {
+    if (!toEmail) { toast.error("No recipient email"); return; }
+    if (!emailSubject || !emailBody) { toast.error("Subject and body required"); return; }
+    setSending(true);
+    toast.loading("Sending via Gmail…", { id: "send" });
+    try {
+      const { data, error } = await supabase.functions.invoke("send-outreach-email", {
+        body: { lead_id: leadId, to: toEmail, subject: emailSubject, body: emailBody },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      toast.success("Sent!", { id: "send" });
+      qc.invalidateQueries({ queryKey: ["lead", leadId] });
+      qc.invalidateQueries({ queryKey: ["emails", leadId] });
+      qc.invalidateQueries({ queryKey: ["activities", leadId] });
+      qc.invalidateQueries({ queryKey: ["leads"] });
+    } catch (e: any) {
+      toast.error(`Send failed: ${e.message}`, { id: "send" });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const updateStatus = async (status: string) => {
+    await supabase.from("leads").update({ status: status as any }).eq("id", leadId);
+    await supabase.from("lead_activities").insert({ lead_id: leadId, kind: "status_change", summary: `Status → ${status}` });
+    qc.invalidateQueries({ queryKey: ["lead", leadId] });
+    qc.invalidateQueries({ queryKey: ["leads"] });
+    qc.invalidateQueries({ queryKey: ["activities", leadId] });
+  };
+
+  return (
+    <Sheet open onOpenChange={onClose}>
+      <SheetContent side="right" className="w-full sm:max-w-2xl p-0 overflow-y-auto bg-background border-l-2 border-border">
+        {isLoading || !lead ? (
+          <div className="p-12 text-center"><Loader2 className="h-4 w-4 mx-auto animate-spin" /></div>
+        ) : (
+          <div>
+            {/* Header */}
+            <div className="bg-primary text-primary-foreground p-6" style={{ background: lead.is_urgent ? "var(--gradient-urgent)" : "var(--gradient-ink)" }}>
+              <div className="flex items-center gap-2 mb-2">
+                {lead.is_urgent && (
+                  <span className="tier-pill bg-card text-urgent flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3" /> URGENT · {daysSince(lead.sale_date)}d ago
+                  </span>
+                )}
+                <span className={`tier-pill ${tierColor(lead.tier)}`}>{lead.tier}</span>
+                <span className="font-mono text-[10px] uppercase tracking-wider text-primary-foreground/60">
+                  Score {lead.score} · {lead.state}
+                </span>
+              </div>
+              <h2 className="font-display text-3xl leading-tight">{lead.property_address ?? "Unknown property"}</h2>
+              <p className="font-mono text-xs uppercase tracking-wider text-primary-foreground/70 mt-1">
+                {lead.property_city}, {lead.state} {lead.property_zip} · {lead.county} County
+              </p>
+            </div>
+
+            {/* Quick facts */}
+            <div className="grid grid-cols-3 gap-px bg-border border-b border-border">
+              <Fact label="Sale price" value={fmtMoney(lead.sale_price, { compact: true })} />
+              <Fact label="Tax exposure" value={fmtMoney(lead.total_tax_exposure, { compact: true })} accent />
+              <Fact label="Sold" value={fmtRelative(lead.sale_date)} sub={fmtDate(lead.sale_date)} />
+              <Fact label="Type" value={lead.property_type} />
+              <Fact label="Owner type" value={lead.owner_type} />
+              <Fact label="Held" value={lead.ownership_years ? `${lead.ownership_years}y` : "—"} />
+            </div>
+
+            {/* Owner & contact */}
+            <Section title="Owner">
+              <div className="text-lg">{lead.owner_name ?? "Unknown"}</div>
+              {lead.mailing_address && <div className="text-xs text-muted-foreground font-mono mt-1">Mailing: {lead.mailing_address}</div>}
+              <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                <ContactPill icon={<Mail className="h-3 w-3" />} value={lead.contact_email} />
+                <ContactPill icon={<Phone className="h-3 w-3" />} value={lead.contact_phone} />
+                <ContactPill icon={<Linkedin className="h-3 w-3" />} value={lead.contact_linkedin} link />
+              </div>
+              {!lead.contact_email && !lead.contact_phone && (
+                <div className="mt-3 text-[11px] text-warm font-mono uppercase tracking-wider">⚠ Manual contact lookup needed</div>
+              )}
+            </Section>
+
+            {/* Score breakdown */}
+            {lead.score_breakdown && (
+              <Section title="Score breakdown">
+                <div className="space-y-1">
+                  {Object.entries(lead.score_breakdown as Record<string, number>).map(([k, v]) => (
+                    <div key={k} className="flex justify-between font-mono text-xs">
+                      <span className="text-muted-foreground uppercase tracking-wider">{k.replace(/_/g, " ")}</span>
+                      <span className="tabular font-semibold">+{v}</span>
+                    </div>
+                  ))}
+                </div>
+              </Section>
+            )}
+
+            {/* Profile */}
+            {lead.personality_type && (
+              <Section title="Profile">
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div><div className="kpi-label">Personality</div><div className="mt-1">{lead.personality_type}</div></div>
+                  <div><div className="kpi-label">Motivation</div><div className="mt-1">{lead.motivation_type}</div></div>
+                  <div><div className="kpi-label">Best channel</div><div className="mt-1">{lead.preferred_channel}</div></div>
+                  <div><div className="kpi-label">LV recommendation</div><div className="mt-1">{lead.lv_property_recommendation}</div></div>
+                </div>
+                {lead.profiler_summary && <p className="mt-3 text-xs text-muted-foreground italic leading-relaxed">{lead.profiler_summary}</p>}
+              </Section>
+            )}
+
+            {/* Wealth signals */}
+            {Array.isArray(lead.wealth_signals) && lead.wealth_signals.length > 0 && (
+              <Section title="Wealth signals">
+                <ul className="space-y-1 text-xs">
+                  {lead.wealth_signals.map((s: any, i: number) => (
+                    <li key={i} className="flex gap-2"><span className="text-accent">●</span><span>{typeof s === "string" ? s : s.signal}</span></li>
+                  ))}
+                </ul>
+              </Section>
+            )}
+
+            {/* Outreach composer */}
+            <Section title="Outreach">
+              <div className="flex items-center gap-2 mb-3">
+                <Button size="sm" variant="outline" onClick={draftEmail} disabled={drafting} className="rounded-none font-mono text-[10px] uppercase tracking-wider">
+                  {drafting ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
+                  {lead.personality_type ? "Re-draft with AI" : "Profile + draft email"}
+                </Button>
+              </div>
+
+              <div className="space-y-2">
+                <Input value={toEmail} onChange={(e) => setToEmail(e.target.value)} placeholder="recipient@example.com"
+                       className="rounded-none font-mono text-xs h-8" />
+                <Input value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} placeholder="Subject"
+                       className="rounded-none text-sm h-9" />
+                <Textarea value={emailBody} onChange={(e) => setEmailBody(e.target.value)} rows={12}
+                          placeholder="Email body — click 'Profile + draft email' to auto-generate."
+                          className="rounded-none text-sm font-sans leading-relaxed" />
+                <div className="flex justify-end">
+                  <Button onClick={sendEmail} disabled={sending || !toEmail || !emailBody} className="rounded-none bg-accent text-accent-foreground hover:bg-accent/90 font-mono text-[10px] uppercase tracking-wider">
+                    {sending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Send className="h-3 w-3 mr-1" />}
+                    Send via Gmail
+                  </Button>
+                </div>
+              </div>
+            </Section>
+
+            {/* Status */}
+            <Section title="Workflow">
+              <div className="flex items-center gap-2">
+                <span className="kpi-label">Status</span>
+                <Select value={lead.status} onValueChange={updateStatus}>
+                  <SelectTrigger className="rounded-none h-8 w-[180px] font-mono text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {["new", "reviewing", "contacted", "replied", "meeting", "won", "dead"].map((s) =>
+                      <SelectItem key={s} value={s} className="font-mono text-xs">{s}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </Section>
+
+            {/* Activity */}
+            <Section title="Activity">
+              {!activities?.length ? <div className="text-xs text-muted-foreground italic">No activity yet.</div> : (
+                <ul className="space-y-2">
+                  {activities.map((a: any) => (
+                    <li key={a.id} className="text-xs flex gap-3 border-l-2 border-border pl-3 py-0.5">
+                      <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground w-20 shrink-0">{a.kind}</span>
+                      <span className="flex-1">{a.summary}</span>
+                      <span className="font-mono text-[10px] text-muted-foreground">{fmtRelative(a.created_at)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Section>
+
+            {lead.source_record_url && (
+              <div className="px-6 py-4 border-t border-border">
+                <a href={lead.source_record_url} target="_blank" rel="noopener" className="text-xs font-mono uppercase tracking-wider text-muted-foreground hover:text-accent inline-flex items-center gap-1">
+                  <ExternalLink className="h-3 w-3" /> View source record
+                </a>
+              </div>
+            )}
+          </div>
+        )}
+      </SheetContent>
+    </Sheet>
+  );
+};
+
+const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
+  <div className="px-6 py-5 border-b border-border">
+    <div className="kpi-label mb-3">{title}</div>
+    {children}
+  </div>
+);
+
+const Fact = ({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: boolean }) => (
+  <div className="bg-card p-4">
+    <div className="kpi-label">{label}</div>
+    <div className={`font-display text-2xl mt-1 leading-none ${accent ? "text-accent" : ""}`}>{value}</div>
+    {sub && <div className="text-[10px] font-mono text-muted-foreground mt-1">{sub}</div>}
+  </div>
+);
+
+const ContactPill = ({ icon, value, link }: { icon: React.ReactNode; value?: string | null; link?: boolean }) => {
+  if (!value) return <span className="inline-flex items-center gap-1 px-2 py-1 bg-muted text-muted-foreground font-mono text-[10px] uppercase tracking-wider">{icon} missing</span>;
+  return link ? (
+    <a href={value} target="_blank" rel="noopener" className="inline-flex items-center gap-1 px-2 py-1 bg-secondary hover:bg-accent/10 font-mono text-xs">{icon} {value.slice(0, 32)}</a>
+  ) : (
+    <span className="inline-flex items-center gap-1 px-2 py-1 bg-secondary font-mono text-xs">{icon} {value}</span>
+  );
+};

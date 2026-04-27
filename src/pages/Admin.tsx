@@ -1,0 +1,117 @@
+import { useState, useEffect } from "react";
+import { AppShell } from "@/components/AppShell";
+import { useAuth } from "@/hooks/useAuth";
+import { Navigate } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Switch } from "@/components/ui/switch";
+import { fmtRelative } from "@/lib/format";
+import { toast } from "sonner";
+
+const Admin = () => {
+  const { isAdmin, loading } = useAuth();
+  const qc = useQueryClient();
+
+  const { data: counties } = useQuery({
+    queryKey: ["counties"],
+    queryFn: async () => {
+      const { data } = await supabase.from("counties").select("*").order("state").order("county");
+      return data ?? [];
+    },
+  });
+
+  const { data: runs } = useQuery({
+    queryKey: ["runs"],
+    queryFn: async () => {
+      const { data } = await supabase.from("scout_runs").select("*").order("started_at", { ascending: false }).limit(20);
+      return data ?? [];
+    },
+  });
+
+  const toggle = async (id: string, enabled: boolean) => {
+    const { error } = await supabase.from("counties").update({ enabled }).eq("id", id);
+    if (error) toast.error(error.message); else qc.invalidateQueries({ queryKey: ["counties"] });
+  };
+
+  if (loading) return null;
+  if (!isAdmin) return <Navigate to="/outreach" replace />;
+
+  return (
+    <AppShell>
+      <div className="px-8 py-6 border-b border-border bg-card">
+        <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-1">Configuration</div>
+        <h1 className="font-display text-5xl leading-none">Sources.</h1>
+      </div>
+
+      <div className="p-8 space-y-10">
+        <section>
+          <h2 className="kpi-label mb-3">Configured counties</h2>
+          <div className="border border-border bg-card">
+            <table className="w-full">
+              <thead className="border-b border-border bg-secondary/50">
+                <tr className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                  <th className="text-left px-4 py-2">State</th>
+                  <th className="text-left px-4 py-2">County</th>
+                  <th className="text-left px-4 py-2">Parser</th>
+                  <th className="text-left px-4 py-2">Last run</th>
+                  <th className="text-right px-4 py-2">Enabled</th>
+                </tr>
+              </thead>
+              <tbody>
+                {counties?.map((c) => (
+                  <tr key={c.id} className="border-b border-border">
+                    <td className="px-4 py-3 font-mono text-sm">{c.state}</td>
+                    <td className="px-4 py-3 text-sm">{c.county}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{c.parser_key}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{fmtRelative(c.last_run_at)}</td>
+                    <td className="px-4 py-3 text-right">
+                      <Switch checked={c.enabled} onCheckedChange={(v) => toggle(c.id, v)} disabled={!["la_county", "cook_county"].includes(c.parser_key)} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground italic">
+            Only Los Angeles and Cook counties have parsers wired up. Others are placeholders for future expansion.
+          </p>
+        </section>
+
+        <section>
+          <h2 className="kpi-label mb-3">Recent scout runs</h2>
+          <div className="border border-border bg-card">
+            <table className="w-full">
+              <thead className="border-b border-border bg-secondary/50">
+                <tr className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                  <th className="text-left px-4 py-2">Started</th>
+                  <th className="text-left px-4 py-2">Trigger</th>
+                  <th className="text-left px-4 py-2">Status</th>
+                  <th className="text-right px-4 py-2">Counties</th>
+                  <th className="text-right px-4 py-2">Found</th>
+                  <th className="text-right px-4 py-2">Qualified</th>
+                  <th className="text-right px-4 py-2">Profiled</th>
+                </tr>
+              </thead>
+              <tbody>
+                {!runs?.length ? (
+                  <tr><td colSpan={7} className="px-4 py-8 text-center text-xs text-muted-foreground italic">No runs yet</td></tr>
+                ) : runs.map((r) => (
+                  <tr key={r.id} className="border-b border-border">
+                    <td className="px-4 py-2 font-mono text-xs">{fmtRelative(r.started_at)}</td>
+                    <td className="px-4 py-2 font-mono text-xs uppercase">{r.trigger_kind}</td>
+                    <td className="px-4 py-2 font-mono text-xs uppercase">{r.status}</td>
+                    <td className="px-4 py-2 font-mono text-sm text-right tabular">{r.counties_scanned}</td>
+                    <td className="px-4 py-2 font-mono text-sm text-right tabular">{r.leads_found}</td>
+                    <td className="px-4 py-2 font-mono text-sm text-right tabular">{r.leads_qualified}</td>
+                    <td className="px-4 py-2 font-mono text-sm text-right tabular">{r.leads_profiled}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </AppShell>
+  );
+};
+export default Admin;
