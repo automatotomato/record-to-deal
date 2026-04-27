@@ -43,7 +43,7 @@ import {
   Search,
   Mail,
   Phone,
-  Linkedin,
+  Link2 as Linkedin,
   Home,
   Settings2,
   SlidersHorizontal,
