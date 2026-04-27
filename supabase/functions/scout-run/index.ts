@@ -16,19 +16,54 @@ const FIRECRAWL_V2 = "https://api.firecrawl.dev/v2";
 // `source_url` overrides this when present.
 // One focused query per county to stay within edge function timeout (~60s).
 const COUNTY_SOURCES: Record<string, { queries: string[]; hint: string }> = {
-  la_county_recorder: {
+  nv_clark: {
     queries: [
-      "Los Angeles multifamily OR commercial property recently sold owner LLC 2026",
+      "Las Vegas Clark County NV multifamily OR commercial OR retail property recently sold owner LLC 2026",
     ],
     hint:
-      "Recent Los Angeles County (CA) property transfers — multifamily, commercial, or investment SFR. Extract owner name, address, sale price/date when visible.",
+      "Recent Clark County, Nevada (Las Vegas, Henderson, North Las Vegas, Paradise, Summerlin) property transfers — multifamily, commercial, retail, industrial, or investment SFR. Extract owner name (LLC preferred), property address, sale price, sale/deed date.",
   },
-  cook_county_recorder: {
+  nv_washoe: {
     queries: [
-      "Chicago Cook County multifamily OR commercial property recently sold owner LLC 2026",
+      "Reno Sparks Washoe County NV commercial OR multifamily property recently sold owner LLC 2026",
     ],
     hint:
-      "Recent Cook County (IL) / Chicago property transfers — multifamily, commercial, or investment SFR. Extract owner name, address, sale price/date when visible.",
+      "Recent Washoe County, Nevada (Reno, Sparks, Incline Village) property transfers — commercial, multifamily, industrial. Extract owner name, address, sale price, date.",
+  },
+  nv_carson_city: {
+    queries: [
+      "Carson City Nevada commercial OR multifamily property recently sold owner LLC 2026",
+    ],
+    hint:
+      "Recent Carson City, Nevada commercial / multifamily / investment property transfers. Extract owner name, address, sale price, date.",
+  },
+  nv_douglas: {
+    queries: [
+      "Douglas County Nevada Minden Gardnerville Stateline commercial property sold owner LLC 2026",
+    ],
+    hint:
+      "Recent Douglas County, NV (Minden, Gardnerville, Stateline / Lake Tahoe south shore) commercial, hospitality, multifamily transfers. Extract owner, address, price, date.",
+  },
+  nv_lyon: {
+    queries: [
+      "Lyon County Nevada Fernley Yerington Dayton commercial OR industrial property sold owner LLC 2026",
+    ],
+    hint:
+      "Recent Lyon County, NV (Fernley, Yerington, Dayton, Silver Springs) industrial, commercial, multifamily transfers. Extract owner, address, price, date.",
+  },
+  nv_nye: {
+    queries: [
+      "Nye County Nevada Pahrump commercial OR land property sold owner LLC 2026",
+    ],
+    hint:
+      "Recent Nye County, NV (Pahrump, Tonopah) commercial, land, and multifamily transfers. Extract owner, address, price, date.",
+  },
+  nv_elko: {
+    queries: [
+      "Elko County Nevada commercial OR industrial property sold owner LLC 2026",
+    ],
+    hint:
+      "Recent Elko County, NV (Elko, Spring Creek, Wells) commercial, industrial, ranch transfers. Extract owner, address, price, date.",
   },
 };
 
