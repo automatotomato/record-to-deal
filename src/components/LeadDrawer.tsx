@@ -56,13 +56,17 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
     }
   }, [lead, emails]);
 
-  const draftEmail = async () => {
+  const draftEmail = async (force = false) => {
     setDrafting(true);
-    toast.loading("Profiling lead and drafting outreach…", { id: "draft" });
+    toast.loading(force ? "Re-profiling seller…" : "Profiling lead and drafting outreach…", { id: "draft" });
     try {
-      const { data, error } = await supabase.functions.invoke("profiler-run", { body: { lead_id: leadId } });
+      const { data, error } = await supabase.functions.invoke("profiler-run", { body: { lead_id: leadId, force } });
       if (error) throw error;
-      toast.success("Draft ready", { id: "draft" });
+      if ((data as any)?.cached) {
+        toast.success("Using saved seller info", { id: "draft" });
+      } else {
+        toast.success("Draft ready", { id: "draft" });
+      }
       qc.invalidateQueries({ queryKey: ["lead", leadId] });
       qc.invalidateQueries({ queryKey: ["emails", leadId] });
     } catch (e: any) {
