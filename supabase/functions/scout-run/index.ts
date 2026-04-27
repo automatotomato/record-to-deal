@@ -99,28 +99,34 @@ const EXTRACTION_SCHEMA = {
   required: ["leads"],
 };
 
-async function firecrawlScrape(url: string, hint: string, apiKey: string) {
-  const resp = await fetch(`${FIRECRAWL_V2}/scrape`, {
+async function firecrawlSearchAndExtract(
+  query: string,
+  hint: string,
+  apiKey: string,
+): Promise<{ leads: ExtractedLead[]; sourceUrls: string[] }> {
+  const resp = await fetch(`${FIRECRAWL_V2}/search`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      url,
-      onlyMainContent: true,
-      waitFor: 2000,
-      formats: [
-        "markdown",
-        {
-          type: "json",
-          schema: EXTRACTION_SCHEMA,
-          prompt:
-            `${hint} Return up to 25 distinct property transfers. ` +
-            `Use ISO dates. Skip records older than 60 days when a date is visible. ` +
-            `If owner appears to be an LLC, trust, or corporation, set property_type accordingly when possible.`,
-        },
-      ],
+      query,
+      limit: 6,
+      tbs: "qdr:m", // last month
+      scrapeOptions: {
+        onlyMainContent: true,
+        formats: [
+          "markdown",
+          {
+            type: "json",
+            schema: EXTRACTION_SCHEMA,
+            prompt:
+              `${hint} Return up to 10 distinct property transfers found on this page. ` +
+              `Use ISO dates. Skip any record without at least an address or owner name.`,
+          },
+        ],
+      },
     }),
   });
   const data = await resp.json();
@@ -129,10 +135,26 @@ async function firecrawlScrape(url: string, hint: string, apiKey: string) {
       `Firecrawl ${resp.status}: ${JSON.stringify(data).slice(0, 400)}`,
     );
   }
-  // SDK-style response: data.json.leads OR data.data.json.leads
-  const json = data?.json ?? data?.data?.json ?? {};
-  const leads: ExtractedLead[] = Array.isArray(json?.leads) ? json.leads : [];
-  return leads;
+  // Response: { success, data: { web: [{ url, json: { leads: [...] } }] } } (v2 SDK shape)
+  // Older shape: { data: [{ url, json: {...} }] }
+  const results: Array<Record<string, unknown>> =
+    (data?.data?.web as Array<Record<string, unknown>>) ??
+    (Array.isArray(data?.data) ? data.data : []) ??
+    [];
+  const aggregated: ExtractedLead[] = [];
+  const sourceUrls: string[] = [];
+  for (const r of results) {
+    const url = (r?.url as string) ?? "";
+    if (url) sourceUrls.push(url);
+    const json = (r?.json as { leads?: ExtractedLead[] } | undefined) ??
+      ((r?.extract as { leads?: ExtractedLead[] } | undefined));
+    const leads = Array.isArray(json?.leads) ? json!.leads! : [];
+    for (const lead of leads) {
+      if (!lead.source_record_url && url) lead.source_record_url = url;
+      aggregated.push(lead);
+    }
+  }
+  return { leads: aggregated, sourceUrls };
 }
 
 function inferOwnerType(name?: string) {
