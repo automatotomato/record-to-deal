@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fmtMoney, fmtDate, fmtRelative, tierColor, daysSince } from "@/lib/format";
-import { Loader2, Sparkles, AlertCircle, ExternalLink, Mail, Phone, Linkedin, Send, RefreshCw, Building2 } from "lucide-react";
+import { Loader2, Sparkles, AlertCircle, ExternalLink, Mail, Phone, Link2 as Linkedin, Send, RefreshCw, Building2 } from "lucide-react";
 import { toast } from "sonner";
 import { TouchpointTimeline } from "./TouchpointTimeline";
 import { NextActionEditor } from "./NextActionEditor";
