@@ -23,15 +23,15 @@ function attomLandUseToType(use: string | undefined | null): string {
   return "Unknown";
 }
 
-// Look up an ATTOM geoIdV4 for a Nevada county. Cached on counties.attom_geo_id.
+// Look up an ATTOM geoIdV4 for a county. Cached on counties.attom_geo_id.
 async function attomLookupCountyGeoId(
   countyName: string,
+  stateAbbr: string,
   apiKey: string,
 ): Promise<string | null> {
   // ATTOM /area/lookup expects: WhereClause + geoType. County geoType is "CO".
-  // Example geoIdV4 for Clark County NV: "CO46f4...". The lookup returns it.
   const params = new URLSearchParams({
-    WhereClause: `CountyName like '${countyName.toUpperCase()}' and StateAbbreviation = 'NV'`,
+    WhereClause: `CountyName like '${countyName.toUpperCase()}' and StateAbbreviation = '${stateAbbr.toUpperCase()}'`,
     geoType: "CO",
   });
   try {
