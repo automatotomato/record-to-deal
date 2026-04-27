@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fmtMoney, fmtDate, fmtRelative, tierColor } from "@/lib/format";
-import { Loader2, Play, Download, AlertCircle, Search, Mail, Phone, Linkedin, Home, Sparkles } from "lucide-react";
+import { Loader2, Play, Download, AlertCircle, Search, Mail, Phone, Linkedin, Home, Sparkles, MoreHorizontal } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator, DropdownMenuLabel } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { LeadDrawer } from "./LeadDrawer";
 import { Progress } from "@/components/ui/progress";
@@ -167,30 +168,32 @@ export const OutreachDashboard = () => {
             </div>
             <h1 className="font-display text-5xl leading-none">The Desk.</h1>
           </div>
-          <div className="flex flex-wrap gap-2 justify-end">
-            <Button variant="outline" size="sm" onClick={exportCsv} className="rounded-none font-mono uppercase text-[10px] tracking-wider">
-              <Download className="h-3 w-3 mr-1" /> Export CSV
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={findSellersBulk}
-              disabled={profiling}
-              className="rounded-none font-mono uppercase text-[10px] tracking-wider"
-            >
-              {profiling
-                ? <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                : <Sparkles className="h-3 w-3 mr-1" />}
-              {profiling
-                ? `Finding ${profileProgress.done}/${profileProgress.total}`
-                : "Find seller info (visible)"}
-            </Button>
+          <div className="flex items-center gap-2">
             {isAdmin && (
               <Button size="sm" onClick={runScout} disabled={running} className="rounded-none bg-accent text-accent-foreground hover:bg-accent/90 font-mono uppercase text-[10px] tracking-wider">
                 {running ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Play className="h-3 w-3 mr-1" />}
                 Run Scout
               </Button>
             )}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="rounded-none font-mono uppercase text-[10px] tracking-wider px-2">
+                  <MoreHorizontal className="h-3 w-3" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="rounded-none font-mono text-xs">
+                <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Actions</DropdownMenuLabel>
+                <DropdownMenuItem onClick={findSellersBulk} disabled={profiling}>
+                  {profiling
+                    ? <><Loader2 className="h-3 w-3 mr-2 animate-spin" /> Finding {profileProgress.done}/{profileProgress.total}</>
+                    : <><Sparkles className="h-3 w-3 mr-2" /> Re-enrich visible leads</>}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={exportCsv}>
+                  <Download className="h-3 w-3 mr-2" /> Export CSV
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
 
