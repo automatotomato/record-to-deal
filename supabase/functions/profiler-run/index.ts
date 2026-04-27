@@ -459,6 +459,15 @@ Deno.serve(async (req) => {
   const { capitalGains: capitalGainsEstimate, recapture: depreciationRecapture } =
     estimateTaxExposure(a, l.state ?? null, salePrice, ownershipYears);
 
+  // 1.5 Decision-maker enrichment chain — only runs when keys are present
+  const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY");
+  const hunterKey = Deno.env.get("HUNTER_API_KEY");
+  const enrichment = await enrichDecisionMaker({
+    ownerName, ownerType, propertyAddress: l.property_address ?? null,
+    city: l.property_city ?? null, state: l.state ?? null,
+    firecrawlKey, hunterKey, lovableKey,
+  });
+
   // 2. AI: build personality profile + draft email using Smarty data as source of truth
   const propertyContext = `
 Property: ${l.property_address ?? "?"} · ${l.property_city ?? ""}, ${l.state ?? ""} ${l.property_zip ?? ""}
@@ -478,6 +487,11 @@ ${(Array.isArray(a.financial_history) ? a.financial_history : []).slice(0, 5).ma
   const r = m as Record<string, unknown>;
   return `  ${i + 1}. $${n(r.mortgage_amount)?.toLocaleString() ?? "?"} ${s(r.mortgage_type) ?? ""} from ${s(r.lender_name) ?? "?"} on ${s(r.mortgage_recording_date) ?? "?"}`;
 }).join("\n") || "  (none)"}
+
+Decision maker (best guess): ${enrichment.decisionMakerName ?? "unknown"}${enrichment.decisionMakerRole ? ` (${enrichment.decisionMakerRole})` : ""}
+Likely email: ${enrichment.decisionMakerEmail ?? "unknown"}
+LinkedIn: ${enrichment.decisionMakerLinkedIn ?? "unknown"}
+News / web mentions: ${enrichment.newsSnippets.slice(0, 3).join(" | ") || "none"}
 `.trim();
 
   const aiResp = await fetch(AI_URL, {
