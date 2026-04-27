@@ -282,7 +282,7 @@ Deno.serve(async (req) => {
       const extracted: ExtractedLead[] = [];
       for (const q of queries) {
         try {
-          const { leads } = await firecrawlSearchAndExtract(q, hint, firecrawlKey);
+          const { leads } = await firecrawlSearchAndExtract(q, hint, firecrawlKey, lovableKey);
           extracted.push(...leads);
         } catch (qe) {
           const msg = qe instanceof Error ? qe.message : String(qe);
