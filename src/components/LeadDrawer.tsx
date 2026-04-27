@@ -101,25 +101,32 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
               <Fact label="Held" value={lead.ownership_years ? `${lead.ownership_years}y` : "—"} />
             </div>
 
+            {/* Workflow — moved to top so changing status is one click after opening */}
+            <Section title="Workflow status">
+              <div className="flex items-center gap-2">
+                <Select value={lead.status} onValueChange={updateStatus}>
+                  <SelectTrigger className="rounded-none h-9 w-[200px] font-mono text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {["new", "reviewing", "contacted", "replied", "meeting", "won", "dead"].map((s) => (
+                      <SelectItem key={s} value={s} className="font-mono text-xs">{s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <span className="text-[11px] text-muted-foreground font-mono">
+                  Changes are saved automatically.
+                </span>
+              </div>
+            </Section>
+
             {/* Seller / Owner */}
             <Section title="Seller information">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-lg font-semibold">{lead.owner_name ?? "Unknown owner"}</div>
-                  <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mt-0.5">
-                    {lead.owner_type ?? "Unknown"}
-                  </div>
+              <div>
+                <div className="text-lg font-semibold">{lead.owner_name ?? "Unknown owner"}</div>
+                <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mt-0.5">
+                  {lead.owner_type ?? "Unknown"}
                 </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => draftEmail(false)}
-                  disabled={drafting}
-                  className="rounded-none font-mono text-[10px] uppercase tracking-wider shrink-0"
-                >
-                  {drafting ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
-                  {lead.contact_email || lead.contact_phone || lead.mailing_address ? "Re-profile" : "Find seller info"}
-                </Button>
               </div>
 
               {lead.mailing_address && (
@@ -158,7 +165,7 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
 
               {!lead.contact_email && !lead.contact_phone && !lead.mailing_address && (
                 <div className="mt-3 text-[11px] text-warm font-mono uppercase tracking-wider">
-                  ⚠ No seller contact yet — click "Find seller info" to pull from public records
+                  ⚠ No seller contact yet — use "Find owner & draft email" below to pull from public records.
                 </div>
               )}
             </Section>
