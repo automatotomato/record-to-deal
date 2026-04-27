@@ -15,7 +15,7 @@ import { LeadDrawer } from "./LeadDrawer";
 import { useAuth } from "@/hooks/useAuth";
 
 type Lead = any;
-type TabKey = "candidates" | "active" | "cold" | "disqualified";
+type TabKey = "candidates" | "active";
 
 const STATUS_DOT: Record<string, string> = {
   new: "bg-accent",
