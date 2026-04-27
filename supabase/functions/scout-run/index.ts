@@ -349,7 +349,18 @@ Deno.serve(async (req) => {
           property_city: lead.property_city ?? null,
           property_zip: lead.property_zip ?? null,
           parcel_number: lead.parcel_number ?? null,
-          property_type: lead.property_type ?? "Unknown",
+          property_type: ((): string => {
+            // Map LLM outputs to the property_type enum (no Industrial/Office/Retail)
+            const raw = (lead.property_type ?? "Unknown").toString();
+            const valid = ["SFR", "Multifamily", "Commercial", "Land", "Mixed", "Unknown"];
+            if (valid.includes(raw)) return raw;
+            const lower = raw.toLowerCase();
+            if (lower.includes("indust") || lower.includes("office") || lower.includes("retail") || lower.includes("warehouse")) return "Commercial";
+            if (lower.includes("apart") || lower.includes("multi")) return "Multifamily";
+            if (lower.includes("single") || lower.includes("residential")) return "SFR";
+            if (lower.includes("land") || lower.includes("vacant")) return "Land";
+            return "Unknown";
+          })(),
           sale_price: lead.sale_price ?? null,
           sale_date: lead.sale_date ?? null,
           deed_date: lead.deed_date ?? lead.sale_date ?? null,
