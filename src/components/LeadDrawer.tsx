@@ -247,6 +247,9 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
                 </div>
               )}
 
+              {/* Reference links — public-record sources used to find seller info */}
+              <ReferenceLinksInline lead={lead} activities={activities} />
+
               {/* Fallback: let user supply company website if discovery fails */}
               {(lead.discovery_status === "failed" || (!lead.decision_maker_email && !lead.contact_email)) && (
                 <div className="mt-4 p-3 border border-dashed border-border bg-secondary/30">
@@ -379,8 +382,6 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
               <TouchpointTimeline leadId={leadId} />
             </Section>
 
-            {/* Reference links — public-record sources used to find seller info */}
-            <ReferenceLinks lead={lead} activities={activities} />
 
             {/* Activity */}
             <Section title="Activity">
@@ -421,7 +422,7 @@ function mailingFromAssessor(activities: any[] | undefined): boolean {
 
 // Aggregate every public-record / web URL the Profiler used so the user
 // can verify where the seller info came from.
-const ReferenceLinks = ({ lead, activities }: { lead: any; activities: any[] | undefined }) => {
+const ReferenceLinksInline = ({ lead, activities }: { lead: any; activities: any[] | undefined }) => {
   const profilerRuns = (activities ?? []).filter((a) => a.kind === "profiler_run");
   const sourceUrls: string[] = [];
   for (const run of profilerRuns) {
@@ -460,7 +461,7 @@ const ReferenceLinks = ({ lead, activities }: { lead: any; activities: any[] | u
   if (!uniqueSources.length && !manualLinks.length) return null;
 
   return (
-    <div className="px-6 py-5 border-b border-border">
+    <div className="mt-4 pt-3 border-t border-border">
       <div className="kpi-label mb-3">Reference links</div>
 
       {manualLinks.length > 0 && (
