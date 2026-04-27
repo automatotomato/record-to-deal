@@ -616,7 +616,7 @@ Return JSON with this exact shape:
         lead_id: leadId,
         subject: profile.email_subject,
         body: profile.email_body,
-        to_email: null, // Smarty doesn't supply email; needs skip-trace
+        to_email: enrichment.decisionMakerEmail ?? null,
         status: "draft",
       })
       .select("id")
