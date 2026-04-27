@@ -320,6 +320,7 @@ Deno.serve(async (req) => {
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY");
   const lovableKey = Deno.env.get("LOVABLE_API_KEY");
+  const attomKey = Deno.env.get("ATTOM_API_KEY");
 
   if (!firecrawlKey || !lovableKey) {
     return new Response(
