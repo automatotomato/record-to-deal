@@ -1,59 +1,96 @@
-## Cleanup Plan
+## Goal
 
-Remove dead code, broken references, and stale artifacts left over from earlier iterations (multi-state focus, A/B/C/D tier system, never-built edge functions, etc.). No feature changes — purely housekeeping.
+Make The Desk feel like a single, obvious workflow:
+**Find leads → Review urgent ones → Open a lead → Draft outreach.**
 
-### 1. Remove broken / stale code in components
+No jargon. One clear primary action at any moment. Everything else tucked away.
 
-**`src/components/LeadDrawer.tsx`**
-- Remove the **Send via Gmail** button + `sendEmail` flow + `send-outreach-email` invocation. That edge function was never built — clicking Send currently throws.
-- Remove the email composer UI (`toEmail`, `emailSubject`, `emailBody` state, `Input`/`Textarea` block) since without send it's pointless. Keep the AI draft preview as read-only text, or drop the whole "Outreach" section.
-- Remove CA/IL-specific reference links in `ReferenceLinks` (LA Assessor, LA Recorder, Cook County Assessor, Cook County Recorder). Replace with Nevada equivalents (Clark County Assessor / Washoe County Assessor) or just leave the generic Google/LinkedIn/OpenCorporates lookups.
-- Remove obsolete `A`/`B`/`C`/`D` keys from `TIER_DESCRIPTIONS` (tiers are now `URGENT/HOT/WARM/COLD/DISQUALIFIED/UNSCORED`).
-- Remove unused imports (`Send`, etc.).
+## What changes (user-facing)
 
-**`src/components/OutreachDashboard.tsx`**
-- Remove the `findSellersBulk` action and its dropdown item — Admin's `profileAllUnprofiled` already does this, and the qualifier auto-profiles every new lead. Keeps the "More" dropdown to just **Export CSV**.
-- Remove related state (`profiling`, `profileProgress`) and the progress bar.
-- Remove unused imports (`Sparkles`, `DropdownMenuSeparator`).
+### 1. Header — one primary action, plain language
 
-**`src/pages/Admin.tsx`**
-- Fix the county-toggle switch: replace `["la_county", "cook_county"]` whitelist with the actual NV parser keys (`clark_county`, `washoe_county`) so admins can toggle the counties that matter.
-- Update the helper caption ("Only Los Angeles and Cook…") to reflect Nevada coverage.
-- Remove unused imports (`Sparkles`, `Target`).
-- Remove leftover `data?.tier_a`/`tier_b` toast (qualifier returns `tier_urgent`/`tier_hot`/`tier_warm` now).
+Current header has "Find new leads" + a "More" dropdown for export. It's small and looks decorative.
 
-### 2. Delete unused files
+New header:
+- Big title stays ("The Desk").
+- A short helper line under it: e.g. *"148 leads · 12 urgent · last refreshed 2h ago"* — replaces the "Outreach pipeline · Live feed" eyebrow.
+- One **prominent primary button**: **`+ Find new leads`** (orange, larger, with a tooltip: *"Scans Nevada county records for fresh investment property sales"*).
+- Secondary button: **`Export CSV`** (visible, not buried in a dropdown).
+- "Sources" admin button moved to header (admin only) so admins don't hunt for it in the sidebar.
 
-- `src/components/NavLink.tsx` — wrapper that nothing imports (`AppShell` uses `NavLink` from `react-router-dom` directly).
-- `src/App.css` — Vite default boilerplate; not imported anywhere (project uses `index.css`).
+### 2. KPI strip — fewer, friendlier
 
-### 3. Delete unused shadcn/ui components
+Today: 6 KPIs, some are jargon ("Avg score", "Data quality").
 
-These have zero imports outside their own files:
-`accordion`, `alert`, `alert-dialog`, `aspect-ratio`, `avatar`, `breadcrumb`, `calendar`, `carousel`, `chart`, `checkbox`, `collapsible`, `command`, `context-menu`, `drawer`, `form`, `hover-card`, `input-otp`, `menubar`, `navigation-menu`, `pagination`, `radio-group`, `resizable`, `scroll-area`, `slider`, `tabs`, `toggle`, `toggle-group`, `sidebar` (custom sidebar in `AppShell`).
+New: 4 KPIs, each with a 1-line description on hover:
+- **Total leads** (all time)
+- **Urgent** *(sold in the last 30 days — 1031 clock is ticking)*
+- **Hot leads** *(strongest 1031 candidates)*
+- **Pipeline tax exposure** *(combined estimated tax bill across all leads)*
 
-Keep: `button, input, select, dropdown-menu, sheet, switch, progress, textarea, table, badge, card, dialog, label, popover, separator, skeleton, sonner, toast, toaster, tooltip, use-toast`.
+Drop "Avg score" and "Data quality" — they're internal metrics, not client-actionable.
 
-### 4. Remove unused npm dependencies
+### 3. Tabs — clearer labels, one default view
 
-After step 3, remove from `package.json`:
-- `@radix-ui/react-accordion`, `react-alert-dialog`, `react-aspect-ratio`, `react-avatar`, `react-checkbox`, `react-collapsible`, `react-context-menu`, `react-hover-card`, `react-menubar`, `react-navigation-menu`, `react-radio-group`, `react-scroll-area`, `react-slider`, `react-toggle`, `react-toggle-group`
-- `cmdk`, `date-fns`, `embla-carousel-react`, `input-otp`, `next-themes`, `react-day-picker`, `react-resizable-panels`, `recharts`, `vaul`
-- `@hookform/resolvers`, `react-hook-form`, `zod` (no forms in project)
-- `@tailwindcss/typography` (no `prose` usage)
+Current: `Active leads / Cold / Disqualified`.
 
-### 5. Database / edge function cleanup
+New labels (clearer intent):
+- **`Worth pursuing`** *(URGENT + HOT + WARM + UNSCORED)* — default
+- **`Low priority`** *(COLD)*
+- **`Filtered out`** *(DISQUALIFIED — explains in tooltip: "Owner-occupied homes, too small, etc.")*
 
-- No edge functions to delete from Supabase (only `scout-run`, `qualifier-run`, `profiler-run` exist and are all in use).
-- No table changes — `outreach_emails` table stays in case email-send is re-added later.
+Each tab keeps its count badge.
 
-### 6. Out of scope
+### 4. Filters — collapse into one row, hide noise
 
-- No behavior changes to scout/qualifier/profiler logic.
-- No styling/theme changes.
-- Outreach email feature is left removed; if you want it back later, we'd build the `send-outreach-email` edge function fresh.
+Current: 3 select dropdowns + search, all visible.
 
-### Files touched
+New:
+- Search bar stays, full width on the left, with placeholder *"Search by owner, address, or city"*.
+- A single **`Filters`** button opens a popover with Tier / State / Status filters. A small badge shows how many filters are active.
+- Removes visual clutter; advanced users still get the same controls.
 
-Edited: `src/components/LeadDrawer.tsx`, `src/components/OutreachDashboard.tsx`, `src/pages/Admin.tsx`, `package.json`
-Deleted: `src/components/NavLink.tsx`, `src/App.css`, ~28 files in `src/components/ui/`
+### 5. Lead table — clearer columns, scannable
+
+Same data, friendlier headers and small cleanups:
+- `Tier` → `Priority`
+- `Score` → removed from default view (it's an internal number — moved to lead drawer)
+- `Type` → `Property type`
+- `Mailing address` → `Owner mailing` with a small "no address" badge instead of an em-dash when missing
+- `Sold` → `Last sale`
+- `Status` column: replace text with a colored dot + label (e.g. green dot "New", grey dot "Contacted") — easier to scan
+- Add a subtle row hover hint: *"Click to open lead"* on first hover only.
+
+### 6. Empty state — guides next step
+
+Current empty state mentions "Los Angeles and Cook counties" (stale copy from before NV pivot).
+
+New empty state:
+- Headline: *"No leads yet."*
+- Subline: *"Click 'Find new leads' to scan Nevada county records for recent investment property sales. This usually takes 1–2 minutes."*
+- Big primary button to run the scout.
+
+### 7. Lead drawer — one clear next action
+
+Currently has two near-identical buttons: "Find seller info" in the Seller section AND "Profile + draft email" in the AI section, both calling the same function. Confusing.
+
+Fix:
+- Remove the duplicate button in the Seller section.
+- Rename the single action to **`Find owner & draft email`** (action verb, plain language).
+- Once data exists, the button becomes **`Refresh & re-draft`**.
+- Move the "Workflow / Status" section to the **top** of the drawer so changing status is one click after opening.
+
+## What stays the same
+
+- Editorial typography, color palette, dense data feel — only labels and layout improve.
+- All scout / qualifier / profiler logic is untouched.
+- Realtime updates, CSV export, drawer content all preserved.
+
+## Technical scope
+
+Files edited:
+- `src/components/OutreachDashboard.tsx` — header restructure, KPI changes, tab labels, filter popover, table column updates, empty-state copy.
+- `src/components/LeadDrawer.tsx` — remove duplicate action button, rename primary CTA, move Workflow section to top.
+- `src/components/AppShell.tsx` — minor: keep "Sources" in sidebar for admins (no change needed if header link added).
+
+No database, edge function, or schema changes. No new dependencies.
