@@ -16,6 +16,7 @@ export type Database = {
     Tables: {
       counties: {
         Row: {
+          attom_geo_id: string | null
           county: string
           created_at: string
           enabled: boolean
@@ -28,6 +29,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          attom_geo_id?: string | null
           county: string
           created_at?: string
           enabled?: boolean
@@ -40,6 +42,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          attom_geo_id?: string | null
           county?: string
           created_at?: string
           enabled?: boolean
@@ -341,6 +344,7 @@ export type Database = {
           leads_found: number | null
           leads_profiled: number | null
           leads_qualified: number | null
+          leads_updated: number
           started_at: string
           status: Database["public"]["Enums"]["scout_run_status"]
           trigger_kind: string
@@ -354,6 +358,7 @@ export type Database = {
           leads_found?: number | null
           leads_profiled?: number | null
           leads_qualified?: number | null
+          leads_updated?: number
           started_at?: string
           status?: Database["public"]["Enums"]["scout_run_status"]
           trigger_kind?: string
@@ -367,6 +372,7 @@ export type Database = {
           leads_found?: number | null
           leads_profiled?: number | null
           leads_qualified?: number | null
+          leads_updated?: number
           started_at?: string
           status?: Database["public"]["Enums"]["scout_run_status"]
           trigger_kind?: string

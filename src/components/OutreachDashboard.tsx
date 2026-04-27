@@ -7,15 +7,15 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { fmtMoney, fmtRelative, tierColor } from "@/lib/format";
-import { Loader2, Plus, Download, AlertCircle, Search, Mail, Phone, Linkedin, Home, Settings2, SlidersHorizontal, X } from "lucide-react";
+import { fmtMoney, fmtRelative, tierColor, windowStatus } from "@/lib/format";
+import { Loader2, Plus, Download, AlertCircle, Search, Mail, Phone, Linkedin, Home, Settings2, SlidersHorizontal, X, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { LeadDrawer } from "./LeadDrawer";
 
 import { useAuth } from "@/hooks/useAuth";
 
 type Lead = any;
-type TabKey = "active" | "cold" | "disqualified";
+type TabKey = "candidates" | "active" | "cold" | "disqualified";
 
 const STATUS_DOT: Record<string, string> = {
   new: "bg-accent",
@@ -40,7 +40,7 @@ const STATUS_LABEL: Record<string, string> = {
 export const OutreachDashboard = () => {
   const { isAdmin } = useAuth();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<TabKey>("active");
+  const [tab, setTab] = useState<TabKey>("candidates");
   const [tierFilter, setTierFilter] = useState<string>("all");
   const [stateFilter, setStateFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("active");
@@ -89,9 +89,22 @@ export const OutreachDashboard = () => {
     return () => { supabase.removeChannel(ch); };
   }, [qc]);
 
+  // A lead qualifies as a true 1031 candidate when:
+  //  - it's a real opportunity (not COLD/DISQUALIFIED)
+  //  - the trigger is a recent or pending sale (the 180-day clock applies)
+  //  - the owner looks like an investor entity (LLC/Corp/Trust/etc.)
+  const isCandidate = (l: Lead) => {
+    if (l.tier === "COLD" || l.tier === "DISQUALIFIED") return false;
+    const trig = (l.trigger_event ?? "").toLowerCase();
+    if (!trig.includes("sale") && trig !== "probate") return false;
+    const otype = (l.owner_type ?? "").toLowerCase();
+    return otype !== "individual" && otype !== "unknown" && otype !== "";
+  };
+
   const filtered = useMemo(() => {
     if (!leads) return [];
     return leads.filter((l) => {
+      if (tab === "candidates" && !isCandidate(l)) return false;
       if (tab === "active" && (l.tier === "COLD" || l.tier === "DISQUALIFIED")) return false;
       if (tab === "cold" && l.tier !== "COLD") return false;
       if (tab === "disqualified" && l.tier !== "DISQUALIFIED") return false;
@@ -108,12 +121,23 @@ export const OutreachDashboard = () => {
     });
   }, [leads, tab, tierFilter, stateFilter, statusFilter, search]);
 
+  // For "1031 Candidates" tab, sort freshest sale first so closing-window leads bubble up.
+  const ordered = useMemo(() => {
+    if (tab !== "candidates") return filtered;
+    return [...filtered].sort((a, b) => {
+      const da = a.sale_date ? new Date(a.sale_date).getTime() : 0;
+      const db = b.sale_date ? new Date(b.sale_date).getTime() : 0;
+      return db - da;
+    });
+  }, [filtered, tab]);
+
   const tabCounts = useMemo(() => {
-    const c = { active: 0, cold: 0, disqualified: 0 };
+    const c = { candidates: 0, active: 0, cold: 0, disqualified: 0 };
     for (const l of leads ?? []) {
       if (l.tier === "COLD") c.cold += 1;
       else if (l.tier === "DISQUALIFIED") c.disqualified += 1;
       else c.active += 1;
+      if (isCandidate(l)) c.candidates += 1;
     }
     return c;
   }, [leads]);
@@ -145,8 +169,12 @@ export const OutreachDashboard = () => {
         body: { trigger_kind: "manual" },
       });
       if (error) throw error;
+      const found = data?.leads_found ?? 0;
+      const updated = data?.leads_updated ?? 0;
       toast.success(
-        `Scan started — ${data?.leads_found ?? 0} new leads found so far. Updates will appear automatically.`,
+        updated || found
+          ? `Scan running — ${found} new, ${updated} refreshed so far. Pipeline updates automatically.`
+          : `Scan started. New leads will appear here within 1–2 minutes.`,
         { id: "scout", duration: 6000 },
       );
       qc.invalidateQueries({ queryKey: ["leads"] });
@@ -291,9 +319,16 @@ export const OutreachDashboard = () => {
         {/* Tabs */}
         <div className="px-8 border-b border-border bg-background flex items-center gap-0 overflow-x-auto">
           <TabButton
+            active={tab === "candidates"}
+            onClick={() => { setTab("candidates"); setTierFilter("all"); }}
+            label="1031 Candidates"
+            count={tabCounts.candidates}
+            tooltip="Entity-owned recent sales — the 180-day 1031 clock is ticking. Sorted freshest first."
+          />
+          <TabButton
             active={tab === "active"}
             onClick={() => { setTab("active"); setTierFilter("all"); }}
-            label="Worth pursuing"
+            label="All worth pursuing"
             count={tabCounts.active}
             tooltip="Urgent, hot, warm, and unscored leads — your active pipeline."
           />
@@ -418,7 +453,7 @@ export const OutreachDashboard = () => {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((l) => (
+                {ordered.map((l) => (
                   <tr
                     key={l.id}
                     onClick={() => setSelectedId(l.id)}
@@ -464,7 +499,8 @@ export const OutreachDashboard = () => {
                       {fmtMoney(l.total_tax_exposure, { compact: true })}
                     </td>
                     <td className="px-4 py-3 data-cell text-muted-foreground">
-                      {fmtRelative(l.sale_date)}
+                      <div>{fmtRelative(l.sale_date)}</div>
+                      <WindowPill saleDate={l.sale_date} />
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5">
@@ -526,6 +562,27 @@ const TabButton = ({
 const Th = ({ children, right }: { children: React.ReactNode; right?: boolean }) => (
   <th className={`px-4 py-2 font-medium ${right ? "text-right" : "text-left"}`}>{children}</th>
 );
+
+const WindowPill = ({ saleDate }: { saleDate?: string | null }) => {
+  const w = windowStatus(saleDate);
+  if (!w) return null;
+  const tone =
+    w.tone === "fresh" ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+    : w.tone === "active" ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+    : w.tone === "closing" ? "bg-red-500/20 text-red-600 dark:text-red-400"
+    : w.tone === "expired" ? "bg-muted text-muted-foreground/60"
+    : "bg-muted text-muted-foreground";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className={`mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider ${tone}`}>
+          <Clock className="h-2.5 w-2.5" /> {w.label}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>1031 exchange clock: 180 days from sale to close on a replacement property.</TooltipContent>
+    </Tooltip>
+  );
+};
 
 const SellerIcons = ({ lead }: { lead: any }) => {
   const items: { icon: React.ReactNode; on: boolean; label: string; value?: string }[] = [
@@ -592,6 +649,7 @@ const EmptyState = ({
     );
   }
   const tabCopy: Record<TabKey, string> = {
+    candidates: "No active 1031 candidates yet. Click 'Find new leads' or check the All / Cold tabs.",
     active: "No leads match your current filters. Try clearing them or switching tabs.",
     cold: "No cold leads right now — that's a good thing.",
     disqualified: "Nothing has been filtered out yet.",
