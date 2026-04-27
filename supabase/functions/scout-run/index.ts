@@ -629,20 +629,29 @@ Deno.serve(async (req) => {
       // Build payloads, dedupe in-batch first
       const seen = new Set<string>();
       const payloads = [];
-      let droppedNonNv = 0;
+      let droppedWrongState = 0;
       let droppedHomeowner = 0;
       let droppedTooSmall = 0;
+      // State name -> abbreviation for cross-checks
+      const STATE_NAMES: Record<string, string> = {
+        NEVADA: "NV", ARIZONA: "AZ", CALIFORNIA: "CA", TEXAS: "TX", FLORIDA: "FL",
+        COLORADO: "CO", UTAH: "UT", WASHINGTON: "WA", ILLINOIS: "IL", "NEW YORK": "NY",
+        OREGON: "OR", "NEW JERSEY": "NJ", MASSACHUSETTS: "MA",
+      };
       for (const lead of extracted) {
         if (!lead.property_address && !lead.parcel_number) continue;
         const key = `${lead.parcel_number ?? ""}|${lead.property_address ?? ""}`;
         if (seen.has(key)) continue;
         seen.add(key);
 
-        // --- HARD STATE GUARD: drop anything that doesn't look Nevada ---
+        // --- STATE GUARD: drop a lead only when its address explicitly names
+        // a different US state than the county we're scanning. ---
         const addrBlob = `${lead.property_address ?? ""} ${lead.property_city ?? ""}`.toUpperCase();
-        const looksNonNv = /\b(IL|ILLINOIS|CHICAGO|CA|CALIFORNIA|TX|TEXAS|FL|FLORIDA|NY|NEW YORK|DOLTON|EVANSTON|WILMETTE|SKOKIE|NILES|HOFFMAN ESTATES|WHEELING)\b/.test(addrBlob);
-        if (county.state === "NV" && looksNonNv) {
-          droppedNonNv += 1;
+        const stateMatch = addrBlob.match(/\b(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)\b/);
+        const nameMatch = Object.keys(STATE_NAMES).find((n) => addrBlob.includes(n));
+        const inferredState = stateMatch?.[1] ?? (nameMatch ? STATE_NAMES[nameMatch] : null);
+        if (inferredState && inferredState !== county.state) {
+          droppedWrongState += 1;
           continue;
         }
 
