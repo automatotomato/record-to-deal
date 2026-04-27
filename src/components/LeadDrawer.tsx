@@ -261,18 +261,51 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
                     </div>
                   );
                 }
+                const defaultTo = latestDraft.to_email || lead.decision_maker_email || lead.contact_email || "";
                 return (
                   <div className="space-y-2 border border-border bg-secondary/30 p-3">
                     <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Subject</div>
                     <div className="text-sm font-medium">{latestDraft.subject}</div>
                     <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mt-2">Body</div>
                     <pre className="text-sm whitespace-pre-wrap font-sans leading-relaxed">{latestDraft.body}</pre>
-                    {latestDraft.to_email && (
-                      <div className="font-mono text-[10px] text-muted-foreground mt-2">To: {latestDraft.to_email}</div>
-                    )}
+
+                    <div className="mt-3 pt-3 border-t border-border space-y-2">
+                      <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Send to</div>
+                      <Input
+                        type="email"
+                        placeholder={defaultTo || "recipient@example.com"}
+                        value={recipientOverride}
+                        onChange={(e) => setRecipientOverride(e.target.value)}
+                        className="rounded-none h-8 font-mono text-xs"
+                      />
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          onClick={() => sendEmail(latestDraft, lead)}
+                          disabled={sending || (!recipientOverride.trim() && !defaultTo)}
+                          className="rounded-none bg-primary text-primary-foreground hover:bg-primary/90 font-mono text-[10px] uppercase tracking-wider"
+                        >
+                          {sending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Send className="h-3 w-3 mr-1" />}
+                          Send from my Gmail
+                        </Button>
+                        <span className="text-[10px] font-mono text-muted-foreground">
+                          {recipientOverride.trim() || defaultTo || "no recipient yet"}
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 );
               })()}
+            </Section>
+
+            {/* Next action — quick CRM follow-up */}
+            <Section title="Next action">
+              <NextActionEditor lead={lead} />
+            </Section>
+
+            {/* Touchpoint timeline — CRM activity feed */}
+            <Section title="Touchpoints">
+              <TouchpointTimeline leadId={leadId} />
             </Section>
 
             {/* Reference links — public-record sources used to find seller info */}
