@@ -264,12 +264,14 @@ Deno.serve(async (req) => {
     const work = async () => {
       // Concurrency 3 — Firecrawl rate-limit friendly
       const queue = [...targets];
+      const enriched: string[] = [];
       const worker = async () => {
         while (queue.length) {
           const id = queue.shift();
           if (!id) break;
           try {
-            await supabase.functions.invoke("profiler-run", { body: { lead_id: id } });
+            await supabase.functions.invoke("profiler-run", { body: { lead_id: id, force: true } });
+            enriched.push(id);
             profiled += 1;
           } catch (e) {
             console.warn("Profiler failed for", id, e);
@@ -277,6 +279,16 @@ Deno.serve(async (req) => {
         }
       };
       await Promise.all([worker(), worker(), worker()]);
+      // Re-score enriched leads so tier/score/tax exposure reflect Smarty data
+      if (enriched.length) {
+        try {
+          await supabase.functions.invoke("qualifier-run", {
+            body: { lead_ids: enriched, auto_profile: false },
+          });
+        } catch (e) {
+          console.warn("Re-qualify after profiling failed:", e);
+        }
+      }
       if (body.run_id) {
         await supabase
           .from("scout_runs")
