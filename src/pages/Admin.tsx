@@ -289,8 +289,5 @@ const Stat = ({ label, value, accent, muted }: { label: string; value: string; a
     <div className={`font-display text-2xl tabular ${accent ? "text-accent" : muted ? "text-muted-foreground" : ""}`}>{value}</div>
   </div>
 );
-      </div>
-    </AppShell>
-  );
-};
+
 export default Admin;
