@@ -422,7 +422,7 @@ function mailingFromAssessor(activities: any[] | undefined): boolean {
 
 // Aggregate every public-record / web URL the Profiler used so the user
 // can verify where the seller info came from.
-const ReferenceLinks = ({ lead, activities }: { lead: any; activities: any[] | undefined }) => {
+const ReferenceLinksInline = ({ lead, activities }: { lead: any; activities: any[] | undefined }) => {
   const profilerRuns = (activities ?? []).filter((a) => a.kind === "profiler_run");
   const sourceUrls: string[] = [];
   for (const run of profilerRuns) {
