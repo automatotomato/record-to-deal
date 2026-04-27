@@ -152,6 +152,7 @@ export type Database = {
           assessed_value: number | null
           assigned_to: string | null
           capital_gains_estimate: number | null
+          company_website: string | null
           contact_completeness: number | null
           contact_email: string | null
           contact_linkedin: string | null
@@ -167,6 +168,8 @@ export type Database = {
           decision_maker_role: string | null
           deed_date: string | null
           depreciation_recapture_est: number | null
+          discovery_confidence_by_field: Json
+          discovery_status: string
           enrichment_confidence: number
           enrichment_payload: Json
           entity_registry_url: string | null
@@ -196,6 +199,7 @@ export type Database = {
           property_type: Database["public"]["Enums"]["property_type"] | null
           property_zip: string | null
           qualifier_notes: string | null
+          related_entities: Json
           sale_date: string | null
           sale_price: number | null
           score: number | null
@@ -215,6 +219,7 @@ export type Database = {
           assessed_value?: number | null
           assigned_to?: string | null
           capital_gains_estimate?: number | null
+          company_website?: string | null
           contact_completeness?: number | null
           contact_email?: string | null
           contact_linkedin?: string | null
@@ -230,6 +235,8 @@ export type Database = {
           decision_maker_role?: string | null
           deed_date?: string | null
           depreciation_recapture_est?: number | null
+          discovery_confidence_by_field?: Json
+          discovery_status?: string
           enrichment_confidence?: number
           enrichment_payload?: Json
           entity_registry_url?: string | null
@@ -259,6 +266,7 @@ export type Database = {
           property_type?: Database["public"]["Enums"]["property_type"] | null
           property_zip?: string | null
           qualifier_notes?: string | null
+          related_entities?: Json
           sale_date?: string | null
           sale_price?: number | null
           score?: number | null
@@ -278,6 +286,7 @@ export type Database = {
           assessed_value?: number | null
           assigned_to?: string | null
           capital_gains_estimate?: number | null
+          company_website?: string | null
           contact_completeness?: number | null
           contact_email?: string | null
           contact_linkedin?: string | null
@@ -293,6 +302,8 @@ export type Database = {
           decision_maker_role?: string | null
           deed_date?: string | null
           depreciation_recapture_est?: number | null
+          discovery_confidence_by_field?: Json
+          discovery_status?: string
           enrichment_confidence?: number
           enrichment_payload?: Json
           entity_registry_url?: string | null
@@ -322,6 +333,7 @@ export type Database = {
           property_type?: Database["public"]["Enums"]["property_type"] | null
           property_zip?: string | null
           qualifier_notes?: string | null
+          related_entities?: Json
           sale_date?: string | null
           sale_price?: number | null
           score?: number | null
