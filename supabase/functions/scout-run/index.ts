@@ -585,7 +585,7 @@ Deno.serve(async (req) => {
         try {
           let geoId: string | null = (county as any).attom_geo_id ?? null;
           if (!geoId) {
-            geoId = await attomLookupCountyGeoId(county.county, attomKey);
+            geoId = await attomLookupCountyGeoId(county.county, county.state, attomKey);
             if (geoId) {
               await supabase
                 .from("counties")
