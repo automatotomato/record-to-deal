@@ -266,6 +266,9 @@ Deno.serve(async (req) => {
     });
   }
 
+  // Run the scrape + extraction in the background so the HTTP response can
+  // return immediately. The frontend polls scout_runs to learn the outcome.
+  const work = async () => {
   const errors: Array<{ county: string; message: string }> = [];
   let totalFound = 0;
   let countiesScanned = 0;
