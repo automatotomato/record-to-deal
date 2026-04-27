@@ -40,7 +40,7 @@ interface Lead {
 
 interface ScoreResult {
   score: number;
-  tier: "A" | "B" | "C" | "D";
+  tier: "URGENT" | "HOT" | "WARM" | "COLD" | "DISQUALIFIED";
   is_urgent: boolean;
   capital_gains_estimate: number | null;
   depreciation_recapture_est: number | null;
@@ -128,11 +128,12 @@ function score(lead: Lead): ScoreResult {
 
   const total = Object.values(breakdown).reduce((s, n) => s + n, 0);
 
-  // Tier thresholds
-  let tier: "A" | "B" | "C" | "D" = "D";
-  if (total >= 70) tier = "A";
-  else if (total >= 50) tier = "B";
-  else if (total >= 30) tier = "C";
+  // Tier thresholds — must match the lead_tier enum
+  let tier: "URGENT" | "HOT" | "WARM" | "COLD" | "DISQUALIFIED" = "DISQUALIFIED";
+  if (total >= 70) tier = "HOT";
+  else if (total >= 50) tier = "WARM";
+  else if (total >= 30) tier = "COLD";
+  if (isUrgent && total >= 50) tier = "URGENT";
 
   // Tax exposure — prefer Smarty-derived values when available (assessed value
   // gives us the current FMV, sale_price gives us the basis, ownership_years
@@ -219,8 +220,9 @@ Deno.serve(async (req) => {
 
   const list = (leads ?? []) as Lead[];
   let qualified = 0;
-  const tierA: string[] = [];
-  const tierB: string[] = [];
+  const tierUrgent: string[] = [];
+  const tierHot: string[] = [];
+  const tierWarm: string[] = [];
   const allScored: string[] = []; // every successfully scored lead, in order
 
   for (const lead of list) {
@@ -241,8 +243,9 @@ Deno.serve(async (req) => {
       .eq("id", lead.id);
     if (upErr) { console.warn("Score update failed:", upErr.message); continue; }
     qualified += 1;
-    if (r.tier === "A") tierA.push(lead.id);
-    else if (r.tier === "B") tierB.push(lead.id);
+    if (r.tier === "URGENT") tierUrgent.push(lead.id);
+    else if (r.tier === "HOT") tierHot.push(lead.id);
+    else if (r.tier === "WARM") tierWarm.push(lead.id);
     allScored.push(lead.id);
 
     await supabase.from("lead_activities").insert({
@@ -253,13 +256,14 @@ Deno.serve(async (req) => {
     });
   }
 
-  // Fan out the Profiler for EVERY scored lead (tier A first, then B, then rest)
+  // Fan out the Profiler for EVERY scored lead (urgent + hot first, then warm, then rest)
   // so seller/owner contact info is pulled automatically for every property.
   let profiled = 0;
   let profileTargetCount = 0;
   if (autoProfile) {
-    const restOfLeads = allScored.filter((id) => !tierA.includes(id) && !tierB.includes(id));
-    const targets = [...tierA, ...tierB, ...restOfLeads].slice(0, profileCap);
+    const priority = [...tierUrgent, ...tierHot, ...tierWarm];
+    const rest = allScored.filter((id) => !priority.includes(id));
+    const targets = [...priority, ...rest].slice(0, profileCap);
     profileTargetCount = targets.length;
     const work = async () => {
       // Concurrency 3 — Firecrawl rate-limit friendly
@@ -317,8 +321,9 @@ Deno.serve(async (req) => {
     JSON.stringify({
       ok: true,
       qualified,
-      tier_a: tierA.length,
-      tier_b: tierB.length,
+      tier_urgent: tierUrgent.length,
+      tier_hot: tierHot.length,
+      tier_warm: tierWarm.length,
       auto_profiling: profileTargetCount,
     }),
     { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
