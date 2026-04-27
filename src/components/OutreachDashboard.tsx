@@ -107,9 +107,7 @@ export const OutreachDashboard = () => {
     if (!leads) return [];
     return leads.filter((l) => {
       if (tab === "candidates" && !isCandidate(l)) return false;
-      if (tab === "active" && (l.tier === "COLD" || l.tier === "DISQUALIFIED")) return false;
-      if (tab === "cold" && l.tier !== "COLD") return false;
-      if (tab === "disqualified" && l.tier !== "DISQUALIFIED") return false;
+      // (cold/disqualified already excluded at the query level)
       if (tierFilter !== "all" && l.tier !== tierFilter) return false;
       if (stateFilter !== "all" && l.state !== stateFilter) return false;
       if (statusFilter === "active" && (l.status === "dead" || l.status === "won")) return false;
