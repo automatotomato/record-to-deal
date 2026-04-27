@@ -1,22 +1,16 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fmtMoney, fmtDate, fmtRelative, tierColor, daysSince } from "@/lib/format";
-import { Loader2, Sparkles, Send, AlertCircle, ExternalLink, Mail, Phone, Linkedin } from "lucide-react";
+import { Loader2, Sparkles, AlertCircle, ExternalLink, Mail, Phone, Linkedin } from "lucide-react";
 import { toast } from "sonner";
 
 export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () => void }) => {
   const qc = useQueryClient();
   const [drafting, setDrafting] = useState(false);
-  const [sending, setSending] = useState(false);
-  const [emailSubject, setEmailSubject] = useState("");
-  const [emailBody, setEmailBody] = useState("");
-  const [toEmail, setToEmail] = useState("");
 
   const { data: lead, isLoading } = useQuery({
     queryKey: ["lead", leadId],
@@ -43,19 +37,6 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
     },
   });
 
-  // Pre-fill email form from latest draft
-  useEffect(() => {
-    if (!lead) return;
-    const latestDraft = emails?.find((e: any) => e.status === "draft");
-    if (latestDraft) {
-      setEmailSubject(latestDraft.subject);
-      setEmailBody(latestDraft.body);
-      setToEmail(latestDraft.to_email ?? lead.contact_email ?? "");
-    } else {
-      setToEmail(lead.contact_email ?? "");
-    }
-  }, [lead, emails]);
-
   const draftEmail = async (force = false) => {
     setDrafting(true);
     toast.loading(force ? "Re-profiling seller…" : "Profiling lead and drafting outreach…", { id: "draft" });
@@ -73,29 +54,6 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
       toast.error(`Draft failed: ${e.message}`, { id: "draft" });
     } finally {
       setDrafting(false);
-    }
-  };
-
-  const sendEmail = async () => {
-    if (!toEmail) { toast.error("No recipient email"); return; }
-    if (!emailSubject || !emailBody) { toast.error("Subject and body required"); return; }
-    setSending(true);
-    toast.loading("Sending via Gmail…", { id: "send" });
-    try {
-      const { data, error } = await supabase.functions.invoke("send-outreach-email", {
-        body: { lead_id: leadId, to: toEmail, subject: emailSubject, body: emailBody },
-      });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      toast.success("Sent!", { id: "send" });
-      qc.invalidateQueries({ queryKey: ["lead", leadId] });
-      qc.invalidateQueries({ queryKey: ["emails", leadId] });
-      qc.invalidateQueries({ queryKey: ["activities", leadId] });
-      qc.invalidateQueries({ queryKey: ["leads"] });
-    } catch (e: any) {
-      toast.error(`Send failed: ${e.message}`, { id: "send" });
-    } finally {
-      setSending(false);
     }
   };
 
@@ -232,8 +190,8 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
               </Section>
             )}
 
-            {/* Outreach composer */}
-            <Section title="Outreach">
+            {/* AI draft + re-profile */}
+            <Section title="AI outreach draft">
               <div className="flex items-center gap-2 mb-3">
                 <Button size="sm" variant="outline" onClick={() => draftEmail(false)} disabled={drafting} className="rounded-none font-mono text-[10px] uppercase tracking-wider">
                   {drafting ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
@@ -245,22 +203,23 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
                   </Button>
                 )}
               </div>
-
-              <div className="space-y-2">
-                <Input value={toEmail} onChange={(e) => setToEmail(e.target.value)} placeholder="recipient@example.com"
-                       className="rounded-none font-mono text-xs h-8" />
-                <Input value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} placeholder="Subject"
-                       className="rounded-none text-sm h-9" />
-                <Textarea value={emailBody} onChange={(e) => setEmailBody(e.target.value)} rows={12}
-                          placeholder="Email body — click 'Profile + draft email' to auto-generate."
-                          className="rounded-none text-sm font-sans leading-relaxed" />
-                <div className="flex justify-end">
-                  <Button onClick={sendEmail} disabled={sending || !toEmail || !emailBody} className="rounded-none bg-accent text-accent-foreground hover:bg-accent/90 font-mono text-[10px] uppercase tracking-wider">
-                    {sending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Send className="h-3 w-3 mr-1" />}
-                    Send via Gmail
-                  </Button>
-                </div>
-              </div>
+              {(() => {
+                const latestDraft = emails?.find((e: any) => e.status === "draft");
+                if (!latestDraft) {
+                  return <div className="text-xs text-muted-foreground italic">No draft yet — click "Profile + draft email" to generate one.</div>;
+                }
+                return (
+                  <div className="space-y-2 border border-border bg-secondary/30 p-3">
+                    <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Subject</div>
+                    <div className="text-sm font-medium">{latestDraft.subject}</div>
+                    <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mt-2">Body</div>
+                    <pre className="text-sm whitespace-pre-wrap font-sans leading-relaxed">{latestDraft.body}</pre>
+                    {latestDraft.to_email && (
+                      <div className="font-mono text-[10px] text-muted-foreground mt-2">To: {latestDraft.to_email}</div>
+                    )}
+                  </div>
+                );
+              })()}
             </Section>
 
             {/* Status */}
@@ -336,13 +295,13 @@ const ReferenceLinks = ({ lead, activities }: { lead: any; activities: any[] | u
   const addr = encodeURIComponent(lead.property_address ?? "");
   const ownerQ = encodeURIComponent(lead.owner_name ?? "");
 
-  if (state === "CA" && county.includes("los angeles")) {
-    if (parcel.length >= 8) manualLinks.push({ label: "LA County Assessor (parcel)", url: `https://portal.assessor.lacounty.gov/parceldetail/${parcel}` });
-    manualLinks.push({ label: "LA Recorder (deeds)", url: `https://www.lavote.gov/home/county-clerk/property-document-records/property-document-search` });
+  if (state === "NV" && county.includes("clark")) {
+    manualLinks.push({ label: "Clark County Assessor", url: `https://maps.clarkcountynv.gov/assessor/AssessorParcelDetail/parceldetail.aspx?hdnParcel=${parcel}` });
+    manualLinks.push({ label: "Clark County Recorder", url: `https://recorder.co.clark.nv.us/RecorderEcommerce/` });
   }
-  if (state === "IL" && county.includes("cook")) {
-    if (parcel.length >= 10) manualLinks.push({ label: "Cook County Assessor (PIN)", url: `https://www.cookcountyassessor.com/pin/${parcel}` });
-    manualLinks.push({ label: "Cook County Recorder", url: `https://crs.cookcountyclerkil.gov/` });
+  if (state === "NV" && county.includes("washoe")) {
+    if (parcel.length >= 8) manualLinks.push({ label: "Washoe Assessor (parcel)", url: `https://www.washoecounty.gov/assessor/cama/index.php?parid=${parcel}` });
+    manualLinks.push({ label: "Washoe Recorder", url: `https://www.washoecounty.gov/recorder/online_services/recorded_documents.php` });
   }
   if (lead.owner_name) {
     manualLinks.push({ label: "Search owner on Google", url: `https://www.google.com/search?q=${ownerQ}+${addr}` });
@@ -449,14 +408,11 @@ const SCORE_LABELS: Record<string, { label: string; help: string }> = {
 };
 
 const TIER_DESCRIPTIONS: Record<string, string> = {
-  A: "Tier A — top-priority 1031 candidate. Multiple strong signals (high-tax state, recent sale, large basis, entity owner). Reach out immediately.",
-  B: "Tier B — strong candidate. Most key 1031 markers present, worth a personalized outreach.",
-  C: "Tier C — qualified but not urgent. Some 1031 indicators; nurture and re-evaluate when fresh data arrives.",
-  D: "Tier D — weak fit. Few 1031 markers — primary residence, small sale, or low-tax state. Skip or recycle later.",
-  HOT: "Hot lead — recently scored as a top-tier 1031 candidate.",
   URGENT: "Urgent — sale closed inside the 45-day 1031 identification window.",
+  HOT: "Hot lead — top-priority 1031 candidate. Reach out immediately.",
   WARM: "Warm — qualified candidate worth nurturing.",
   COLD: "Cold — limited 1031 indicators.",
+  DISQUALIFIED: "Disqualified — owner-occupied residential or other non-investment profile.",
   UNSCORED: "Not yet scored. Run the qualifier from the Admin page.",
 };
 

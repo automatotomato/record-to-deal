@@ -5,11 +5,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fmtMoney, fmtDate, fmtRelative, tierColor } from "@/lib/format";
-import { Loader2, Play, Download, AlertCircle, Search, Mail, Phone, Linkedin, Home, Sparkles, MoreHorizontal } from "lucide-react";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator, DropdownMenuLabel } from "@/components/ui/dropdown-menu";
+import { Loader2, Play, Download, AlertCircle, Search, Mail, Phone, Linkedin, Home, MoreHorizontal } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuLabel } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { LeadDrawer } from "./LeadDrawer";
-import { Progress } from "@/components/ui/progress";
+
 import { useAuth } from "@/hooks/useAuth";
 
 type Lead = any;
@@ -23,8 +23,6 @@ export const OutreachDashboard = () => {
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
-  const [profiling, setProfiling] = useState(false);
-  const [profileProgress, setProfileProgress] = useState({ done: 0, total: 0, ok: 0, fail: 0 });
 
   const { data: leads, isLoading } = useQuery({
     queryKey: ["leads"],
@@ -96,53 +94,6 @@ export const OutreachDashboard = () => {
     }
   };
 
-  // Find seller info on every visible lead that's missing contact data.
-  // Operates on the *currently filtered* view so users can target specific tiers/states.
-  const findSellersBulk = async () => {
-    const targets = filtered.filter(
-      (l) => !l.contact_email && !l.contact_phone && !l.mailing_address,
-    );
-    if (!targets.length) {
-      toast.info("Every visible lead already has seller info");
-      return;
-    }
-    setProfiling(true);
-    setProfileProgress({ done: 0, total: targets.length, ok: 0, fail: 0 });
-    toast.info(`Finding sellers for ${targets.length} leads — runs in the background`);
-    try {
-      const queue = [...targets];
-      let ok = 0, fail = 0, done = 0;
-      const worker = async () => {
-        while (queue.length) {
-          const lead = queue.shift();
-          if (!lead) break;
-          try {
-            const { error: fnErr } = await supabase.functions.invoke("profiler-run", {
-              body: { lead_id: lead.id },
-            });
-            if (fnErr) throw fnErr;
-            ok += 1;
-          } catch (e) {
-            fail += 1;
-            console.warn("Profiler failed for", lead.id, e);
-          } finally {
-            done += 1;
-            setProfileProgress({ done, total: targets.length, ok, fail });
-            // Refresh the table every 5 leads so the user sees results stream in
-            if (done % 5 === 0) qc.invalidateQueries({ queryKey: ["leads"] });
-          }
-        }
-      };
-      await Promise.all([worker(), worker(), worker()]);
-      toast.success(`Found seller info for ${ok} leads${fail ? ` · ${fail} failed` : ""}`);
-      qc.invalidateQueries({ queryKey: ["leads"] });
-    } catch (e: any) {
-      toast.error(`Bulk seller lookup failed: ${e.message}`);
-    } finally {
-      setProfiling(false);
-    }
-  };
-
   const exportCsv = () => {
     if (!filtered.length) return;
     const cols = ["tier", "score", "is_urgent", "state", "county", "property_address", "property_city", "owner_name", "owner_type", "sale_price", "sale_date", "capital_gains_estimate", "total_tax_exposure", "contact_email", "contact_phone", "status", "personality_type"];
@@ -188,27 +139,10 @@ export const OutreachDashboard = () => {
                 <DropdownMenuItem onClick={exportCsv}>
                   <Download className="h-3 w-3 mr-2" /> Export CSV
                 </DropdownMenuItem>
-                {isAdmin && (
-                  <DropdownMenuItem onClick={findSellersBulk} disabled={profiling}>
-                    {profiling
-                      ? <><Loader2 className="h-3 w-3 mr-2 animate-spin" /> Re-pulling {profileProgress.done}/{profileProgress.total}</>
-                      : <><Sparkles className="h-3 w-3 mr-2" /> Re-pull missing seller info</>}
-                  </DropdownMenuItem>
-                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
         </div>
-
-        {profiling && profileProgress.total > 0 && (
-          <div className="mt-4">
-            <div className="flex justify-between font-mono text-[10px] uppercase tracking-wider text-muted-foreground mb-1">
-              <span>Pulling seller info · {profileProgress.ok} ok · {profileProgress.fail} failed</span>
-              <span className="tabular">{profileProgress.done} / {profileProgress.total}</span>
-            </div>
-            <Progress value={(profileProgress.done / profileProgress.total) * 100} className="h-1" />
-          </div>
-        )}
 
         {/* KPI strip */}
         <div className="mt-8 grid grid-cols-6 gap-px bg-border border border-border">
