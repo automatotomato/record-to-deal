@@ -20,7 +20,7 @@ const AI_URL = "https://api.openai.com/v1/chat/completions";
 const AI_MODEL = "gpt-4o-mini";
 
 // Per-call budget so a single lead can't burn the day's quota
-const BUDGET = { firecrawl: 12, apollo: 5, openai: 1 };
+const BUDGET = { firecrawl: 12, apollo: 7, openai: 1 };
 
 const STATE_NAMES: Record<string, string> = {
   AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
@@ -90,7 +90,7 @@ async function fcSearch(query: string, key: string, limit: number, scrape: boole
       return [];
     }
     const d = await r.json();
-    const arr = d?.data ?? d?.web ?? [];
+    const arr = d?.data?.web ?? d?.data ?? d?.web ?? [];
     return Array.isArray(arr) ? arr : [];
   } catch (e) { console.warn("fc threw", e); return []; }
 }
@@ -119,7 +119,8 @@ const APOLLO_HEADERS = (key: string) => ({
 
 function isUnlockedEmail(e?: string | null): boolean {
   if (!e) return false;
-  return !/email_not_unlocked|domain\.com$/i.test(e);
+  if (!/[^@\s]+@[^@\s]+\.[a-z]{2,}/i.test(e)) return false;
+  return !/email_not_unlocked|domain\.com$|@apollo-locked/i.test(e);
 }
 
 // People match: best when we have first+last+domain. Returns single person.
@@ -139,6 +140,7 @@ async function apolloMatch(
         // Spend a credit to actually unlock the email — without this Apollo
         // returns "email_not_unlocked@domain.com" and we drop it downstream.
         reveal_personal_emails: true,
+        reveal_phone_number: true,
       }),
     });
     if (!r.ok) {
@@ -147,6 +149,52 @@ async function apolloMatch(
     }
     return await r.json();
   } catch (e) { console.warn("apollo match threw", e); return null; }
+}
+
+async function apolloRevealByHints(
+  opts: {
+    first?: string | null;
+    last?: string | null;
+    name?: string | null;
+    linkedin?: string | null;
+    domain?: string | null;
+    organizationName?: string | null;
+    city?: string | null;
+    state?: string | null;
+  },
+  key: string,
+  budget: Budget,
+) {
+  if (!budget.canApollo()) return null;
+  const hasIdentity = (opts.first && opts.last) || opts.name || opts.linkedin;
+  if (!hasIdentity) return null;
+  budget.apollo++;
+  const body: Record<string, unknown> = {
+    reveal_personal_emails: true,
+    reveal_phone_number: true,
+  };
+  if (opts.first) body.first_name = opts.first;
+  if (opts.last) body.last_name = opts.last;
+  if (opts.name && (!opts.first || !opts.last)) body.name = opts.name;
+  if (opts.linkedin) body.linkedin_url = opts.linkedin;
+  if (opts.domain) body.domain = opts.domain;
+  if (opts.organizationName) body.organization_name = opts.organizationName;
+  if (opts.city) body.city = opts.city;
+  if (opts.state) body.state = opts.state;
+
+  try {
+    const r = await fetch(`${APOLLO}/people/match`, {
+      method: "POST",
+      headers: APOLLO_HEADERS(key),
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      console.warn(`apollo reveal ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      return null;
+    }
+    const data = await r.json();
+    return data?.person ?? data?.matched_person ?? null;
+  } catch (e) { console.warn("apollo reveal threw", e); return null; }
 }
 
 // Org-wide search by domain — pulls decision-maker titles.
@@ -205,6 +253,47 @@ function splitName(full: string | null): { first: string; last: string } | null 
   const parts = full.trim().split(/\s+/).filter(Boolean);
   if (parts.length < 2) return null;
   return { first: parts[0], last: parts[parts.length - 1] };
+}
+
+function looksLikePersonName(name: string | null): boolean {
+  if (!name) return false;
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length < 2 || parts.length > 4) return false;
+  return !/\b(LLC|INC|CORP|COMPANY|FRESH|BRANDS|HOLDINGS|ACQUISITION|PROPERTIES|GROUP|DOCUMENTS|FUNDING)\b/i.test(name);
+}
+
+function splitLinkedInName(url: string | null): { first: string; last: string } | null {
+  if (!url) return null;
+  const m = url.match(/linkedin\.com\/in\/([^/?#]+)/i);
+  if (!m) return null;
+  const parts = decodeURIComponent(m[1])
+    .split("-")
+    .filter((p) => p.length > 1 && !/^\d+$/.test(p) && !/^(realestate|realtor|broker|investor)$/i.test(p));
+  if (parts.length < 2) return null;
+  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+  return { first: cap(parts[0]), last: parts.slice(1).map(cap).join(" ") };
+}
+
+function applyApolloPerson(d: Discovery, p: any, source: string) {
+  if (!p) return;
+  const email = isUnlockedEmail(p.email) ? p.email
+    : (p.personal_emails ?? []).find((e: string) => isUnlockedEmail(e));
+  if (email) setField(d, "email", email, 90, source);
+  const phoneList = p.phone_numbers ?? [];
+  const ph = Array.isArray(phoneList)
+    ? phoneList[0]?.sanitized_number ?? phoneList[0]?.raw_number
+    : null;
+  const phone = ph ?? p.mobile_phone ?? p.phone_number;
+  if (phone) setField(d, "phone", phone, 75, source);
+  if (!d.name && (p.first_name || p.last_name)) setField(d, "name", `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim(), 70, source);
+  if (!d.role && p.title) setField(d, "role", p.title, 65, source);
+  if (!d.linkedin && p.linkedin_url) setField(d, "linkedin", p.linkedin_url, 75, source);
+}
+
+function acceptScrapedEmail(email: string, score: number, name: string | null, domain: string | null): boolean {
+  if (!isUnlockedEmail(email) || score <= 0) return false;
+  if (domain && email.toLowerCase().endsWith(`@${domain.toLowerCase()}`)) return true;
+  return score >= 60 && !!name;
 }
 
 function isEntity(ownerType: string | null, ownerName: string | null): boolean {
@@ -304,8 +393,9 @@ Deno.serve(async (req) => {
     });
   }
 
-  // Cache: skip if reachable and not forced and no new website hint
-  if (!body.force && !body.company_website && lead.discovery_status === "reachable") {
+  // Cache: only skip when we already have a real email/phone. A LinkedIn-only
+  // partial needs another pass because Apollo can often reveal contact details.
+  if (!body.force && !body.company_website && lead.discovery_status === "reachable" && (isUnlockedEmail(lead.decision_maker_email) || lead.decision_maker_phone)) {
     return new Response(JSON.stringify({ ok: true, cached: true, status: lead.discovery_status }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
@@ -321,9 +411,9 @@ Deno.serve(async (req) => {
   const entity = isEntity(ownerType, ownerName);
 
   // Pre-seed existing data so we never regress
-  if (lead.decision_maker_name) setField(d, "name", lead.decision_maker_name, 30, "cached");
+  if (looksLikePersonName(lead.decision_maker_name)) setField(d, "name", lead.decision_maker_name, 30, "cached");
   if (lead.decision_maker_role) setField(d, "role", lead.decision_maker_role, 30, "cached");
-  if (lead.decision_maker_email) setField(d, "email", lead.decision_maker_email, 40, "cached");
+  if (isUnlockedEmail(lead.decision_maker_email) && (scoreEmail(lead.decision_maker_email, lead.decision_maker_name) >= 45 || lead.decision_maker_email.toLowerCase().endsWith(`@${String(lead.company_website ?? "").replace(/^https?:\/\//, "").replace(/^www\./, "").toLowerCase()}`))) setField(d, "email", lead.decision_maker_email, 40, "cached");
   if (lead.decision_maker_phone) setField(d, "phone", lead.decision_maker_phone, 30, "cached");
   if (lead.decision_maker_linkedin) setField(d, "linkedin", lead.decision_maker_linkedin, 35, "cached");
   if (lead.company_website) setField(d, "company_website", lead.company_website, 30, "cached");
@@ -350,7 +440,7 @@ Deno.serve(async (req) => {
         }
         // Officer regex
         const m = md.match(/(?:Manager|Managing Member|President|CEO|Officer|Member|Director|Registered Agent)[\s:-]+([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)/);
-        if (m) {
+        if (m && looksLikePersonName(m[1])) {
           const role = m[0].split(/[\s:-]+/)[0];
           setField(d, "name", m[1], 55, "sos");
           setField(d, "role", role, 55, "sos");
@@ -402,6 +492,8 @@ Deno.serve(async (req) => {
     ? pickHostFromUrl(body.company_website.startsWith("http") ? body.company_website : `https://${body.company_website}`)
     : (lead.company_website ?? null);
 
+  if (domain && /^https?:\/\//i.test(domain)) domain = pickHostFromUrl(domain);
+
   if (!domain && entity && ownerName) {
     d.passes.website_discovery = true;
     const res = await fcSearch(`"${ownerName}" official site OR website`, fcKey, 4, false, budget);
@@ -424,27 +516,38 @@ Deno.serve(async (req) => {
   }
 
   // ============ PASS 4 — Apollo.io ============
-  if (apolloKey && domain) {
+  if (apolloKey) {
     d.passes.apollo = true;
-    // People match first if we have a name
-    const split = splitName(targetName);
-    if (split) {
+    // People match first if we have a name + domain.
+    const split = splitName(targetName) ?? splitLinkedInName(d.linkedin);
+    if (domain && split) {
       const matched = await apolloMatch(domain, split.first, split.last, apolloKey, budget);
       const p = matched?.person ?? matched?.matched_person ?? null;
       if (p) {
-        if (isUnlockedEmail(p.email)) {
-          setField(d, "email", p.email, 90, "apollo.match");
-        }
-        if (!d.role && p.title) setField(d, "role", p.title, 65, "apollo");
-        if (!d.linkedin && p.linkedin_url) setField(d, "linkedin", p.linkedin_url, 70, "apollo");
-        const phoneList = p.phone_numbers ?? [];
-        const ph = Array.isArray(phoneList) ? phoneList[0]?.sanitized_number ?? phoneList[0]?.raw_number : null;
-        if (!d.phone && ph) setField(d, "phone", ph, 70, "apollo");
+        applyApolloPerson(d, p, "apollo.match");
         d.sources.push("apollo.io");
       }
     }
-    // Org-wide search as broader fallback to find any decision-maker
-    if (!d.email) {
+    // LinkedIn/name/location reveal: this catches the common case where Firecrawl
+    // found a profile but no official company domain was discovered.
+    if (!d.email || !d.phone) {
+      const revealed = await apolloRevealByHints({
+        first: split?.first,
+        last: split?.last,
+        name: targetName,
+        linkedin: d.linkedin,
+        domain,
+        organizationName: entity ? ownerName : null,
+        city,
+        state,
+      }, apolloKey, budget);
+      if (revealed) {
+        applyApolloPerson(d, revealed, "apollo.reveal");
+        d.sources.push("apollo.io");
+      }
+    }
+    // Org-wide search as broader fallback to find any decision-maker.
+    if (domain && !d.email) {
       const search = await apolloOrgPeople(domain, apolloKey, budget);
       const people: any[] = search?.people ?? [];
       const ranked = [...people].sort((a, b) => {
@@ -460,11 +563,8 @@ Deno.serve(async (req) => {
         if (pick.first_name && pick.last_name) {
           const matched = await apolloMatch(domain, pick.first_name, pick.last_name, apolloKey, budget);
           const mp = matched?.person ?? matched?.matched_person ?? null;
+          applyApolloPerson(d, mp, "apollo.match");
           if (mp && isUnlockedEmail(mp.email)) unlockedEmail = mp.email;
-          if (mp?.phone_numbers?.[0]) {
-            const ph = mp.phone_numbers[0]?.sanitized_number ?? mp.phone_numbers[0]?.raw_number;
-            if (!d.phone && ph) setField(d, "phone", ph, 70, "apollo.match");
-          }
         }
         if (unlockedEmail) {
           setField(d, "email", unlockedEmail, 85, "apollo.match");
@@ -497,12 +597,15 @@ Deno.serve(async (req) => {
       let best: { e: string; s: number } | null = null;
       for (const e of emails) {
         const s = scoreEmail(e, targetName);
-        if (s > 0 && (!best || s > best.s)) best = { e, s };
+          if (acceptScrapedEmail(e, s, targetName, domain) && (!best || s > best.s)) best = { e, s };
       }
       if (best) setField(d, "email", best.e, best.s, "scrape");
     }
-    if (!d.phone) {
-      const phones = pullPhones(allEvidence);
+    if (!d.phone && domain) {
+      const ownDomainEvidence = evidence
+        .filter((chunk) => chunk.toLowerCase().includes(domain!.toLowerCase()))
+        .join("\n---\n");
+      const phones = pullPhones(ownDomainEvidence);
       if (phones.length) setField(d, "phone", phones[0], 35, "scrape");
     }
   }
@@ -530,8 +633,8 @@ Deno.serve(async (req) => {
 
   // ============ Determine status ============
   let status: "none" | "partial" | "reachable" | "failed" = "none";
-  if (d.email) status = "reachable";
-  else if (d.phone || d.linkedin) status = "partial";
+  if (d.email || d.phone) status = "reachable";
+  else if (d.linkedin) status = "partial";
   else status = "failed";
 
   // Compute completeness (0-100)
