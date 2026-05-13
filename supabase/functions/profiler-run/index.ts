@@ -794,20 +794,40 @@ async function fcSearch(query: string, key: string, limit = 5, scrape = true) {
   }
 }
 
-async function hunterDomainSearch(domain: string, key: string) {
+async function apolloOrgPeopleSearch(domain: string, key: string) {
   try {
-    const r = await fetch(
-      `https://api.hunter.io/v2/domain-search?domain=${encodeURIComponent(domain)}&api_key=${key}&limit=5`,
-    );
+    const r = await fetch("https://api.apollo.io/api/v1/mixed_people/search", {
+      method: "POST",
+      headers: {
+        "X-Api-Key": key,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Cache-Control": "no-cache",
+      },
+      body: JSON.stringify({
+        q_organization_domains_list: [domain],
+        person_titles: [
+          "owner", "principal", "managing member", "manager",
+          "president", "ceo", "founder", "partner", "director",
+        ],
+        page: 1,
+        per_page: 10,
+      }),
+    });
     if (!r.ok) {
-      console.warn(`Hunter ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      console.warn(`Apollo ${r.status}: ${(await r.text()).slice(0, 200)}`);
       return null;
     }
     return await r.json();
   } catch (e) {
-    console.warn("Hunter threw:", e);
+    console.warn("Apollo threw:", e);
     return null;
   }
+}
+
+function isUnlockedApolloEmail(e?: string | null): boolean {
+  if (!e) return false;
+  return !/email_not_unlocked|domain\.com$/i.test(e);
 }
 
 async function aiExtractContact(blob: string, lovableKey: string): Promise<{
