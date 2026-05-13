@@ -90,7 +90,7 @@ async function fcSearch(query: string, key: string, limit: number, scrape: boole
       return [];
     }
     const d = await r.json();
-    const arr = d?.data ?? d?.web ?? [];
+    const arr = d?.data?.web ?? d?.data ?? d?.web ?? [];
     return Array.isArray(arr) ? arr : [];
   } catch (e) { console.warn("fc threw", e); return []; }
 }
