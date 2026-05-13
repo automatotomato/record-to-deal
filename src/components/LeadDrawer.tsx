@@ -16,8 +16,26 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
   const [drafting, setDrafting] = useState(false);
   const [sending, setSending] = useState(false);
   const [discovering, setDiscovering] = useState(false);
+  const [briefing, setBriefing] = useState(false);
   const [recipientOverride, setRecipientOverride] = useState("");
   const [websiteHint, setWebsiteHint] = useState("");
+
+  const generateBrief = async () => {
+    setBriefing(true);
+    toast.loading("Generating AI brief…", { id: "brief" });
+    try {
+      const { data, error } = await supabase.functions.invoke("lead-brief", { body: { lead_id: leadId } });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      toast.success("Brief ready", { id: "brief" });
+      qc.invalidateQueries({ queryKey: ["lead", leadId] });
+    } catch (e: any) {
+      toast.error(`Brief failed: ${e.message}`, { id: "brief" });
+    } finally {
+      setBriefing(false);
+    }
+  };
+
 
   const { data: lead, isLoading } = useQuery({
     queryKey: ["lead", leadId],
