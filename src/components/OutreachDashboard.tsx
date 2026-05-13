@@ -109,10 +109,12 @@ export const OutreachDashboard = () => {
   const { data: leads, isLoading } = useQuery({
     queryKey: ["leads"],
     queryFn: async () => {
+      // Main dashboard ONLY shows ready-for-outreach leads in actionable tiers.
       const { data, error } = await supabase
         .from("leads")
         .select("*")
-        .not("tier", "in", "(COLD,DISQUALIFIED)")
+        .eq("pipeline_stage", "ready")
+        .in("tier", ["CRITICAL", "URGENT", "ACTIVE"])
         .order("is_urgent", { ascending: false })
         .order("score", { ascending: false })
         .limit(500);
@@ -212,25 +214,22 @@ export const OutreachDashboard = () => {
   };
 
   const runScout = async () => {
+    // Enqueue one scan_sources job per enabled county and return immediately.
     setRunning(true);
-    toast.loading("Scanning high-priority county records…", { id: "scout" });
     try {
-      const { data, error } = await supabase.functions.invoke("scout-run", {
-        body: { trigger_kind: "manual" },
-      });
+      const { data: counties, error: cErr } = await supabase
+        .from("counties").select("id").eq("enabled", true);
+      if (cErr) throw cErr;
+      const rows = (counties ?? []).map((c) => ({
+        kind: "scan_sources", county_id: c.id, priority: 100,
+      }));
+      if (!rows.length) { toast.error("No enabled counties to scan."); return; }
+      const { error } = await supabase.from("pipeline_jobs").insert(rows);
       if (error) throw error;
-      const found = data?.leads_found ?? 0;
-      const updated = data?.leads_updated ?? 0;
-      toast.success(
-        updated || found
-          ? `Scan running — ${found} new, ${updated} refreshed so far. Pipeline updates automatically.`
-          : `Scan started. New leads will appear here within 1–2 minutes.`,
-        { id: "scout", duration: 6000 },
-      );
+      toast.success(`Queued ${rows.length} county scans — results will appear over the next few minutes.`);
       qc.invalidateQueries({ queryKey: ["leads"] });
-      qc.invalidateQueries({ queryKey: ["last-scout-run"] });
     } catch (e: any) {
-      toast.error(`Couldn't start scan: ${e.message}`, { id: "scout" });
+      toast.error(`Couldn't queue scan: ${e.message}`);
     } finally {
       setRunning(false);
     }

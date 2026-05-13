@@ -44,21 +44,19 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
     },
   });
 
-  const draftEmail = async (force = false) => {
+  const draftEmail = async (_force = false) => {
     setDrafting(true);
-    toast.loading(force ? "Re-profiling seller…" : "Profiling lead and drafting outreach…", { id: "draft" });
+    toast.loading("Queuing enrichment + draft…", { id: "draft" });
     try {
-      const { data, error } = await supabase.functions.invoke("profiler-run", { body: { lead_id: leadId, force } });
+      const { error } = await supabase.from("pipeline_jobs").insert([
+        { kind: "enrich_contact", lead_id: leadId, priority: 30 },
+      ]);
       if (error) throw error;
-      if ((data as any)?.cached) {
-        toast.success("Using saved seller info", { id: "draft" });
-      } else {
-        toast.success("Draft ready", { id: "draft" });
-      }
+      toast.success("Queued — refresh in a minute to see the draft", { id: "draft" });
       qc.invalidateQueries({ queryKey: ["lead", leadId] });
       qc.invalidateQueries({ queryKey: ["emails", leadId] });
     } catch (e: any) {
-      toast.error(`Draft failed: ${e.message}`, { id: "draft" });
+      toast.error(`Couldn't queue: ${e.message}`, { id: "draft" });
     } finally {
       setDrafting(false);
     }

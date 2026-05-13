@@ -16,108 +16,27 @@ const Admin = () => {
   const { isAdmin, loading } = useAuth();
   const qc = useQueryClient();
   const [running, setRunning] = useState(false);
-  const [qualifying, setQualifying] = useState(false);
-  const [profiling, setProfiling] = useState(false);
-  const [profileProgress, setProfileProgress] = useState({ done: 0, total: 0, ok: 0, fail: 0 });
-
-  const runQualifier = async () => {
-    setQualifying(true);
-    try {
-      const { data, error } = await supabase.functions.invoke("qualifier-run", {
-        body: { rescore_all: true, auto_profile: true },
-      });
-      if (error) throw error;
-      toast.success(`Scored ${data?.qualified ?? 0} leads · ${data?.tier_urgent ?? 0} urgent · ${data?.tier_hot ?? 0} hot · ${data?.tier_warm ?? 0} warm · profiling top ${data?.auto_profiling ?? 0} in background`);
-      qc.invalidateQueries({ queryKey: ["leads"] });
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Qualifier failed");
-    } finally {
-      setQualifying(false);
-    }
-  };
-
-  const profileAllUnprofiled = async () => {
-    setProfiling(true);
-    setProfileProgress({ done: 0, total: 0, ok: 0, fail: 0 });
-    try {
-      // Unprofiled by Smarty = no smarty_key on file
-      const { data: leads, error } = await supabase
-        .from("leads")
-        .select("id, property_address")
-        .is("smarty_key", null)
-        .not("property_address", "is", null)
-        .order("created_at", { ascending: false })
-        .limit(200);
-      if (error) throw error;
-      const list = leads ?? [];
-      if (!list.length) {
-        toast.info("All leads already enriched with Smarty");
-        return;
-      }
-      setProfileProgress({ done: 0, total: list.length, ok: 0, fail: 0 });
-      toast.info(`Enriching ${list.length} leads via Smarty — this may take a few minutes`);
-
-      // Concurrency = 3
-      const queue = [...list];
-      const enriched: string[] = [];
-      let ok = 0, fail = 0, done = 0;
-      const worker = async () => {
-        while (queue.length) {
-          const lead = queue.shift();
-          if (!lead) break;
-          try {
-            const { error: fnErr } = await supabase.functions.invoke("profiler-run", {
-              body: { lead_id: lead.id, force: true },
-            });
-            if (fnErr) throw fnErr;
-            ok += 1;
-            enriched.push(lead.id);
-          } catch (e) {
-            fail += 1;
-            console.warn("Profiler failed for", lead.id, e);
-          } finally {
-            done += 1;
-            setProfileProgress({ done, total: list.length, ok, fail });
-          }
-        }
-      };
-      await Promise.all([worker(), worker(), worker()]);
-
-      // Re-score the freshly enriched leads so tier/score/tax exposure
-      // reflect the new Smarty-derived owner type, sale price, and hold time.
-      if (enriched.length) {
-        toast.info(`Scoring ${enriched.length} enriched leads…`);
-        const { error: qErr } = await supabase.functions.invoke("qualifier-run", {
-          body: { lead_ids: enriched, auto_profile: false },
-        });
-        if (qErr) console.warn("Qualifier re-score failed:", qErr);
-      }
-
-      toast.success(`Enriched ${ok} leads${fail ? ` · ${fail} failed` : ""} · tier + score updated`);
-      qc.invalidateQueries({ queryKey: ["leads"] });
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Enrichment batch failed");
-    } finally {
-      setProfiling(false);
-    }
-  };
 
   const runScout = async () => {
+    // Enqueue one scan_sources job per enabled county. Dispatcher (cron, 1/min)
+    // picks them up and fans out the rest of the pipeline asynchronously.
     setRunning(true);
     try {
-      const { data, error } = await supabase.functions.invoke("scout-run", {
-        body: { trigger_kind: "manual" },
-      });
+      const { data: counties, error: cErr } = await supabase
+        .from("counties").select("id").eq("enabled", true);
+      if (cErr) throw cErr;
+      const rows = (counties ?? []).map((c) => ({
+        kind: "scan_sources", county_id: c.id, priority: 100,
+      }));
+      if (!rows.length) { toast.error("No enabled counties."); return; }
+      const { error } = await supabase.from("pipeline_jobs").insert(rows);
       if (error) throw error;
-      toast.success(`Scout complete — ${data?.leads_found ?? 0} new leads from ${data?.counties_scanned ?? 0} counties`);
-      if (data?.errors?.length) {
-        toast.warning(`${data.errors.length} county error(s) — see run log`);
-      }
-      qc.invalidateQueries({ queryKey: ["runs"] });
+      toast.success(`Queued ${rows.length} county scans — results will appear over the next few minutes.`);
       qc.invalidateQueries({ queryKey: ["counties"] });
       qc.invalidateQueries({ queryKey: ["leads"] });
+      qc.invalidateQueries({ queryKey: ["pipeline-job-counts"] });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Scout failed");
+      toast.error(e instanceof Error ? e.message : "Couldn't queue scan");
     } finally {
       setRunning(false);
     }
@@ -167,22 +86,12 @@ const Admin = () => {
           <h1 className="font-display text-5xl leading-none">Sources.</h1>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          <Button onClick={runScout} disabled={running || profiling || qualifying} size="lg" className="font-mono uppercase tracking-wider text-xs">
+          <Button onClick={runScout} disabled={running} size="lg" className="font-mono uppercase tracking-wider text-xs">
             {running ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
-            {running ? "Finding leads…" : "Find new leads"}
+            {running ? "Queuing…" : "Run scan now"}
           </Button>
         </div>
       </div>
-
-      {profiling && profileProgress.total > 0 && (
-        <div className="px-8 py-4 border-b border-border bg-secondary/30">
-          <div className="flex items-center justify-between mb-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-            <span>Profiling owners · {profileProgress.ok} ok · {profileProgress.fail} failed</span>
-            <span className="tabular">{profileProgress.done} / {profileProgress.total}</span>
-          </div>
-          <Progress value={(profileProgress.done / profileProgress.total) * 100} className="h-1" />
-        </div>
-      )}
 
 
       <div className="p-8 space-y-10">
