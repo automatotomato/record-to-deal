@@ -213,7 +213,7 @@ export const OutreachDashboard = () => {
 
   const runScout = async () => {
     setRunning(true);
-    toast.loading("Scanning Nevada county records…", { id: "scout" });
+    toast.loading("Scanning high-priority county records…", { id: "scout" });
     try {
       const { data, error } = await supabase.functions.invoke("scout-run", {
         body: { trigger_kind: "manual" },
