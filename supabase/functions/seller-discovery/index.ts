@@ -110,25 +110,67 @@ async function fcScrape(url: string, key: string, budget: Budget): Promise<strin
   } catch (_) { return null; }
 }
 
-async function hunterDomain(domain: string, key: string, budget: Budget) {
-  if (!budget.canHunter()) return null;
-  budget.hunter++;
-  try {
-    const r = await fetch(`${HUNTER}/domain-search?domain=${encodeURIComponent(domain)}&api_key=${key}&limit=10`);
-    if (!r.ok) return null;
-    return await r.json();
-  } catch (_) { return null; }
+const APOLLO_HEADERS = (key: string) => ({
+  "X-Api-Key": key,
+  "Content-Type": "application/json",
+  "Accept": "application/json",
+  "Cache-Control": "no-cache",
+});
+
+function isUnlockedEmail(e?: string | null): boolean {
+  if (!e) return false;
+  return !/email_not_unlocked|domain\.com$/i.test(e);
 }
 
-async function hunterFinder(domain: string, first: string, last: string, key: string, budget: Budget) {
-  if (!budget.canHunter()) return null;
-  budget.hunter++;
+// People match: best when we have first+last+domain. Returns single person.
+async function apolloMatch(
+  domain: string, first: string, last: string, key: string, budget: Budget,
+) {
+  if (!budget.canApollo()) return null;
+  budget.apollo++;
   try {
-    const url = `${HUNTER}/email-finder?domain=${encodeURIComponent(domain)}&first_name=${encodeURIComponent(first)}&last_name=${encodeURIComponent(last)}&api_key=${key}`;
-    const r = await fetch(url);
-    if (!r.ok) return null;
+    const r = await fetch(`${APOLLO}/people/match`, {
+      method: "POST",
+      headers: APOLLO_HEADERS(key),
+      body: JSON.stringify({
+        first_name: first,
+        last_name: last,
+        domain,
+        reveal_personal_emails: false,
+      }),
+    });
+    if (!r.ok) {
+      console.warn(`apollo match ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      return null;
+    }
     return await r.json();
-  } catch (_) { return null; }
+  } catch (e) { console.warn("apollo match threw", e); return null; }
+}
+
+// Org-wide search by domain — pulls decision-maker titles.
+async function apolloOrgPeople(domain: string, key: string, budget: Budget) {
+  if (!budget.canApollo()) return null;
+  budget.apollo++;
+  try {
+    const r = await fetch(`${APOLLO}/mixed_people/search`, {
+      method: "POST",
+      headers: APOLLO_HEADERS(key),
+      body: JSON.stringify({
+        q_organization_domains_list: [domain],
+        person_titles: [
+          "owner", "principal", "managing member", "manager",
+          "president", "ceo", "founder", "partner", "director",
+        ],
+        page: 1,
+        per_page: 10,
+      }),
+    });
+    if (!r.ok) {
+      console.warn(`apollo search ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      return null;
+    }
+    return await r.json();
+  } catch (e) { console.warn("apollo search threw", e); return null; }
 }
 
 function pickHostFromUrl(url: string): string | null {
