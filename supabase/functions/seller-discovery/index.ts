@@ -439,7 +439,7 @@ Deno.serve(async (req) => {
         }
         // Officer regex
         const m = md.match(/(?:Manager|Managing Member|President|CEO|Officer|Member|Director|Registered Agent)[\s:-]+([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)/);
-        if (m) {
+        if (m && looksLikePersonName(m[1])) {
           const role = m[0].split(/[\s:-]+/)[0];
           setField(d, "name", m[1], 55, "sos");
           setField(d, "role", role, 55, "sos");
@@ -594,7 +594,7 @@ Deno.serve(async (req) => {
       let best: { e: string; s: number } | null = null;
       for (const e of emails) {
         const s = scoreEmail(e, targetName);
-        if (s > 0 && (!best || s > best.s)) best = { e, s };
+          if (acceptScrapedEmail(e, s, targetName, domain) && (!best || s > best.s)) best = { e, s };
       }
       if (best) setField(d, "email", best.e, best.s, "scrape");
     }
