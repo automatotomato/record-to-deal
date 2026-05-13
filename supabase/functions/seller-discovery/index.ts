@@ -379,8 +379,9 @@ Deno.serve(async (req) => {
     });
   }
 
-  // Cache: skip if reachable and not forced and no new website hint
-  if (!body.force && !body.company_website && lead.discovery_status === "reachable") {
+  // Cache: only skip when we already have a real email/phone. A LinkedIn-only
+  // partial needs another pass because Apollo can often reveal contact details.
+  if (!body.force && !body.company_website && lead.discovery_status === "reachable" && (lead.decision_maker_email || lead.decision_maker_phone)) {
     return new Response(JSON.stringify({ ok: true, cached: true, status: lead.discovery_status }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
@@ -613,8 +614,8 @@ Deno.serve(async (req) => {
 
   // ============ Determine status ============
   let status: "none" | "partial" | "reachable" | "failed" = "none";
-  if (d.email) status = "reachable";
-  else if (d.phone || d.linkedin) status = "partial";
+  if (d.email || d.phone) status = "reachable";
+  else if (d.linkedin) status = "partial";
   else status = "failed";
 
   // Compute completeness (0-100)
