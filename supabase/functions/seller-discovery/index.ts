@@ -492,6 +492,8 @@ Deno.serve(async (req) => {
     ? pickHostFromUrl(body.company_website.startsWith("http") ? body.company_website : `https://${body.company_website}`)
     : (lead.company_website ?? null);
 
+  if (domain && /^https?:\/\//i.test(domain)) domain = pickHostFromUrl(domain);
+
   if (!domain && entity && ownerName) {
     d.passes.website_discovery = true;
     const res = await fcSearch(`"${ownerName}" official site OR website`, fcKey, 4, false, budget);
@@ -599,8 +601,11 @@ Deno.serve(async (req) => {
       }
       if (best) setField(d, "email", best.e, best.s, "scrape");
     }
-    if (!d.phone) {
-      const phones = pullPhones(allEvidence);
+    if (!d.phone && domain) {
+      const ownDomainEvidence = evidence
+        .filter((chunk) => chunk.toLowerCase().includes(domain!.toLowerCase()))
+        .join("\n---\n");
+      const phones = pullPhones(ownDomainEvidence);
       if (phones.length) setField(d, "phone", phones[0], 35, "scrape");
     }
   }
