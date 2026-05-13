@@ -587,6 +587,7 @@ Return JSON with this exact shape:
     pitch_angle: profile.pitch_angle ?? null,
     lv_property_recommendation: profile.lv_property_recommendation ?? null,
     profiler_summary: profile.profiler_summary ?? null,
+    pipeline_stage: completeness >= 70 ? "enriched" : "profiled",
     data_sources: Array.from(new Set([
       ...(l as unknown as { data_sources?: string[] }).data_sources ?? [],
       enrichSource === "attom" ? "attomdata.com" : "smarty.com",
