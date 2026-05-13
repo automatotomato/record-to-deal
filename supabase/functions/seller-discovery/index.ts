@@ -499,27 +499,38 @@ Deno.serve(async (req) => {
   }
 
   // ============ PASS 4 — Apollo.io ============
-  if (apolloKey && domain) {
+  if (apolloKey) {
     d.passes.apollo = true;
-    // People match first if we have a name
-    const split = splitName(targetName);
-    if (split) {
+    // People match first if we have a name + domain.
+    const split = splitName(targetName) ?? splitLinkedInName(d.linkedin);
+    if (domain && split) {
       const matched = await apolloMatch(domain, split.first, split.last, apolloKey, budget);
       const p = matched?.person ?? matched?.matched_person ?? null;
       if (p) {
-        if (isUnlockedEmail(p.email)) {
-          setField(d, "email", p.email, 90, "apollo.match");
-        }
-        if (!d.role && p.title) setField(d, "role", p.title, 65, "apollo");
-        if (!d.linkedin && p.linkedin_url) setField(d, "linkedin", p.linkedin_url, 70, "apollo");
-        const phoneList = p.phone_numbers ?? [];
-        const ph = Array.isArray(phoneList) ? phoneList[0]?.sanitized_number ?? phoneList[0]?.raw_number : null;
-        if (!d.phone && ph) setField(d, "phone", ph, 70, "apollo");
+        applyApolloPerson(d, p, "apollo.match");
         d.sources.push("apollo.io");
       }
     }
-    // Org-wide search as broader fallback to find any decision-maker
-    if (!d.email) {
+    // LinkedIn/name/location reveal: this catches the common case where Firecrawl
+    // found a profile but no official company domain was discovered.
+    if (!d.email || !d.phone) {
+      const revealed = await apolloRevealByHints({
+        first: split?.first,
+        last: split?.last,
+        name: targetName,
+        linkedin: d.linkedin,
+        domain,
+        organizationName: entity ? ownerName : null,
+        city,
+        state,
+      }, apolloKey, budget);
+      if (revealed) {
+        applyApolloPerson(d, revealed, "apollo.reveal");
+        d.sources.push("apollo.io");
+      }
+    }
+    // Org-wide search as broader fallback to find any decision-maker.
+    if (domain && !d.email) {
       const search = await apolloOrgPeople(domain, apolloKey, budget);
       const people: any[] = search?.people ?? [];
       const ranked = [...people].sort((a, b) => {
@@ -535,11 +546,8 @@ Deno.serve(async (req) => {
         if (pick.first_name && pick.last_name) {
           const matched = await apolloMatch(domain, pick.first_name, pick.last_name, apolloKey, budget);
           const mp = matched?.person ?? matched?.matched_person ?? null;
+          applyApolloPerson(d, mp, "apollo.match");
           if (mp && isUnlockedEmail(mp.email)) unlockedEmail = mp.email;
-          if (mp?.phone_numbers?.[0]) {
-            const ph = mp.phone_numbers[0]?.sanitized_number ?? mp.phone_numbers[0]?.raw_number;
-            if (!d.phone && ph) setField(d, "phone", ph, 70, "apollo.match");
-          }
         }
         if (unlockedEmail) {
           setField(d, "email", unlockedEmail, 85, "apollo.match");
