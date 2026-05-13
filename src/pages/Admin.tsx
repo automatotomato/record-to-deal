@@ -86,22 +86,12 @@ const Admin = () => {
           <h1 className="font-display text-5xl leading-none">Sources.</h1>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          <Button onClick={runScout} disabled={running || profiling || qualifying} size="lg" className="font-mono uppercase tracking-wider text-xs">
+          <Button onClick={runScout} disabled={running} size="lg" className="font-mono uppercase tracking-wider text-xs">
             {running ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
-            {running ? "Finding leads…" : "Find new leads"}
+            {running ? "Queuing…" : "Run scan now"}
           </Button>
         </div>
       </div>
-
-      {profiling && profileProgress.total > 0 && (
-        <div className="px-8 py-4 border-b border-border bg-secondary/30">
-          <div className="flex items-center justify-between mb-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-            <span>Profiling owners · {profileProgress.ok} ok · {profileProgress.fail} failed</span>
-            <span className="tabular">{profileProgress.done} / {profileProgress.total}</span>
-          </div>
-          <Progress value={(profileProgress.done / profileProgress.total) * 100} className="h-1" />
-        </div>
-      )}
 
 
       <div className="p-8 space-y-10">
