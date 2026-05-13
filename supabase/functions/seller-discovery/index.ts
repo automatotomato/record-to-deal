@@ -119,7 +119,8 @@ const APOLLO_HEADERS = (key: string) => ({
 
 function isUnlockedEmail(e?: string | null): boolean {
   if (!e) return false;
-  return !/email_not_unlocked|domain\.com$/i.test(e);
+  if (!/[^@\s]+@[^@\s]+\.[a-z]{2,}/i.test(e)) return false;
+  return !/email_not_unlocked|domain\.com$|@apollo-locked/i.test(e);
 }
 
 // People match: best when we have first+last+domain. Returns single person.
@@ -290,7 +291,7 @@ function applyApolloPerson(d: Discovery, p: any, source: string) {
 }
 
 function acceptScrapedEmail(email: string, score: number, name: string | null, domain: string | null): boolean {
-  if (!isUnlockedEmail(email) || score < 45) return false;
+  if (!isUnlockedEmail(email) || score <= 0) return false;
   if (domain && email.toLowerCase().endsWith(`@${domain.toLowerCase()}`)) return true;
   return score >= 60 && !!name;
 }
