@@ -603,9 +603,43 @@ Return JSON with this exact shape:
     });
   }
 
-  // Draft email
+  // Draft email — ALWAYS create a draft. Use AI output when available,
+  // fall back to a templated message keyed on tier/property/state so every
+  // lead has something to act on.
   let emailId: string | null = null;
-  if (profile.email_subject && profile.email_body) {
+  {
+    let subject = profile.email_subject ?? null;
+    let bodyText = profile.email_body ?? null;
+    let templated = false;
+
+    if (!subject || !bodyText) {
+      templated = true;
+      const stateLabel = l.state ?? "your state";
+      const propLabel = propertyType === "Multifamily" ? "multifamily property"
+        : propertyType === "Commercial" ? "commercial property"
+        : propertyType === "Land" ? "land parcel"
+        : propertyType === "Industrial" ? "industrial property"
+        : "investment property";
+      const greeting = enrichment.decisionMakerName
+        ? `Hi ${enrichment.decisionMakerName.split(/\s+/)[0]},`
+        : ownerName ? `Hi ${ownerName.split(/\s+/)[0]},` : "Hello,";
+      const addrLabel = l.property_address ?? `your ${stateLabel} ${propLabel}`;
+      const taxLine = (capitalGainsEstimate && capitalGainsEstimate > 100_000)
+        ? ` Based on public records, the federal + ${stateLabel} state capital-gains exposure on this sale is roughly $${Math.round(capitalGainsEstimate / 1000)}k — a 1031 exchange into Las Vegas (no state income tax) could defer most of that.`
+        : ` A 1031 exchange into Las Vegas (no state income tax) could defer the capital-gains and depreciation-recapture liability on this sale.`;
+      subject = `Quick question on ${addrLabel.split(",")[0]}`;
+      bodyText = `${greeting}
+
+Saw the recent sale of ${addrLabel}. ${taxLine}
+
+We help sellers identify replacement properties inside the 45-day window — happy to share a shortlist of Las Vegas multifamily and NNN options that match your basis.
+
+Worth a 15-minute call this week?
+
+– The team
+1031 Exchange Elite`;
+    }
+
     await supabase
       .from("outreach_emails")
       .update({ status: "superseded" })
@@ -616,8 +650,8 @@ Return JSON with this exact shape:
       .from("outreach_emails")
       .insert({
         lead_id: leadId,
-        subject: profile.email_subject,
-        body: profile.email_body,
+        subject,
+        body: bodyText,
         to_email: enrichment.decisionMakerEmail ?? null,
         status: "draft",
       })
@@ -625,6 +659,18 @@ Return JSON with this exact shape:
       .single();
     if (emErr) console.warn("Draft insert error:", emErr.message);
     emailId = emailRow?.id ?? null;
+    if (emailId) {
+      await supabase.from("leads").update({
+        pipeline_stage: enrichment.decisionMakerEmail ? "ready" : "drafted",
+      }).eq("id", leadId);
+    }
+    if (templated) {
+      await supabase.from("lead_activities").insert({
+        lead_id: leadId,
+        kind: "email_drafted",
+        summary: "Templated draft (AI output incomplete)",
+      });
+    }
   }
 
   // Activity log
