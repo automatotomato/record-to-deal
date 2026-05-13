@@ -711,7 +711,7 @@ Worth a 15-minute call this week?
 // Tries, in order:
 //   1. Firecrawl search the state Secretary of State business registry for
 //      the LLC/Corp name → extract registered agent + officers (free).
-//   2. Hunter.io domain search if we can guess a company website.
+//   2. Apollo.io organization people search if we can guess a company website.
 //   3. Firecrawl search "<name> linkedin" + "<name> news" for LinkedIn URL
 //      and recent press mentions (wealth/timing signals).
 //   4. Lovable AI to extract the highest-confidence email/phone/LinkedIn
