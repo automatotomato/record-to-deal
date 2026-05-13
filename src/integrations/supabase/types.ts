@@ -25,6 +25,7 @@ export type Database = {
           last_run_at: string | null
           notes: string | null
           parser_key: string
+          priority: string
           source_url: string | null
           state: string
           updated_at: string
@@ -39,6 +40,7 @@ export type Database = {
           last_run_at?: string | null
           notes?: string | null
           parser_key: string
+          priority?: string
           source_url?: string | null
           state: string
           updated_at?: string
@@ -53,6 +55,7 @@ export type Database = {
           last_run_at?: string | null
           notes?: string | null
           parser_key?: string
+          priority?: string
           source_url?: string | null
           state?: string
           updated_at?: string
@@ -173,6 +176,7 @@ export type Database = {
           enrichment_confidence: number
           enrichment_payload: Json
           entity_registry_url: string | null
+          fed_capital_gains_estimate: number | null
           id: string
           is_urgent: boolean
           last_contacted_at: string | null
@@ -191,6 +195,7 @@ export type Database = {
           ownership_years: number | null
           parcel_number: string | null
           personality_type: string | null
+          pipeline_stage: string
           pitch_angle: string | null
           preferred_channel: string | null
           profiler_summary: string | null
@@ -208,6 +213,8 @@ export type Database = {
           smarty_key: string | null
           source_record_url: string | null
           state: string
+          state_capital_gains_estimate: number | null
+          state_tax_rate: number | null
           status: Database["public"]["Enums"]["lead_status"]
           tier: Database["public"]["Enums"]["lead_tier"]
           total_tax_exposure: number | null
@@ -240,6 +247,7 @@ export type Database = {
           enrichment_confidence?: number
           enrichment_payload?: Json
           entity_registry_url?: string | null
+          fed_capital_gains_estimate?: number | null
           id?: string
           is_urgent?: boolean
           last_contacted_at?: string | null
@@ -258,6 +266,7 @@ export type Database = {
           ownership_years?: number | null
           parcel_number?: string | null
           personality_type?: string | null
+          pipeline_stage?: string
           pitch_angle?: string | null
           preferred_channel?: string | null
           profiler_summary?: string | null
@@ -275,6 +284,8 @@ export type Database = {
           smarty_key?: string | null
           source_record_url?: string | null
           state: string
+          state_capital_gains_estimate?: number | null
+          state_tax_rate?: number | null
           status?: Database["public"]["Enums"]["lead_status"]
           tier?: Database["public"]["Enums"]["lead_tier"]
           total_tax_exposure?: number | null
@@ -307,6 +318,7 @@ export type Database = {
           enrichment_confidence?: number
           enrichment_payload?: Json
           entity_registry_url?: string | null
+          fed_capital_gains_estimate?: number | null
           id?: string
           is_urgent?: boolean
           last_contacted_at?: string | null
@@ -325,6 +337,7 @@ export type Database = {
           ownership_years?: number | null
           parcel_number?: string | null
           personality_type?: string | null
+          pipeline_stage?: string
           pitch_angle?: string | null
           preferred_channel?: string | null
           profiler_summary?: string | null
@@ -342,6 +355,8 @@ export type Database = {
           smarty_key?: string | null
           source_record_url?: string | null
           state?: string
+          state_capital_gains_estimate?: number | null
+          state_tax_rate?: number | null
           status?: Database["public"]["Enums"]["lead_status"]
           tier?: Database["public"]["Enums"]["lead_tier"]
           total_tax_exposure?: number | null
@@ -478,6 +493,36 @@ export type Database = {
           status?: Database["public"]["Enums"]["scout_run_status"]
           trigger_kind?: string
           triggered_by?: string | null
+        }
+        Relationships: []
+      }
+      state_tax_rates: {
+        Row: {
+          is_high_tax: boolean
+          ltcg_rate: number
+          notes: string | null
+          state: string
+          state_name: string
+          surcharge: number
+          updated_at: string
+        }
+        Insert: {
+          is_high_tax?: boolean
+          ltcg_rate?: number
+          notes?: string | null
+          state: string
+          state_name: string
+          surcharge?: number
+          updated_at?: string
+        }
+        Update: {
+          is_high_tax?: boolean
+          ltcg_rate?: number
+          notes?: string | null
+          state?: string
+          state_name?: string
+          surcharge?: number
+          updated_at?: string
         }
         Relationships: []
       }

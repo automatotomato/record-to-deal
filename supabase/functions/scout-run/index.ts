@@ -318,6 +318,171 @@ const COUNTY_SOURCES: Record<string, { queries: string[]; hint: string }> = {
     ],
     hint: "King County, WA (Seattle/Bellevue) entity-owned multifamily ≥4-units, commercial, industrial, office transfers. Skip SFR/condo. Extract owner, address, price ≥$1M, date.",
   },
+  // --- CA (high-priority, additional counties) ---
+  ca_san_francisco: {
+    queries: [
+      `San Francisco County California commercial OR multifamily OR office sold LLC 2026 ${NV_EXCLUSIONS}`,
+      `site:loopnet.com "San Francisco" sold`,
+      `site:crexi.com "San Francisco" sold`,
+    ],
+    hint: "San Francisco County, CA entity-owned multifamily ≥4-units, commercial, office, retail transfers. Skip SFR/condo. Extract owner, address, price ≥$1M, date.",
+  },
+  ca_alameda: {
+    queries: [
+      `Alameda County California Oakland Berkeley commercial OR multifamily OR industrial sold LLC 2026 ${NV_EXCLUSIONS}`,
+      `site:loopnet.com Oakland OR Berkeley sold`,
+    ],
+    hint: "Alameda County, CA (Oakland, Berkeley) entity-owned multifamily, commercial, industrial transfers. Skip SFR. Extract owner, address, price ≥$1M, date.",
+  },
+  ca_santa_clara: {
+    queries: [
+      `Santa Clara County California San Jose commercial OR multifamily OR office sold LLC 2026 ${NV_EXCLUSIONS}`,
+      `site:loopnet.com "San Jose" OR "Santa Clara" sold`,
+    ],
+    hint: "Santa Clara County, CA (San Jose, Silicon Valley) entity-owned multifamily, commercial, office transfers. Skip SFR. Extract owner, address, price ≥$1M, date.",
+  },
+  ca_san_mateo: {
+    queries: [
+      `San Mateo County California commercial OR multifamily OR office sold LLC 2026 ${NV_EXCLUSIONS}`,
+    ],
+    hint: "San Mateo County, CA entity-owned multifamily, commercial, office transfers. Skip SFR. Extract owner, address, price ≥$1M, date.",
+  },
+  ca_sacramento: {
+    queries: [
+      `Sacramento County California commercial OR multifamily OR industrial sold LLC 2026 ${NV_EXCLUSIONS}`,
+      `site:loopnet.com Sacramento sold`,
+    ],
+    hint: "Sacramento County, CA entity-owned multifamily, commercial, industrial transfers. Skip SFR. Extract owner, address, price ≥$750k, date.",
+  },
+  // --- NY (high-priority) ---
+  ny_kings: {
+    queries: [
+      `Brooklyn Kings County New York commercial OR multifamily OR mixed-use sold LLC 2026 ${NV_EXCLUSIONS}`,
+      `site:loopnet.com Brooklyn sold`,
+      `site:crexi.com Brooklyn sold`,
+    ],
+    hint: "Kings County, NY (Brooklyn) entity-owned multifamily ≥4-units, commercial, mixed-use, retail transfers. Skip SFR/condo. Extract owner, address, price ≥$1M, date.",
+  },
+  ny_queens: {
+    queries: [
+      `Queens County New York commercial OR multifamily OR mixed-use sold LLC 2026 ${NV_EXCLUSIONS}`,
+      `site:loopnet.com Queens "New York" sold`,
+    ],
+    hint: "Queens County, NY entity-owned multifamily, commercial, mixed-use transfers. Skip SFR/condo. Extract owner, address, price ≥$1M, date.",
+  },
+  ny_bronx: {
+    queries: [
+      `Bronx County New York commercial OR multifamily OR mixed-use sold LLC 2026 ${NV_EXCLUSIONS}`,
+      `site:loopnet.com Bronx sold`,
+    ],
+    hint: "Bronx County, NY entity-owned multifamily, commercial, mixed-use transfers. Skip SFR. Extract owner, address, price ≥$750k, date.",
+  },
+  ny_westchester: {
+    queries: [
+      `Westchester County New York commercial OR multifamily OR office sold LLC 2026 ${NV_EXCLUSIONS}`,
+    ],
+    hint: "Westchester County, NY entity-owned multifamily, commercial, office transfers. Skip SFR. Extract owner, address, price ≥$1M, date.",
+  },
+  ny_nassau: {
+    queries: [
+      `Nassau County New York Long Island commercial OR multifamily OR retail sold LLC 2026 ${NV_EXCLUSIONS}`,
+    ],
+    hint: "Nassau County, NY (Long Island) entity-owned multifamily, commercial, retail transfers. Skip SFR. Extract owner, address, price ≥$1M, date.",
+  },
+  ny_suffolk: {
+    queries: [
+      `Suffolk County New York Long Island commercial OR multifamily OR retail sold LLC 2026 ${NV_EXCLUSIONS}`,
+    ],
+    hint: "Suffolk County, NY (Long Island) entity-owned multifamily, commercial, retail transfers. Skip SFR. Extract owner, address, price ≥$1M, date.",
+  },
+  // --- NJ (high-priority) ---
+  nj_hudson: {
+    queries: [
+      `Hudson County New Jersey Jersey City Hoboken commercial OR multifamily OR mixed-use sold LLC 2026 ${NV_EXCLUSIONS}`,
+      `site:loopnet.com "Jersey City" OR Hoboken sold`,
+    ],
+    hint: "Hudson County, NJ (Jersey City, Hoboken) entity-owned multifamily ≥4-units, commercial, mixed-use transfers. Skip SFR/condo. Extract owner, address, price ≥$750k, date.",
+  },
+  nj_essex: {
+    queries: [
+      `Essex County New Jersey Newark commercial OR multifamily OR industrial sold LLC 2026 ${NV_EXCLUSIONS}`,
+    ],
+    hint: "Essex County, NJ (Newark) entity-owned multifamily, commercial, industrial transfers. Skip SFR. Extract owner, address, price ≥$500k, date.",
+  },
+  nj_middlesex: {
+    queries: [
+      `Middlesex County New Jersey commercial OR multifamily OR industrial sold LLC 2026 ${NV_EXCLUSIONS}`,
+    ],
+    hint: "Middlesex County, NJ entity-owned multifamily, commercial, industrial transfers. Skip SFR. Extract owner, address, price ≥$500k, date.",
+  },
+  nj_monmouth: {
+    queries: [
+      `Monmouth County New Jersey commercial OR multifamily OR retail sold LLC 2026 ${NV_EXCLUSIONS}`,
+    ],
+    hint: "Monmouth County, NJ entity-owned multifamily, commercial, retail transfers. Skip SFR. Extract owner, address, price ≥$500k, date.",
+  },
+  // --- OR (high-priority) ---
+  or_washington: {
+    queries: [
+      `Washington County Oregon Beaverton Hillsboro commercial OR multifamily OR industrial sold LLC 2026 ${NV_EXCLUSIONS}`,
+    ],
+    hint: "Washington County, OR (Beaverton, Hillsboro) entity-owned multifamily, commercial, industrial transfers. Skip SFR. Extract owner, address, price ≥$500k, date.",
+  },
+  or_clackamas: {
+    queries: [
+      `Clackamas County Oregon commercial OR multifamily OR industrial sold LLC 2026 ${NV_EXCLUSIONS}`,
+    ],
+    hint: "Clackamas County, OR entity-owned multifamily, commercial, industrial transfers. Skip SFR. Extract owner, address, price ≥$500k, date.",
+  },
+  // --- MN (high-priority) ---
+  mn_hennepin: {
+    queries: [
+      `Hennepin County Minnesota Minneapolis commercial OR multifamily OR industrial sold LLC 2026 ${NV_EXCLUSIONS}`,
+      `site:loopnet.com Minneapolis sold`,
+    ],
+    hint: "Hennepin County, MN (Minneapolis) entity-owned multifamily ≥4-units, commercial, industrial, office transfers. Skip SFR. Extract owner, address, price ≥$500k, date.",
+  },
+  mn_ramsey: {
+    queries: [
+      `Ramsey County Minnesota Saint Paul commercial OR multifamily OR industrial sold LLC 2026 ${NV_EXCLUSIONS}`,
+    ],
+    hint: "Ramsey County, MN (Saint Paul) entity-owned multifamily, commercial, industrial transfers. Skip SFR. Extract owner, address, price ≥$500k, date.",
+  },
+  // --- MA (high-priority) ---
+  ma_suffolk: {
+    queries: [
+      `Suffolk County Massachusetts Boston commercial OR multifamily OR mixed-use sold LLC 2026 ${NV_EXCLUSIONS}`,
+      `site:loopnet.com Boston sold`,
+    ],
+    hint: "Suffolk County, MA (Boston) entity-owned multifamily ≥4-units, commercial, mixed-use, office transfers. Skip SFR/condo. Extract owner, address, price ≥$1M, date.",
+  },
+  ma_norfolk: {
+    queries: [
+      `Norfolk County Massachusetts commercial OR multifamily OR retail sold LLC 2026 ${NV_EXCLUSIONS}`,
+    ],
+    hint: "Norfolk County, MA entity-owned multifamily, commercial, retail transfers. Skip SFR. Extract owner, address, price ≥$750k, date.",
+  },
+  // --- HI (high-priority) ---
+  hi_honolulu: {
+    queries: [
+      `Honolulu County Hawaii commercial OR multifamily OR hospitality sold LLC 2026 ${NV_EXCLUSIONS}`,
+      `site:loopnet.com Honolulu sold`,
+    ],
+    hint: "Honolulu County, HI entity-owned multifamily, commercial, hospitality, retail transfers. Skip SFR/condo. Extract owner, address, price ≥$1M, date.",
+  },
+  // --- IL (high-priority extras) ---
+  il_dupage: {
+    queries: [
+      `DuPage County Illinois commercial OR multifamily OR industrial sold LLC 2026 ${NV_EXCLUSIONS}`,
+    ],
+    hint: "DuPage County, IL entity-owned multifamily, commercial, industrial transfers. Skip SFR. Extract owner, address, price ≥$500k, date.",
+  },
+  il_lake: {
+    queries: [
+      `Lake County Illinois commercial OR multifamily OR industrial sold LLC 2026 ${NV_EXCLUSIONS}`,
+    ],
+    hint: "Lake County, IL entity-owned multifamily, commercial, industrial transfers. Skip SFR. Extract owner, address, price ≥$500k, date.",
+  },
 };
 
 interface ExtractedLead {
@@ -543,7 +708,13 @@ Deno.serve(async (req) => {
   if (body.county_ids?.length) {
     countyQuery = countyQuery.in("id", body.county_ids);
   }
-  const { data: counties, error: cErr } = await countyQuery;
+  const { data: countiesRaw, error: cErr } = await countyQuery;
+  // Run high-tax states first, then normal, then low. Lets the scout always
+  // get to CA/NY/FL/etc before burning its budget on lower-priority states.
+  const PRIO: Record<string, number> = { high: 0, normal: 1, low: 2 };
+  const counties = (countiesRaw ?? []).slice().sort(
+    (a: any, b: any) => (PRIO[a.priority ?? "normal"] ?? 1) - (PRIO[b.priority ?? "normal"] ?? 1),
+  );
   if (cErr) {
     await supabase.from("scout_runs").update({
       status: "failed",
