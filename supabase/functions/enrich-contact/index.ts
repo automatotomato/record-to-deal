@@ -56,20 +56,78 @@ async function apolloSearch(domain: string, key: string) {
 
 // Apollo search returns locked email placeholders. /people/match with
 // reveal_personal_emails:true actually unlocks the address (1 credit).
-async function apolloReveal(domain: string, first: string, last: string, key: string) {
+// Domain, organization, location, and linkedin_url are all optional hints —
+// pass whatever we have to maximize match rate.
+async function apolloReveal(
+  opts: {
+    first?: string | null; last?: string | null;
+    name?: string | null;
+    domain?: string | null;
+    organizationName?: string | null;
+    linkedinUrl?: string | null;
+    city?: string | null; state?: string | null;
+  },
+  key: string,
+) {
+  const body: Record<string, unknown> = {
+    reveal_personal_emails: true,
+    reveal_phone_number: true,
+  };
+  if (opts.first) body.first_name = opts.first;
+  if (opts.last) body.last_name = opts.last;
+  if (opts.name && !opts.first && !opts.last) body.name = opts.name;
+  if (opts.domain) body.domain = opts.domain;
+  if (opts.organizationName) body.organization_name = opts.organizationName;
+  if (opts.linkedinUrl) body.linkedin_url = opts.linkedinUrl;
+  if (opts.city) body.city = opts.city;
+  if (opts.state) body.state = opts.state;
+
   try {
     const r = await fetch("https://api.apollo.io/api/v1/people/match", {
       method: "POST",
       headers: { "X-Api-Key": key, "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({
-        first_name: first, last_name: last, domain,
-        reveal_personal_emails: true,
-      }),
+      body: JSON.stringify(body),
     });
     if (!r.ok) return null;
     const data = await r.json();
     return data?.person ?? data?.matched_person ?? null;
   } catch { return null; }
+}
+
+function splitName(full: string): { first: string; last: string } {
+  const cleaned = full.replace(/,?\s*(jr|sr|ii|iii|iv|esq)\.?$/i, "").trim();
+  const parts = cleaned.split(/\s+/);
+  if (parts.length === 1) return { first: parts[0], last: "" };
+  return { first: parts[0], last: parts.slice(1).join(" ") };
+}
+
+function nameFromLinkedIn(url: string): { first: string; last: string } | null {
+  const m = url.match(/linkedin\.com\/in\/([^/?#]+)/i);
+  if (!m) return null;
+  const slug = decodeURIComponent(m[1]).split("-").filter((p) => !/^\d+$/.test(p) && p.length > 1);
+  if (slug.length < 2) return null;
+  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+  return { first: cap(slug[0]), last: slug.slice(1).map(cap).join(" ") };
+}
+
+function applyRevealed(
+  revealed: any,
+  cur: { dmEmail: string | null; dmPhone: string | null; dmName: string | null; dmRole: string | null; dmLinkedIn: string | null },
+) {
+  const email = isUnlockedEmail(revealed?.email) ? revealed.email
+    : (revealed?.personal_emails ?? []).find((e: string) => isUnlockedEmail(e)) ?? null;
+  const phone = revealed?.phone_numbers?.[0]?.sanitized_number
+    ?? revealed?.phone_numbers?.[0]?.raw_number
+    ?? revealed?.mobile_phone ?? null;
+  let bumped = 0;
+  if (email && !isUnlockedEmail(cur.dmEmail)) { cur.dmEmail = email; bumped += 25; }
+  if (phone && !cur.dmPhone) { cur.dmPhone = phone; bumped += 15; }
+  if (!cur.dmName && (revealed?.first_name || revealed?.last_name)) {
+    cur.dmName = `${revealed.first_name ?? ""} ${revealed.last_name ?? ""}`.trim();
+  }
+  if (!cur.dmRole && revealed?.title) cur.dmRole = revealed.title;
+  if (!cur.dmLinkedIn && revealed?.linkedin_url) cur.dmLinkedIn = revealed.linkedin_url;
+  return bumped;
 }
 
 function pickDomain(html: string, ownerName: string | null): string | null {
@@ -156,8 +214,10 @@ Deno.serve(async (req) => {
     if (liUrl && !dmLinkedIn) { dmLinkedIn = liUrl; confidence += 10; sources.push("firecrawl:linkedin"); }
   }
 
-  // 2) Apollo via guessed domain
-  if (apolloKey && firecrawlKey && isEntity && ownerName && !isUnlockedEmail(dmEmail)) {
+  const cur = { dmEmail, dmPhone, dmName, dmRole, dmLinkedIn };
+
+  // 2) Apollo via guessed domain (entities only)
+  if (apolloKey && firecrawlKey && isEntity && ownerName && !isUnlockedEmail(cur.dmEmail)) {
     const probe = await fcSearch(`"${ownerName}" website OR contact`, firecrawlKey, 2, true);
     const blob = probe.map((r: any) => `${r.url}\n${r.markdown ?? ""}`).join("\n");
     const domain = pickDomain(blob, ownerName);
@@ -171,28 +231,56 @@ Deno.serve(async (req) => {
           (/owner|principal|manager|president|ceo|founder|partner/i.test(`${a.title ?? ""} ${a.seniority ?? ""}`) ? 1 : 0)
         );
         const pick = ranked.find((x) => x.first_name && x.last_name) ?? ranked[0];
-
-        // Reveal email via /people/match — search results are always locked.
-        let revealed: any = null;
         if (pick?.first_name && pick?.last_name) {
-          revealed = await apolloReveal(domain, pick.first_name, pick.last_name, apolloKey);
+          const revealed = await apolloReveal({
+            first: pick.first_name, last: pick.last_name, domain,
+            organizationName: ownerName,
+            city: lead.property_city, state: lead.state,
+          }, apolloKey);
+          if (revealed) confidence += applyRevealed(revealed, cur);
         }
-        const finalEmail = isUnlockedEmail(revealed?.email) ? revealed.email
-          : isUnlockedEmail(pick?.email) ? pick.email : null;
-        const finalPhone = revealed?.phone_numbers?.[0]?.sanitized_number
-          ?? revealed?.phone_numbers?.[0]?.raw_number
-          ?? pick?.phone_numbers?.[0]?.sanitized_number
-          ?? null;
-
-        if (finalEmail) { dmEmail = finalEmail; confidence += 25; }
-        if (!dmName && (pick.first_name || pick.last_name)) dmName = `${pick.first_name ?? ""} ${pick.last_name ?? ""}`.trim();
-        if (!dmRole && (revealed?.title || pick.title)) dmRole = revealed?.title ?? pick.title;
-        if (!dmLinkedIn && (revealed?.linkedin_url || pick.linkedin_url)) dmLinkedIn = revealed?.linkedin_url ?? pick.linkedin_url;
-        if (!dmPhone && finalPhone) dmPhone = finalPhone;
+        if (!cur.dmName && (pick.first_name || pick.last_name)) cur.dmName = `${pick.first_name ?? ""} ${pick.last_name ?? ""}`.trim();
+        if (!cur.dmRole && pick.title) cur.dmRole = pick.title;
+        if (!cur.dmLinkedIn && pick.linkedin_url) cur.dmLinkedIn = pick.linkedin_url;
         sources.push("apollo.io");
       }
     }
   }
+
+  // 3) Apollo reveal by name — fallback for individuals OR entities where
+  //    the domain probe failed. Apollo can match by name + location, or by
+  //    linkedin_url alone (very high hit rate when LI is known).
+  if (apolloKey && (!isUnlockedEmail(cur.dmEmail) || !cur.dmPhone)) {
+    let first: string | null = null;
+    let last: string | null = null;
+
+    if (cur.dmName) {
+      const s = splitName(cur.dmName);
+      first = s.first; last = s.last;
+    } else if (cur.dmLinkedIn) {
+      const s = nameFromLinkedIn(cur.dmLinkedIn);
+      if (s) { first = s.first; last = s.last; }
+    } else if (!isEntity && ownerName) {
+      const s = splitName(ownerName);
+      first = s.first; last = s.last;
+    }
+
+    if ((first && last) || cur.dmLinkedIn) {
+      const revealed = await apolloReveal({
+        first, last,
+        linkedinUrl: cur.dmLinkedIn,
+        organizationName: isEntity ? ownerName : null,
+        city: lead.property_city, state: lead.state,
+      }, apolloKey);
+      if (revealed) {
+        const bumped = applyRevealed(revealed, cur);
+        if (bumped > 0) sources.push("apollo.io:reveal");
+      }
+    }
+  }
+
+  dmEmail = cur.dmEmail; dmPhone = cur.dmPhone;
+  dmName = cur.dmName; dmRole = cur.dmRole; dmLinkedIn = cur.dmLinkedIn;
 
   const updated = {
     decision_maker_name: dmName,
