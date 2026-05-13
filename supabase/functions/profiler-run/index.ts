@@ -928,31 +928,34 @@ async function enrichDecisionMaker(args: {
     if (result.newsSnippets.length) result.sources.push("firecrawl:news");
   }
 
-  // 3) Hunter.io domain search if we can guess a company website
-  if (hunterKey && firecrawlKey && isEntity) {
+  // 3) Apollo.io organization people search if we can guess a company website
+  if (apolloKey && firecrawlKey && isEntity) {
     // Try to find a company website by scraping the SoS page text
     const probe = await fcSearch(`"${ownerName}" website`, firecrawlKey, 2, true);
     const blob = probe.map((r: any) => `${r.url}\n${r.markdown ?? ""}`).join("\n");
     const domain = pickDomain(blob, ownerName);
     if (domain) {
-      const hunter = await hunterDomainSearch(domain, hunterKey);
-      const emails = hunter?.data?.emails as Array<any> | undefined;
-      if (emails?.length) {
-        // Prefer decision-maker-ish titles
-        const ranked = [...emails].sort((a, b) => {
-          const score = (e: any) => /owner|principal|manager|president|ceo|founder|partner/i.test(`${e.position ?? ""} ${e.seniority ?? ""}`) ? 1 : 0;
+      const apollo = await apolloOrgPeopleSearch(domain, apolloKey);
+      const people = apollo?.people as Array<any> | undefined;
+      if (people?.length) {
+        // Prefer decision-maker-ish titles, then prefer ones with unlocked email
+        const ranked = [...people].sort((a, b) => {
+          const score = (e: any) => /owner|principal|manager|president|ceo|founder|partner/i.test(`${e.title ?? ""} ${e.seniority ?? ""}`) ? 1 : 0;
           return score(b) - score(a);
         });
-        const pick = ranked[0];
-        result.decisionMakerEmail = pick.value ?? null;
+        const pick = ranked.find((x) => isUnlockedApolloEmail(x.email)) ?? ranked[0];
+        if (isUnlockedApolloEmail(pick.email)) {
+          result.decisionMakerEmail = pick.email;
+        }
         if (!result.decisionMakerName && (pick.first_name || pick.last_name)) {
           result.decisionMakerName = `${pick.first_name ?? ""} ${pick.last_name ?? ""}`.trim();
         }
-        if (!result.decisionMakerRole && pick.position) result.decisionMakerRole = pick.position;
-        result.payload.hunter_company = hunter?.data?.organization;
-        result.payload.hunter_domain = domain;
-        result.confidence += pick.confidence ? Math.min(30, Math.round(pick.confidence / 3)) : 15;
-        result.sources.push("hunter.io");
+        if (!result.decisionMakerRole && pick.title) result.decisionMakerRole = pick.title;
+        if (!result.decisionMakerLinkedIn && pick.linkedin_url) result.decisionMakerLinkedIn = pick.linkedin_url;
+        result.payload.apollo_company = pick.organization?.name ?? apollo?.organization?.name;
+        result.payload.apollo_domain = domain;
+        result.confidence += result.decisionMakerEmail ? 25 : 12;
+        result.sources.push("apollo.io");
       }
     }
   }
