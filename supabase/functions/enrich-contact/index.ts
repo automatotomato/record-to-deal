@@ -214,8 +214,10 @@ Deno.serve(async (req) => {
     if (liUrl && !dmLinkedIn) { dmLinkedIn = liUrl; confidence += 10; sources.push("firecrawl:linkedin"); }
   }
 
-  // 2) Apollo via guessed domain
-  if (apolloKey && firecrawlKey && isEntity && ownerName && !isUnlockedEmail(dmEmail)) {
+  const cur = { dmEmail, dmPhone, dmName, dmRole, dmLinkedIn };
+
+  // 2) Apollo via guessed domain (entities only)
+  if (apolloKey && firecrawlKey && isEntity && ownerName && !isUnlockedEmail(cur.dmEmail)) {
     const probe = await fcSearch(`"${ownerName}" website OR contact`, firecrawlKey, 2, true);
     const blob = probe.map((r: any) => `${r.url}\n${r.markdown ?? ""}`).join("\n");
     const domain = pickDomain(blob, ownerName);
@@ -229,28 +231,56 @@ Deno.serve(async (req) => {
           (/owner|principal|manager|president|ceo|founder|partner/i.test(`${a.title ?? ""} ${a.seniority ?? ""}`) ? 1 : 0)
         );
         const pick = ranked.find((x) => x.first_name && x.last_name) ?? ranked[0];
-
-        // Reveal email via /people/match — search results are always locked.
-        let revealed: any = null;
         if (pick?.first_name && pick?.last_name) {
-          revealed = await apolloReveal(domain, pick.first_name, pick.last_name, apolloKey);
+          const revealed = await apolloReveal({
+            first: pick.first_name, last: pick.last_name, domain,
+            organizationName: ownerName,
+            city: lead.property_city, state: lead.state,
+          }, apolloKey);
+          if (revealed) confidence += applyRevealed(revealed, cur);
         }
-        const finalEmail = isUnlockedEmail(revealed?.email) ? revealed.email
-          : isUnlockedEmail(pick?.email) ? pick.email : null;
-        const finalPhone = revealed?.phone_numbers?.[0]?.sanitized_number
-          ?? revealed?.phone_numbers?.[0]?.raw_number
-          ?? pick?.phone_numbers?.[0]?.sanitized_number
-          ?? null;
-
-        if (finalEmail) { dmEmail = finalEmail; confidence += 25; }
-        if (!dmName && (pick.first_name || pick.last_name)) dmName = `${pick.first_name ?? ""} ${pick.last_name ?? ""}`.trim();
-        if (!dmRole && (revealed?.title || pick.title)) dmRole = revealed?.title ?? pick.title;
-        if (!dmLinkedIn && (revealed?.linkedin_url || pick.linkedin_url)) dmLinkedIn = revealed?.linkedin_url ?? pick.linkedin_url;
-        if (!dmPhone && finalPhone) dmPhone = finalPhone;
+        if (!cur.dmName && (pick.first_name || pick.last_name)) cur.dmName = `${pick.first_name ?? ""} ${pick.last_name ?? ""}`.trim();
+        if (!cur.dmRole && pick.title) cur.dmRole = pick.title;
+        if (!cur.dmLinkedIn && pick.linkedin_url) cur.dmLinkedIn = pick.linkedin_url;
         sources.push("apollo.io");
       }
     }
   }
+
+  // 3) Apollo reveal by name — fallback for individuals OR entities where
+  //    the domain probe failed. Apollo can match by name + location, or by
+  //    linkedin_url alone (very high hit rate when LI is known).
+  if (apolloKey && (!isUnlockedEmail(cur.dmEmail) || !cur.dmPhone)) {
+    let first: string | null = null;
+    let last: string | null = null;
+
+    if (cur.dmName) {
+      const s = splitName(cur.dmName);
+      first = s.first; last = s.last;
+    } else if (cur.dmLinkedIn) {
+      const s = nameFromLinkedIn(cur.dmLinkedIn);
+      if (s) { first = s.first; last = s.last; }
+    } else if (!isEntity && ownerName) {
+      const s = splitName(ownerName);
+      first = s.first; last = s.last;
+    }
+
+    if ((first && last) || cur.dmLinkedIn) {
+      const revealed = await apolloReveal({
+        first, last,
+        linkedinUrl: cur.dmLinkedIn,
+        organizationName: isEntity ? ownerName : null,
+        city: lead.property_city, state: lead.state,
+      }, apolloKey);
+      if (revealed) {
+        const bumped = applyRevealed(revealed, cur);
+        if (bumped > 0) sources.push("apollo.io:reveal");
+      }
+    }
+  }
+
+  dmEmail = cur.dmEmail; dmPhone = cur.dmPhone;
+  dmName = cur.dmName; dmRole = cur.dmRole; dmLinkedIn = cur.dmLinkedIn;
 
   const updated = {
     decision_maker_name: dmName,
