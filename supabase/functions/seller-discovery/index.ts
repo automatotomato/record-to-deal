@@ -3,7 +3,7 @@
 //   1. Entity unmask (OpenCorporates + state SoS via Firecrawl)
 //   2. Person identity (LinkedIn / RocketReach / ZoomInfo / Bizapedia / Crunchbase)
 //   3. Company website discovery
-//   4. Hunter.io domain search + email finder
+//   4. Apollo.io people/match + organization people search
 //   5. Personal contact scrape (regex + scoring)
 //   6. AI consolidation (OpenAI picks best per field with confidence)
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
