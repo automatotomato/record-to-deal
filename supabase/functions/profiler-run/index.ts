@@ -867,10 +867,10 @@ async function enrichDecisionMaker(args: {
   city: string | null;
   state: string | null;
   firecrawlKey: string | undefined;
-  hunterKey: string | undefined;
+  apolloKey: string | undefined;
   lovableKey: string;
 }): Promise<EnrichmentResult> {
-  const { ownerName, ownerType, city, state, firecrawlKey, hunterKey, lovableKey } = args;
+  const { ownerName, ownerType, city, state, firecrawlKey, apolloKey, lovableKey } = args;
   if (!ownerName) return EMPTY_ENRICHMENT;
 
   const result: EnrichmentResult = { ...EMPTY_ENRICHMENT, payload: {} };
