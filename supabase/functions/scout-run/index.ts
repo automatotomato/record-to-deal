@@ -484,6 +484,8 @@ const COUNTY_SOURCES: Record<string, { queries: string[]; hint: string }> = {
     hint: "Lake County, IL entity-owned multifamily, commercial, industrial transfers. Skip SFR. Extract owner, address, price ≥$500k, date.",
   },
 };
+
+interface ExtractedLead {
   owner_name?: string;
   property_address?: string;
   property_city?: string;
