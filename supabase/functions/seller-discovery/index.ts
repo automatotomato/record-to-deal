@@ -421,34 +421,45 @@ Deno.serve(async (req) => {
     if (contactMd) evidence.push(`CONTACT ${domain}\n${contactMd.slice(0, 4000)}`);
   }
 
-  // ============ PASS 4 — Hunter.io ============
-  if (hunterKey && domain) {
-    d.passes.hunter = true;
-    // Email finder first if we have a name
+  // ============ PASS 4 — Apollo.io ============
+  if (apolloKey && domain) {
+    d.passes.apollo = true;
+    // People match first if we have a name
     const split = splitName(targetName);
     if (split) {
-      const found = await hunterFinder(domain, split.first, split.last, hunterKey, budget);
-      const fEmail = found?.data?.email;
-      if (fEmail) {
-        setField(d, "email", fEmail, Math.min(95, 50 + (found?.data?.score ?? 0) / 2), "hunter.finder");
-        d.sources.push("hunter.io");
-        if (!d.role && found?.data?.position) setField(d, "role", found.data.position, 60, "hunter");
+      const matched = await apolloMatch(domain, split.first, split.last, apolloKey, budget);
+      const p = matched?.person ?? matched?.matched_person ?? null;
+      if (p) {
+        if (isUnlockedEmail(p.email)) {
+          setField(d, "email", p.email, 90, "apollo.match");
+        }
+        if (!d.role && p.title) setField(d, "role", p.title, 65, "apollo");
+        if (!d.linkedin && p.linkedin_url) setField(d, "linkedin", p.linkedin_url, 70, "apollo");
+        const phoneList = p.phone_numbers ?? [];
+        const ph = Array.isArray(phoneList) ? phoneList[0]?.sanitized_number ?? phoneList[0]?.raw_number : null;
+        if (!d.phone && ph) setField(d, "phone", ph, 70, "apollo");
+        d.sources.push("apollo.io");
       }
     }
-    // Domain search as broader fallback
+    // Org-wide search as broader fallback to find any decision-maker
     if (!d.email) {
-      const dom = await hunterDomain(domain, hunterKey, budget);
-      const emails: any[] = dom?.data?.emails ?? [];
-      const ranked = [...emails].sort((a, b) => {
-        const w = (e: any) => (/owner|principal|manager|president|ceo|founder|partner/i.test(`${e.position ?? ""} ${e.seniority ?? ""}`) ? 1 : 0);
+      const search = await apolloOrgPeople(domain, apolloKey, budget);
+      const people: any[] = search?.people ?? [];
+      const ranked = [...people].sort((a, b) => {
+        const w = (e: any) => (/owner|principal|manager|president|ceo|founder|partner/i.test(`${e.title ?? ""} ${e.seniority ?? ""}`) ? 1 : 0);
         return w(b) - w(a);
       });
-      const pick = ranked[0];
-      if (pick?.value) {
-        setField(d, "email", pick.value, Math.min(90, 40 + (pick.confidence ?? 0) / 2), "hunter.domain");
-        if (!d.name && (pick.first_name || pick.last_name)) setField(d, "name", `${pick.first_name ?? ""} ${pick.last_name ?? ""}`.trim(), 60, "hunter");
-        if (!d.role && pick.position) setField(d, "role", pick.position, 55, "hunter");
-        d.sources.push("hunter.io");
+      const pick = ranked.find((x) => isUnlockedEmail(x.email)) ?? ranked[0];
+      if (pick) {
+        if (isUnlockedEmail(pick.email)) {
+          setField(d, "email", pick.email, 80, "apollo.search");
+        }
+        if (!d.name && (pick.first_name || pick.last_name)) {
+          setField(d, "name", `${pick.first_name ?? ""} ${pick.last_name ?? ""}`.trim(), 65, "apollo");
+        }
+        if (!d.role && pick.title) setField(d, "role", pick.title, 60, "apollo");
+        if (!d.linkedin && pick.linkedin_url) setField(d, "linkedin", pick.linkedin_url, 65, "apollo");
+        d.sources.push("apollo.io");
       }
     }
   }
