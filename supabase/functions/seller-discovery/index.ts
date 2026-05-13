@@ -20,7 +20,7 @@ const AI_URL = "https://api.openai.com/v1/chat/completions";
 const AI_MODEL = "gpt-4o-mini";
 
 // Per-call budget so a single lead can't burn the day's quota
-const BUDGET = { firecrawl: 12, apollo: 3, openai: 1 };
+const BUDGET = { firecrawl: 12, apollo: 5, openai: 1 };
 
 const STATE_NAMES: Record<string, string> = {
   AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
@@ -136,7 +136,9 @@ async function apolloMatch(
         first_name: first,
         last_name: last,
         domain,
-        reveal_personal_emails: false,
+        // Spend a credit to actually unlock the email — without this Apollo
+        // returns "email_not_unlocked@domain.com" and we drop it downstream.
+        reveal_personal_emails: true,
       }),
     });
     if (!r.ok) {
@@ -449,9 +451,24 @@ Deno.serve(async (req) => {
         const w = (e: any) => (/owner|principal|manager|president|ceo|founder|partner/i.test(`${e.title ?? ""} ${e.seniority ?? ""}`) ? 1 : 0);
         return w(b) - w(a);
       });
-      const pick = ranked.find((x) => isUnlockedEmail(x.email)) ?? ranked[0];
+      // Prefer someone we can actually unlock (has first+last name)
+      const pick = ranked.find((x) => x.first_name && x.last_name) ?? ranked[0];
       if (pick) {
-        if (isUnlockedEmail(pick.email)) {
+        // Org search returns locked emails. Run a /people/match with reveal=true
+        // to actually unlock the address.
+        let unlockedEmail: string | null = null;
+        if (pick.first_name && pick.last_name) {
+          const matched = await apolloMatch(domain, pick.first_name, pick.last_name, apolloKey, budget);
+          const mp = matched?.person ?? matched?.matched_person ?? null;
+          if (mp && isUnlockedEmail(mp.email)) unlockedEmail = mp.email;
+          if (mp?.phone_numbers?.[0]) {
+            const ph = mp.phone_numbers[0]?.sanitized_number ?? mp.phone_numbers[0]?.raw_number;
+            if (!d.phone && ph) setField(d, "phone", ph, 70, "apollo.match");
+          }
+        }
+        if (unlockedEmail) {
+          setField(d, "email", unlockedEmail, 85, "apollo.match");
+        } else if (isUnlockedEmail(pick.email)) {
           setField(d, "email", pick.email, 80, "apollo.search");
         }
         if (!d.name && (pick.first_name || pick.last_name)) {

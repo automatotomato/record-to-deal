@@ -54,6 +54,24 @@ async function apolloSearch(domain: string, key: string) {
   } catch { return null; }
 }
 
+// Apollo search returns locked email placeholders. /people/match with
+// reveal_personal_emails:true actually unlocks the address (1 credit).
+async function apolloReveal(domain: string, first: string, last: string, key: string) {
+  try {
+    const r = await fetch("https://api.apollo.io/api/v1/people/match", {
+      method: "POST",
+      headers: { "X-Api-Key": key, "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        first_name: first, last_name: last, domain,
+        reveal_personal_emails: true,
+      }),
+    });
+    if (!r.ok) return null;
+    const data = await r.json();
+    return data?.person ?? data?.matched_person ?? null;
+  } catch { return null; }
+}
+
 function pickDomain(html: string, ownerName: string | null): string | null {
   const links = Array.from(html.matchAll(/href="(https?:\/\/[^"]+)"/g)).map((m) => m[1]);
   const slug = (ownerName ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -152,12 +170,25 @@ Deno.serve(async (req) => {
           (/owner|principal|manager|president|ceo|founder|partner/i.test(`${b.title ?? ""} ${b.seniority ?? ""}`) ? 1 : 0) -
           (/owner|principal|manager|president|ceo|founder|partner/i.test(`${a.title ?? ""} ${a.seniority ?? ""}`) ? 1 : 0)
         );
-        const pick = ranked.find((x) => isUnlockedEmail(x.email)) ?? ranked[0];
-        if (isUnlockedEmail(pick.email)) { dmEmail = pick.email; confidence += 25; }
+        const pick = ranked.find((x) => x.first_name && x.last_name) ?? ranked[0];
+
+        // Reveal email via /people/match — search results are always locked.
+        let revealed: any = null;
+        if (pick?.first_name && pick?.last_name) {
+          revealed = await apolloReveal(domain, pick.first_name, pick.last_name, apolloKey);
+        }
+        const finalEmail = isUnlockedEmail(revealed?.email) ? revealed.email
+          : isUnlockedEmail(pick?.email) ? pick.email : null;
+        const finalPhone = revealed?.phone_numbers?.[0]?.sanitized_number
+          ?? revealed?.phone_numbers?.[0]?.raw_number
+          ?? pick?.phone_numbers?.[0]?.sanitized_number
+          ?? null;
+
+        if (finalEmail) { dmEmail = finalEmail; confidence += 25; }
         if (!dmName && (pick.first_name || pick.last_name)) dmName = `${pick.first_name ?? ""} ${pick.last_name ?? ""}`.trim();
-        if (!dmRole && pick.title) dmRole = pick.title;
-        if (!dmLinkedIn && pick.linkedin_url) dmLinkedIn = pick.linkedin_url;
-        if (!dmPhone && pick.phone_numbers?.[0]?.sanitized_number) dmPhone = pick.phone_numbers[0].sanitized_number;
+        if (!dmRole && (revealed?.title || pick.title)) dmRole = revealed?.title ?? pick.title;
+        if (!dmLinkedIn && (revealed?.linkedin_url || pick.linkedin_url)) dmLinkedIn = revealed?.linkedin_url ?? pick.linkedin_url;
+        if (!dmPhone && finalPhone) dmPhone = finalPhone;
         sources.push("apollo.io");
       }
     }
