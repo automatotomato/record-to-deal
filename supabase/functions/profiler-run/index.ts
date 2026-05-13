@@ -462,11 +462,11 @@ Deno.serve(async (req) => {
 
   // 1.5 Decision-maker enrichment chain — only runs when keys are present
   const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY");
-  const hunterKey = Deno.env.get("HUNTER_API_KEY");
+  const apolloKey = Deno.env.get("APOLLO_API_KEY");
   const enrichment = await enrichDecisionMaker({
     ownerName, ownerType, propertyAddress: l.property_address ?? null,
     city: l.property_city ?? null, state: l.state ?? null,
-    firecrawlKey, hunterKey, lovableKey,
+    firecrawlKey, apolloKey, lovableKey,
   });
 
   // 2. AI: build personality profile + draft email using Smarty data as source of truth
