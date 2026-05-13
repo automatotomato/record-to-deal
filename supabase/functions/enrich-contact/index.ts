@@ -54,6 +54,24 @@ async function apolloSearch(domain: string, key: string) {
   } catch { return null; }
 }
 
+// Apollo search returns locked email placeholders. /people/match with
+// reveal_personal_emails:true actually unlocks the address (1 credit).
+async function apolloReveal(domain: string, first: string, last: string, key: string) {
+  try {
+    const r = await fetch("https://api.apollo.io/api/v1/people/match", {
+      method: "POST",
+      headers: { "X-Api-Key": key, "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        first_name: first, last_name: last, domain,
+        reveal_personal_emails: true,
+      }),
+    });
+    if (!r.ok) return null;
+    const data = await r.json();
+    return data?.person ?? data?.matched_person ?? null;
+  } catch { return null; }
+}
+
 function pickDomain(html: string, ownerName: string | null): string | null {
   const links = Array.from(html.matchAll(/href="(https?:\/\/[^"]+)"/g)).map((m) => m[1]);
   const slug = (ownerName ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
