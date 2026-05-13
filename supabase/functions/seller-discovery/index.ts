@@ -136,7 +136,9 @@ async function apolloMatch(
         first_name: first,
         last_name: last,
         domain,
-        reveal_personal_emails: false,
+        // Spend a credit to actually unlock the email — without this Apollo
+        // returns "email_not_unlocked@domain.com" and we drop it downstream.
+        reveal_personal_emails: true,
       }),
     });
     if (!r.ok) {
