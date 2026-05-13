@@ -410,9 +410,9 @@ Deno.serve(async (req) => {
   const entity = isEntity(ownerType, ownerName);
 
   // Pre-seed existing data so we never regress
-  if (lead.decision_maker_name) setField(d, "name", lead.decision_maker_name, 30, "cached");
+  if (looksLikePersonName(lead.decision_maker_name)) setField(d, "name", lead.decision_maker_name, 30, "cached");
   if (lead.decision_maker_role) setField(d, "role", lead.decision_maker_role, 30, "cached");
-  if (lead.decision_maker_email) setField(d, "email", lead.decision_maker_email, 40, "cached");
+  if (lead.decision_maker_email && (scoreEmail(lead.decision_maker_email, lead.decision_maker_name) >= 45 || lead.decision_maker_email.toLowerCase().endsWith(`@${String(lead.company_website ?? "").replace(/^https?:\/\//, "").replace(/^www\./, "").toLowerCase()}`))) setField(d, "email", lead.decision_maker_email, 40, "cached");
   if (lead.decision_maker_phone) setField(d, "phone", lead.decision_maker_phone, 30, "cached");
   if (lead.decision_maker_linkedin) setField(d, "linkedin", lead.decision_maker_linkedin, 35, "cached");
   if (lead.company_website) setField(d, "company_website", lead.company_website, 30, "cached");
