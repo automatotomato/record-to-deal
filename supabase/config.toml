@@ -1,12 +1,24 @@
 project_id = "bebakfrptkmjcaqursui"
 
-[functions.scout-run]
+[functions.scan-sources]
 verify_jwt = false
 
-[functions.qualifier-run]
+[functions.verify-property]
 verify_jwt = false
 
-[functions.profiler-run]
+[functions.qualify-lead]
+verify_jwt = false
+
+[functions.enrich-contact]
+verify_jwt = false
+
+[functions.draft-outreach]
+verify_jwt = false
+
+[functions.job-dispatcher]
+verify_jwt = false
+
+[functions.pipeline-sweeper]
 verify_jwt = false
 
 [functions.poll-email-replies]
@@ -17,6 +29,3 @@ verify_jwt = true
 
 [functions.seller-discovery]
 verify_jwt = true
-
-[functions.pipeline-sweeper]
-verify_jwt = false

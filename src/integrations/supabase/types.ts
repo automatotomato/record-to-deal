@@ -16,7 +16,6 @@ export type Database = {
     Tables: {
       counties: {
         Row: {
-          attom_geo_id: string | null
           county: string
           court_records_enabled: boolean
           created_at: string
@@ -31,7 +30,6 @@ export type Database = {
           updated_at: string
         }
         Insert: {
-          attom_geo_id?: string | null
           county: string
           court_records_enabled?: boolean
           created_at?: string
@@ -46,7 +44,6 @@ export type Database = {
           updated_at?: string
         }
         Update: {
-          attom_geo_id?: string | null
           county?: string
           court_records_enabled?: boolean
           created_at?: string
@@ -164,6 +161,7 @@ export type Database = {
           county_id: string | null
           created_at: string
           data_sources: string[] | null
+          days_since_sale: number | null
           decision_maker_email: string | null
           decision_maker_linkedin: string | null
           decision_maker_name: string | null
@@ -177,6 +175,8 @@ export type Database = {
           enrichment_payload: Json
           entity_registry_url: string | null
           fed_capital_gains_estimate: number | null
+          has_contact: boolean
+          has_outreach_contact: boolean
           id: string
           is_urgent: boolean
           last_contacted_at: string | null
@@ -203,6 +203,7 @@ export type Database = {
           property_city: string | null
           property_type: Database["public"]["Enums"]["property_type"] | null
           property_zip: string | null
+          qualification_reason: string | null
           qualifier_notes: string | null
           related_entities: Json
           sale_date: string | null
@@ -235,6 +236,7 @@ export type Database = {
           county_id?: string | null
           created_at?: string
           data_sources?: string[] | null
+          days_since_sale?: number | null
           decision_maker_email?: string | null
           decision_maker_linkedin?: string | null
           decision_maker_name?: string | null
@@ -248,6 +250,8 @@ export type Database = {
           enrichment_payload?: Json
           entity_registry_url?: string | null
           fed_capital_gains_estimate?: number | null
+          has_contact?: boolean
+          has_outreach_contact?: boolean
           id?: string
           is_urgent?: boolean
           last_contacted_at?: string | null
@@ -274,6 +278,7 @@ export type Database = {
           property_city?: string | null
           property_type?: Database["public"]["Enums"]["property_type"] | null
           property_zip?: string | null
+          qualification_reason?: string | null
           qualifier_notes?: string | null
           related_entities?: Json
           sale_date?: string | null
@@ -306,6 +311,7 @@ export type Database = {
           county_id?: string | null
           created_at?: string
           data_sources?: string[] | null
+          days_since_sale?: number | null
           decision_maker_email?: string | null
           decision_maker_linkedin?: string | null
           decision_maker_name?: string | null
@@ -319,6 +325,8 @@ export type Database = {
           enrichment_payload?: Json
           entity_registry_url?: string | null
           fed_capital_gains_estimate?: number | null
+          has_contact?: boolean
+          has_outreach_contact?: boolean
           id?: string
           is_urgent?: boolean
           last_contacted_at?: string | null
@@ -345,6 +353,7 @@ export type Database = {
           property_city?: string | null
           property_type?: Database["public"]["Enums"]["property_type"] | null
           property_zip?: string | null
+          qualification_reason?: string | null
           qualifier_notes?: string | null
           related_entities?: Json
           sale_date?: string | null
@@ -429,6 +438,63 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      pipeline_jobs: {
+        Row: {
+          attempts: number
+          county_id: string | null
+          created_at: string
+          finished_at: string | null
+          id: string
+          kind: string
+          last_error: string | null
+          lead_id: string | null
+          locked_at: string | null
+          locked_by: string | null
+          max_attempts: number
+          payload: Json
+          priority: number
+          result: Json | null
+          run_after: string
+          status: string
+        }
+        Insert: {
+          attempts?: number
+          county_id?: string | null
+          created_at?: string
+          finished_at?: string | null
+          id?: string
+          kind: string
+          last_error?: string | null
+          lead_id?: string | null
+          locked_at?: string | null
+          locked_by?: string | null
+          max_attempts?: number
+          payload?: Json
+          priority?: number
+          result?: Json | null
+          run_after?: string
+          status?: string
+        }
+        Update: {
+          attempts?: number
+          county_id?: string | null
+          created_at?: string
+          finished_at?: string | null
+          id?: string
+          kind?: string
+          last_error?: string | null
+          lead_id?: string | null
+          locked_at?: string | null
+          locked_by?: string | null
+          max_attempts?: number
+          payload?: Json
+          priority?: number
+          result?: Json | null
+          run_after?: string
+          status?: string
+        }
+        Relationships: []
       }
       profiles: {
         Row: {
@@ -552,6 +618,33 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      claim_jobs: {
+        Args: { p_kind: string; p_limit: number; p_lock_id: string }
+        Returns: {
+          attempts: number
+          county_id: string | null
+          created_at: string
+          finished_at: string | null
+          id: string
+          kind: string
+          last_error: string | null
+          lead_id: string | null
+          locked_at: string | null
+          locked_by: string | null
+          max_attempts: number
+          payload: Json
+          priority: number
+          result: Json | null
+          run_after: string
+          status: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "pipeline_jobs"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -577,6 +670,10 @@ export type Database = {
         | "COLD"
         | "DISQUALIFIED"
         | "UNSCORED"
+        | "CRITICAL"
+        | "ACTIVE"
+        | "FOLLOW_UP"
+        | "EXPIRED"
       owner_type:
         | "Individual"
         | "Joint"
@@ -738,7 +835,18 @@ export const Constants = {
         "won",
         "dead",
       ],
-      lead_tier: ["URGENT", "HOT", "WARM", "COLD", "DISQUALIFIED", "UNSCORED"],
+      lead_tier: [
+        "URGENT",
+        "HOT",
+        "WARM",
+        "COLD",
+        "DISQUALIFIED",
+        "UNSCORED",
+        "CRITICAL",
+        "ACTIVE",
+        "FOLLOW_UP",
+        "EXPIRED",
+      ],
       owner_type: [
         "Individual",
         "Joint",

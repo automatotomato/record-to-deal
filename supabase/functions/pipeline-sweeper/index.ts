@@ -1,12 +1,8 @@
-// Pipeline sweeper: nightly safety net that re-runs the right stage on any
-// lead that didn't make it all the way to `pipeline_stage='ready'`.
-//
-// Stages it heals (in order):
-//   1. UNSCORED leads          → qualifier-run (will auto-fan to profiler)
-//   2. Scored but no contact   → profiler-run (force=true)
-//   3. Profiled but no draft   → profiler-run (force=true)  // profiler always writes a draft
-//
-// Caps each stage at 200 leads/run to keep Apollo + Firecrawl spend predictable.
+// pipeline-sweeper: nightly safety net for the queued pipeline.
+// 1) Reset jobs stuck in 'running' for >10 min back to 'queued'.
+// 2) Re-enqueue leads whose stage is behind their data (heals stragglers).
+// 3) Move sales > 180 days old to EXPIRED.
+// 4) Clean up done jobs older than 7 days.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {
@@ -16,125 +12,98 @@ const corsHeaders = {
 };
 
 const STAGE_CAP = 200;
-const PROFILER_CONCURRENCY = 5;
-
-async function runProfiler(
-  supabase: ReturnType<typeof createClient>,
-  ids: string[],
-  reason: string,
-): Promise<{ ok: number; fail: number }> {
-  let ok = 0, fail = 0;
-  const queue = [...ids];
-  const worker = async () => {
-    while (queue.length) {
-      const id = queue.shift();
-      if (!id) break;
-      try {
-        const { error } = await supabase.functions.invoke("profiler-run", {
-          body: { lead_id: id, force: true },
-        });
-        if (error) throw error;
-        ok += 1;
-        await supabase.from("lead_activities").insert({
-          lead_id: id,
-          kind: "sweeper_rerun",
-          summary: `Sweeper re-ran profiler · reason: ${reason}`,
-        });
-      } catch (e) {
-        fail += 1;
-        console.warn("Sweeper profiler failed for", id, e);
-      }
-    }
-  };
-  await Promise.all(
-    Array.from({ length: PROFILER_CONCURRENCY }, () => worker()),
-  );
-  return { ok, fail };
-}
+const STUCK_MINUTES = 10;
+const RETENTION_DAYS = 7;
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
-  const summary = {
-    rescored: 0,
-    reprofiled_for_contact: 0,
-    redrafted: 0,
-    failures: 0,
-  };
+  const summary = { stuck_reset: 0, requalified: 0, re_enriched: 0, re_drafted: 0, expired: 0, cleaned: 0 };
 
-  // 1) UNSCORED → qualifier (with auto_profile so it cascades)
-  const { data: unscored } = await supabase
+  // 1) Reset stuck running jobs (worker died mid-run)
+  const stuckCutoff = new Date(Date.now() - STUCK_MINUTES * 60 * 1000).toISOString();
+  const { data: stuck } = await supabase
+    .from("pipeline_jobs")
+    .update({ status: "queued", locked_at: null, locked_by: null, last_error: "reset by sweeper (stuck)" })
+    .eq("status", "running")
+    .lt("locked_at", stuckCutoff)
+    .select("id");
+  summary.stuck_reset = stuck?.length ?? 0;
+
+  // 2) Heal stragglers — verified but not qualified
+  const { data: needQualify } = await supabase
     .from("leads")
     .select("id")
-    .eq("tier", "UNSCORED")
+    .eq("pipeline_stage", "verified")
     .limit(STAGE_CAP);
-  const unscoredIds = (unscored ?? []).map((r: any) => r.id);
-  if (unscoredIds.length) {
-    try {
-      const { error } = await supabase.functions.invoke("qualifier-run", {
-        body: { lead_ids: unscoredIds, auto_profile: true },
-      });
-      if (error) throw error;
-      summary.rescored = unscoredIds.length;
-      for (const id of unscoredIds) {
-        await supabase.from("lead_activities").insert({
-          lead_id: id,
-          kind: "sweeper_rerun",
-          summary: "Sweeper re-ran qualifier · reason: tier=UNSCORED",
-        });
-      }
-    } catch (e) {
-      console.warn("Sweeper qualifier batch failed:", e);
-      summary.failures += 1;
+  for (const r of needQualify ?? []) {
+    await supabase.from("pipeline_jobs").insert({ kind: "qualify_lead", lead_id: r.id, priority: 90 });
+    summary.requalified += 1;
+  }
+
+  // 2b) Qualified but no enrichment job in flight
+  const { data: needEnrich } = await supabase
+    .from("leads")
+    .select("id")
+    .eq("pipeline_stage", "qualified")
+    .limit(STAGE_CAP);
+  for (const r of needEnrich ?? []) {
+    const { count } = await supabase.from("pipeline_jobs")
+      .select("id", { count: "exact", head: true })
+      .eq("lead_id", r.id)
+      .eq("kind", "enrich_contact")
+      .in("status", ["queued", "retry", "running"]);
+    if ((count ?? 0) === 0) {
+      await supabase.from("pipeline_jobs").insert({ kind: "enrich_contact", lead_id: r.id, priority: 80 });
+      summary.re_enriched += 1;
     }
   }
 
-  // 2) Scored but missing decision-maker email (skip DISQUALIFIED — they shouldn't be enriched)
-  const { data: noContact } = await supabase
+  // 2c) Enriched but no draft job in flight
+  const { data: needDraft } = await supabase
     .from("leads")
     .select("id")
-    .in("tier", ["URGENT", "HOT", "WARM", "COLD"])
-    .in("pipeline_stage", ["scored", "profiled"])
-    .is("decision_maker_email", null)
+    .eq("pipeline_stage", "enriched")
+    .eq("has_outreach_contact", true)
     .limit(STAGE_CAP);
-  const noContactIds = (noContact ?? []).map((r: any) => r.id);
-  if (noContactIds.length) {
-    const r = await runProfiler(supabase, noContactIds, "no decision-maker email");
-    summary.reprofiled_for_contact = r.ok;
-    summary.failures += r.fail;
-  }
-
-  // 3) Profiled/enriched but no draft email row
-  const { data: candidates } = await supabase
-    .from("leads")
-    .select("id")
-    .in("pipeline_stage", ["profiled", "enriched"])
-    .in("tier", ["URGENT", "HOT", "WARM", "COLD"])
-    .limit(STAGE_CAP);
-  const candidateIds = (candidates ?? []).map((r: any) => r.id);
-  if (candidateIds.length) {
-    const { data: withEmails } = await supabase
-      .from("outreach_emails")
-      .select("lead_id")
-      .in("lead_id", candidateIds);
-    const have = new Set((withEmails ?? []).map((r: any) => r.lead_id));
-    const missing = candidateIds.filter((id) => !have.has(id));
-    if (missing.length) {
-      const r = await runProfiler(supabase, missing, "no draft email");
-      summary.redrafted = r.ok;
-      summary.failures += r.fail;
+  for (const r of needDraft ?? []) {
+    const { count } = await supabase.from("pipeline_jobs")
+      .select("id", { count: "exact", head: true })
+      .eq("lead_id", r.id)
+      .eq("kind", "draft_outreach")
+      .in("status", ["queued", "retry", "running"]);
+    if ((count ?? 0) === 0) {
+      await supabase.from("pipeline_jobs").insert({ kind: "draft_outreach", lead_id: r.id, priority: 70 });
+      summary.re_drafted += 1;
     }
   }
+
+  // 3) Expire 180+ day sales
+  const expiredCutoff = new Date(Date.now() - 180 * 86_400_000).toISOString().slice(0, 10);
+  const { data: expiredRows } = await supabase
+    .from("leads")
+    .update({ tier: "EXPIRED", pipeline_stage: "expired", is_urgent: false })
+    .lt("sale_date", expiredCutoff)
+    .not("tier", "in", "(EXPIRED,DISQUALIFIED)")
+    .select("id");
+  summary.expired = expiredRows?.length ?? 0;
+
+  // 4) Clean old done jobs
+  const cleanCutoff = new Date(Date.now() - RETENTION_DAYS * 86_400_000).toISOString();
+  const { data: cleaned } = await supabase
+    .from("pipeline_jobs")
+    .delete()
+    .eq("status", "done")
+    .lt("finished_at", cleanCutoff)
+    .select("id");
+  summary.cleaned = cleaned?.length ?? 0;
 
   return new Response(JSON.stringify({ ok: true, ...summary }), {
-    status: 200,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 });
