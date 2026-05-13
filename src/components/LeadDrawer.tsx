@@ -697,3 +697,60 @@ const ScoreExplanation = ({ lead }: { lead: any }) => {
     </Section>
   );
 };
+
+const AIBriefSection = ({
+  brief, generatedAt, onGenerate, loading,
+}: {
+  brief: { summary?: string; why_good?: string; approach?: string } | null;
+  generatedAt: string | null;
+  onGenerate: () => void;
+  loading: boolean;
+}) => {
+  const has = brief && (brief.summary || brief.why_good || brief.approach);
+  return (
+    <Section title="AI lead brief">
+      <div className="flex items-center justify-between mb-3">
+        <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+          {generatedAt ? `Generated ${fmtRelative(generatedAt)}` : "Not generated yet"}
+        </div>
+        <Button
+          size="sm"
+          onClick={onGenerate}
+          disabled={loading}
+          className="rounded-none bg-accent text-accent-foreground hover:bg-accent/90 font-mono text-[10px] uppercase tracking-wider"
+        >
+          {loading ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
+          {has ? "Regenerate" : "Generate brief"}
+        </Button>
+      </div>
+
+      {!has ? (
+        <p className="text-xs text-muted-foreground italic">
+          Click "Generate brief" for a plain-English summary of what the agent found, why this is a good lead, and how to approach the seller.
+        </p>
+      ) : (
+        <div className="space-y-4">
+          {brief!.summary && (
+            <div>
+              <div className="kpi-label mb-1">Summary</div>
+              <p className="text-sm leading-relaxed whitespace-pre-wrap">{brief!.summary}</p>
+            </div>
+          )}
+          {brief!.why_good && (
+            <div className="border-l-2 border-accent pl-3">
+              <div className="kpi-label mb-1">Why this is a good lead</div>
+              <p className="text-sm leading-relaxed whitespace-pre-wrap">{brief!.why_good}</p>
+            </div>
+          )}
+          {brief!.approach && (
+            <div className="border-l-2 border-warm pl-3">
+              <div className="kpi-label mb-1">How to approach</div>
+              <p className="text-sm leading-relaxed whitespace-pre-wrap">{brief!.approach}</p>
+            </div>
+          )}
+        </div>
+      )}
+    </Section>
+  );
+};
+
