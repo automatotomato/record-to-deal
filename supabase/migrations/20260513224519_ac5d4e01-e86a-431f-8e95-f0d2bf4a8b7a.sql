@@ -1,0 +1,1 @@
+ALTER TABLE public.leads ADD COLUMN IF NOT EXISTS ai_brief jsonb, ADD COLUMN IF NOT EXISTS ai_brief_generated_at timestamptz;

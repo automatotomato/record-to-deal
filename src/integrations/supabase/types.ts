@@ -149,6 +149,8 @@ export type Database = {
       }
       leads: {
         Row: {
+          ai_brief: Json | null
+          ai_brief_generated_at: string | null
           assessed_value: number | null
           assigned_to: string | null
           capital_gains_estimate: number | null
@@ -224,6 +226,8 @@ export type Database = {
           wealth_signals: Json | null
         }
         Insert: {
+          ai_brief?: Json | null
+          ai_brief_generated_at?: string | null
           assessed_value?: number | null
           assigned_to?: string | null
           capital_gains_estimate?: number | null
@@ -299,6 +303,8 @@ export type Database = {
           wealth_signals?: Json | null
         }
         Update: {
+          ai_brief?: Json | null
+          ai_brief_generated_at?: string | null
           assessed_value?: number | null
           assigned_to?: string | null
           capital_gains_estimate?: number | null

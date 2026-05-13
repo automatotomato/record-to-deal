@@ -29,3 +29,6 @@ verify_jwt = true
 
 [functions.seller-discovery]
 verify_jwt = true
+
+[functions.lead-brief]
+verify_jwt = true
