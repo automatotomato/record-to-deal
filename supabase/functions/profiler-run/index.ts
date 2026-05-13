@@ -462,11 +462,11 @@ Deno.serve(async (req) => {
 
   // 1.5 Decision-maker enrichment chain — only runs when keys are present
   const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY");
-  const hunterKey = Deno.env.get("HUNTER_API_KEY");
+  const apolloKey = Deno.env.get("APOLLO_API_KEY");
   const enrichment = await enrichDecisionMaker({
     ownerName, ownerType, propertyAddress: l.property_address ?? null,
     city: l.property_city ?? null, state: l.state ?? null,
-    firecrawlKey, hunterKey, lovableKey,
+    firecrawlKey, apolloKey, lovableKey,
   });
 
   // 2. AI: build personality profile + draft email using Smarty data as source of truth
@@ -711,7 +711,7 @@ Worth a 15-minute call this week?
 // Tries, in order:
 //   1. Firecrawl search the state Secretary of State business registry for
 //      the LLC/Corp name → extract registered agent + officers (free).
-//   2. Hunter.io domain search if we can guess a company website.
+//   2. Apollo.io organization people search if we can guess a company website.
 //   3. Firecrawl search "<name> linkedin" + "<name> news" for LinkedIn URL
 //      and recent press mentions (wealth/timing signals).
 //   4. Lovable AI to extract the highest-confidence email/phone/LinkedIn
@@ -794,20 +794,40 @@ async function fcSearch(query: string, key: string, limit = 5, scrape = true) {
   }
 }
 
-async function hunterDomainSearch(domain: string, key: string) {
+async function apolloOrgPeopleSearch(domain: string, key: string) {
   try {
-    const r = await fetch(
-      `https://api.hunter.io/v2/domain-search?domain=${encodeURIComponent(domain)}&api_key=${key}&limit=5`,
-    );
+    const r = await fetch("https://api.apollo.io/api/v1/mixed_people/search", {
+      method: "POST",
+      headers: {
+        "X-Api-Key": key,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Cache-Control": "no-cache",
+      },
+      body: JSON.stringify({
+        q_organization_domains_list: [domain],
+        person_titles: [
+          "owner", "principal", "managing member", "manager",
+          "president", "ceo", "founder", "partner", "director",
+        ],
+        page: 1,
+        per_page: 10,
+      }),
+    });
     if (!r.ok) {
-      console.warn(`Hunter ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      console.warn(`Apollo ${r.status}: ${(await r.text()).slice(0, 200)}`);
       return null;
     }
     return await r.json();
   } catch (e) {
-    console.warn("Hunter threw:", e);
+    console.warn("Apollo threw:", e);
     return null;
   }
+}
+
+function isUnlockedApolloEmail(e?: string | null): boolean {
+  if (!e) return false;
+  return !/email_not_unlocked|domain\.com$/i.test(e);
 }
 
 async function aiExtractContact(blob: string, lovableKey: string): Promise<{
@@ -847,10 +867,10 @@ async function enrichDecisionMaker(args: {
   city: string | null;
   state: string | null;
   firecrawlKey: string | undefined;
-  hunterKey: string | undefined;
+  apolloKey: string | undefined;
   lovableKey: string;
 }): Promise<EnrichmentResult> {
-  const { ownerName, ownerType, city, state, firecrawlKey, hunterKey, lovableKey } = args;
+  const { ownerName, ownerType, city, state, firecrawlKey, apolloKey, lovableKey } = args;
   if (!ownerName) return EMPTY_ENRICHMENT;
 
   const result: EnrichmentResult = { ...EMPTY_ENRICHMENT, payload: {} };
@@ -908,31 +928,34 @@ async function enrichDecisionMaker(args: {
     if (result.newsSnippets.length) result.sources.push("firecrawl:news");
   }
 
-  // 3) Hunter.io domain search if we can guess a company website
-  if (hunterKey && firecrawlKey && isEntity) {
+  // 3) Apollo.io organization people search if we can guess a company website
+  if (apolloKey && firecrawlKey && isEntity) {
     // Try to find a company website by scraping the SoS page text
     const probe = await fcSearch(`"${ownerName}" website`, firecrawlKey, 2, true);
     const blob = probe.map((r: any) => `${r.url}\n${r.markdown ?? ""}`).join("\n");
     const domain = pickDomain(blob, ownerName);
     if (domain) {
-      const hunter = await hunterDomainSearch(domain, hunterKey);
-      const emails = hunter?.data?.emails as Array<any> | undefined;
-      if (emails?.length) {
-        // Prefer decision-maker-ish titles
-        const ranked = [...emails].sort((a, b) => {
-          const score = (e: any) => /owner|principal|manager|president|ceo|founder|partner/i.test(`${e.position ?? ""} ${e.seniority ?? ""}`) ? 1 : 0;
+      const apollo = await apolloOrgPeopleSearch(domain, apolloKey);
+      const people = apollo?.people as Array<any> | undefined;
+      if (people?.length) {
+        // Prefer decision-maker-ish titles, then prefer ones with unlocked email
+        const ranked = [...people].sort((a, b) => {
+          const score = (e: any) => /owner|principal|manager|president|ceo|founder|partner/i.test(`${e.title ?? ""} ${e.seniority ?? ""}`) ? 1 : 0;
           return score(b) - score(a);
         });
-        const pick = ranked[0];
-        result.decisionMakerEmail = pick.value ?? null;
+        const pick = ranked.find((x) => isUnlockedApolloEmail(x.email)) ?? ranked[0];
+        if (isUnlockedApolloEmail(pick.email)) {
+          result.decisionMakerEmail = pick.email;
+        }
         if (!result.decisionMakerName && (pick.first_name || pick.last_name)) {
           result.decisionMakerName = `${pick.first_name ?? ""} ${pick.last_name ?? ""}`.trim();
         }
-        if (!result.decisionMakerRole && pick.position) result.decisionMakerRole = pick.position;
-        result.payload.hunter_company = hunter?.data?.organization;
-        result.payload.hunter_domain = domain;
-        result.confidence += pick.confidence ? Math.min(30, Math.round(pick.confidence / 3)) : 15;
-        result.sources.push("hunter.io");
+        if (!result.decisionMakerRole && pick.title) result.decisionMakerRole = pick.title;
+        if (!result.decisionMakerLinkedIn && pick.linkedin_url) result.decisionMakerLinkedIn = pick.linkedin_url;
+        result.payload.apollo_company = pick.organization?.name ?? apollo?.organization?.name;
+        result.payload.apollo_domain = domain;
+        result.confidence += result.decisionMakerEmail ? 25 : 12;
+        result.sources.push("apollo.io");
       }
     }
   }

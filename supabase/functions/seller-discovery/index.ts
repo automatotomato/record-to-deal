@@ -3,7 +3,7 @@
 //   1. Entity unmask (OpenCorporates + state SoS via Firecrawl)
 //   2. Person identity (LinkedIn / RocketReach / ZoomInfo / Bizapedia / Crunchbase)
 //   3. Company website discovery
-//   4. Hunter.io domain search + email finder
+//   4. Apollo.io people/match + organization people search
 //   5. Personal contact scrape (regex + scoring)
 //   6. AI consolidation (OpenAI picks best per field with confidence)
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
@@ -15,12 +15,12 @@ const corsHeaders = {
 };
 
 const FC_V2 = "https://api.firecrawl.dev/v2";
-const HUNTER = "https://api.hunter.io/v2";
+const APOLLO = "https://api.apollo.io/api/v1";
 const AI_URL = "https://api.openai.com/v1/chat/completions";
 const AI_MODEL = "gpt-4o-mini";
 
 // Per-call budget so a single lead can't burn the day's quota
-const BUDGET = { firecrawl: 12, hunter: 2, openai: 1 };
+const BUDGET = { firecrawl: 12, apollo: 3, openai: 1 };
 
 const STATE_NAMES: Record<string, string> = {
   AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
@@ -67,9 +67,9 @@ function setField(d: Discovery, field: keyof Discovery, value: any, score: numbe
 }
 
 class Budget {
-  constructor(public fc = 0, public hunter = 0, public ai = 0) {}
+  constructor(public fc = 0, public apollo = 0, public ai = 0) {}
   canFc() { return this.fc < BUDGET.firecrawl; }
-  canHunter() { return this.hunter < BUDGET.hunter; }
+  canApollo() { return this.apollo < BUDGET.apollo; }
   canAi() { return this.ai < BUDGET.openai; }
 }
 
@@ -110,25 +110,67 @@ async function fcScrape(url: string, key: string, budget: Budget): Promise<strin
   } catch (_) { return null; }
 }
 
-async function hunterDomain(domain: string, key: string, budget: Budget) {
-  if (!budget.canHunter()) return null;
-  budget.hunter++;
-  try {
-    const r = await fetch(`${HUNTER}/domain-search?domain=${encodeURIComponent(domain)}&api_key=${key}&limit=10`);
-    if (!r.ok) return null;
-    return await r.json();
-  } catch (_) { return null; }
+const APOLLO_HEADERS = (key: string) => ({
+  "X-Api-Key": key,
+  "Content-Type": "application/json",
+  "Accept": "application/json",
+  "Cache-Control": "no-cache",
+});
+
+function isUnlockedEmail(e?: string | null): boolean {
+  if (!e) return false;
+  return !/email_not_unlocked|domain\.com$/i.test(e);
 }
 
-async function hunterFinder(domain: string, first: string, last: string, key: string, budget: Budget) {
-  if (!budget.canHunter()) return null;
-  budget.hunter++;
+// People match: best when we have first+last+domain. Returns single person.
+async function apolloMatch(
+  domain: string, first: string, last: string, key: string, budget: Budget,
+) {
+  if (!budget.canApollo()) return null;
+  budget.apollo++;
   try {
-    const url = `${HUNTER}/email-finder?domain=${encodeURIComponent(domain)}&first_name=${encodeURIComponent(first)}&last_name=${encodeURIComponent(last)}&api_key=${key}`;
-    const r = await fetch(url);
-    if (!r.ok) return null;
+    const r = await fetch(`${APOLLO}/people/match`, {
+      method: "POST",
+      headers: APOLLO_HEADERS(key),
+      body: JSON.stringify({
+        first_name: first,
+        last_name: last,
+        domain,
+        reveal_personal_emails: false,
+      }),
+    });
+    if (!r.ok) {
+      console.warn(`apollo match ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      return null;
+    }
     return await r.json();
-  } catch (_) { return null; }
+  } catch (e) { console.warn("apollo match threw", e); return null; }
+}
+
+// Org-wide search by domain — pulls decision-maker titles.
+async function apolloOrgPeople(domain: string, key: string, budget: Budget) {
+  if (!budget.canApollo()) return null;
+  budget.apollo++;
+  try {
+    const r = await fetch(`${APOLLO}/mixed_people/search`, {
+      method: "POST",
+      headers: APOLLO_HEADERS(key),
+      body: JSON.stringify({
+        q_organization_domains_list: [domain],
+        person_titles: [
+          "owner", "principal", "managing member", "manager",
+          "president", "ceo", "founder", "partner", "director",
+        ],
+        page: 1,
+        per_page: 10,
+      }),
+    });
+    if (!r.ok) {
+      console.warn(`apollo search ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      return null;
+    }
+    return await r.json();
+  } catch (e) { console.warn("apollo search threw", e); return null; }
 }
 
 function pickHostFromUrl(url: string): string | null {
@@ -234,7 +276,7 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const fcKey = Deno.env.get("FIRECRAWL_API_KEY");
-  const hunterKey = Deno.env.get("HUNTER_API_KEY");
+  const apolloKey = Deno.env.get("APOLLO_API_KEY");
   const openaiKey = Deno.env.get("OPENAI_API_KEY");
 
   if (!fcKey || !openaiKey) {
@@ -379,34 +421,45 @@ Deno.serve(async (req) => {
     if (contactMd) evidence.push(`CONTACT ${domain}\n${contactMd.slice(0, 4000)}`);
   }
 
-  // ============ PASS 4 — Hunter.io ============
-  if (hunterKey && domain) {
-    d.passes.hunter = true;
-    // Email finder first if we have a name
+  // ============ PASS 4 — Apollo.io ============
+  if (apolloKey && domain) {
+    d.passes.apollo = true;
+    // People match first if we have a name
     const split = splitName(targetName);
     if (split) {
-      const found = await hunterFinder(domain, split.first, split.last, hunterKey, budget);
-      const fEmail = found?.data?.email;
-      if (fEmail) {
-        setField(d, "email", fEmail, Math.min(95, 50 + (found?.data?.score ?? 0) / 2), "hunter.finder");
-        d.sources.push("hunter.io");
-        if (!d.role && found?.data?.position) setField(d, "role", found.data.position, 60, "hunter");
+      const matched = await apolloMatch(domain, split.first, split.last, apolloKey, budget);
+      const p = matched?.person ?? matched?.matched_person ?? null;
+      if (p) {
+        if (isUnlockedEmail(p.email)) {
+          setField(d, "email", p.email, 90, "apollo.match");
+        }
+        if (!d.role && p.title) setField(d, "role", p.title, 65, "apollo");
+        if (!d.linkedin && p.linkedin_url) setField(d, "linkedin", p.linkedin_url, 70, "apollo");
+        const phoneList = p.phone_numbers ?? [];
+        const ph = Array.isArray(phoneList) ? phoneList[0]?.sanitized_number ?? phoneList[0]?.raw_number : null;
+        if (!d.phone && ph) setField(d, "phone", ph, 70, "apollo");
+        d.sources.push("apollo.io");
       }
     }
-    // Domain search as broader fallback
+    // Org-wide search as broader fallback to find any decision-maker
     if (!d.email) {
-      const dom = await hunterDomain(domain, hunterKey, budget);
-      const emails: any[] = dom?.data?.emails ?? [];
-      const ranked = [...emails].sort((a, b) => {
-        const w = (e: any) => (/owner|principal|manager|president|ceo|founder|partner/i.test(`${e.position ?? ""} ${e.seniority ?? ""}`) ? 1 : 0);
+      const search = await apolloOrgPeople(domain, apolloKey, budget);
+      const people: any[] = search?.people ?? [];
+      const ranked = [...people].sort((a, b) => {
+        const w = (e: any) => (/owner|principal|manager|president|ceo|founder|partner/i.test(`${e.title ?? ""} ${e.seniority ?? ""}`) ? 1 : 0);
         return w(b) - w(a);
       });
-      const pick = ranked[0];
-      if (pick?.value) {
-        setField(d, "email", pick.value, Math.min(90, 40 + (pick.confidence ?? 0) / 2), "hunter.domain");
-        if (!d.name && (pick.first_name || pick.last_name)) setField(d, "name", `${pick.first_name ?? ""} ${pick.last_name ?? ""}`.trim(), 60, "hunter");
-        if (!d.role && pick.position) setField(d, "role", pick.position, 55, "hunter");
-        d.sources.push("hunter.io");
+      const pick = ranked.find((x) => isUnlockedEmail(x.email)) ?? ranked[0];
+      if (pick) {
+        if (isUnlockedEmail(pick.email)) {
+          setField(d, "email", pick.email, 80, "apollo.search");
+        }
+        if (!d.name && (pick.first_name || pick.last_name)) {
+          setField(d, "name", `${pick.first_name ?? ""} ${pick.last_name ?? ""}`.trim(), 65, "apollo");
+        }
+        if (!d.role && pick.title) setField(d, "role", pick.title, 60, "apollo");
+        if (!d.linkedin && pick.linkedin_url) setField(d, "linkedin", pick.linkedin_url, 65, "apollo");
+        d.sources.push("apollo.io");
       }
     }
   }
@@ -515,7 +568,7 @@ Deno.serve(async (req) => {
   await supabase.from("lead_activities").insert({
     lead_id: leadId,
     kind: "seller_discovery",
-    summary: `Discovery: ${status}${d.email ? ` · email ✓` : ""}${d.phone ? " · phone ✓" : ""}${d.linkedin ? " · LinkedIn ✓" : ""} · used ${budget.fc} FC + ${budget.hunter} Hunter + ${budget.ai} AI`,
+    summary: `Discovery: ${status}${d.email ? ` · email ✓` : ""}${d.phone ? " · phone ✓" : ""}${d.linkedin ? " · LinkedIn ✓" : ""} · used ${budget.fc} FC + ${budget.apollo} Apollo + ${budget.ai} AI`,
     payload: { discovery: d, budget_used: budget },
   });
 
