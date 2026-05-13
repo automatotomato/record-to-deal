@@ -1,6 +1,6 @@
 // Qualifier agent: score each lead's 1031-exchange propensity, assign a tier
-// (A/B/C/D), flag urgency, estimate tax exposure, and (optionally) auto-fan
-// out the Profiler for high-tier leads. Pure scoring — no external API calls.
+// (URGENT/HOT/WARM/COLD/DISQUALIFIED), flag urgency, estimate fed + state
+// tax exposure separately, and fan out the Profiler for every scored lead.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {
@@ -10,17 +10,15 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-// High-tax origin states — owners here have the strongest 1031 motivation
-const HIGH_TAX_STATES = new Set([
-  "CA", "NY", "NJ", "OR", "MN", "HI", "MA", "CT", "VT", "MD", "IL", "DC",
-]);
+// Federal LTCG (20%) + NIIT (3.8%). State portion comes from state_tax_rates.
+const FEDERAL_LTCG_RATE = 0.238;
 
-// Approx blended cap-gain rate by state (federal 23.8% + state, simplified)
-const STATE_BLENDED_RATE: Record<string, number> = {
-  CA: 0.37, NY: 0.348, NJ: 0.348, OR: 0.337, MN: 0.336, HI: 0.349,
-  MA: 0.288, CT: 0.308, VT: 0.328, MD: 0.296, IL: 0.288, DC: 0.323,
-  TX: 0.238, FL: 0.238, NV: 0.238, WA: 0.238,
-};
+interface StateRate {
+  state: string;
+  ltcg_rate: number;
+  surcharge: number;
+  is_high_tax: boolean;
+}
 
 interface Lead {
   id: string;
@@ -42,6 +40,9 @@ interface ScoreResult {
   score: number;
   tier: "URGENT" | "HOT" | "WARM" | "COLD" | "DISQUALIFIED";
   is_urgent: boolean;
+  state_tax_rate: number | null;
+  fed_capital_gains_estimate: number | null;
+  state_capital_gains_estimate: number | null;
   capital_gains_estimate: number | null;
   depreciation_recapture_est: number | null;
   total_tax_exposure: number | null;
@@ -57,7 +58,7 @@ function daysBetween(a: string | null | undefined, b = new Date()): number | nul
   return Math.floor((b.getTime() - t) / 86_400_000);
 }
 
-function score(lead: Lead): ScoreResult {
+function score(lead: Lead, stateRate: StateRate | null): ScoreResult {
   const breakdown: Record<string, number> = {};
   const notes: string[] = [];
 
@@ -66,9 +67,9 @@ function score(lead: Lead): ScoreResult {
   const sp = lead.sale_price ?? 0;
   const addr = (lead.property_address ?? "").toUpperCase();
   const isCondoOrApt = /\b(APT|UNIT|#|STE|SUITE)\b/.test(addr);
+  const isHighTax = !!stateRate?.is_high_tax;
 
   // --- HARD DISQUALIFIERS ---
-  // Owner-occupied SFR / starter condo = homeowner, not 1031 candidate
   const isLikelyHomeowner =
     (propertyType === "SFR" && ownerType === "Individual" && sp > 0 && sp < 750_000) ||
     (isCondoOrApt && ownerType === "Individual" && sp > 0 && sp < 1_000_000);
@@ -77,6 +78,9 @@ function score(lead: Lead): ScoreResult {
       score: 0,
       tier: "DISQUALIFIED",
       is_urgent: false,
+      state_tax_rate: stateRate ? stateRate.ltcg_rate + stateRate.surcharge : null,
+      fed_capital_gains_estimate: null,
+      state_capital_gains_estimate: null,
       capital_gains_estimate: null,
       depreciation_recapture_est: null,
       total_tax_exposure: null,
@@ -86,22 +90,26 @@ function score(lead: Lead): ScoreResult {
     };
   }
 
-  // 1) High-tax origin state — biggest single signal
-  if (HIGH_TAX_STATES.has(lead.state)) {
+  // 1) High-tax state — biggest single signal
+  if (isHighTax) {
     breakdown.high_tax_state = 25;
-    notes.push(`${lead.state} is a high-tax origin state`);
+    const stateTotalRate = (stateRate!.ltcg_rate + stateRate!.surcharge) * 100;
+    notes.push(`${lead.state} state cap-gains ~${stateTotalRate.toFixed(1)}%`);
+  } else if (lead.state === "NV") {
+    // NV is explicitly de-prioritized: still scored but doesn't earn high-tax points
+    notes.push("Nevada: no state cap-gains motivation");
   }
 
-  // 2) Property type — investment assets are 1031-eligible, primary homes are not
+  // 2) Property type
   const investmentTypes = new Set(["Multifamily", "Commercial", "Industrial", "Mixed", "Land"]);
   if (investmentTypes.has(propertyType)) {
     breakdown.investment_property = 20;
   } else if (propertyType === "SFR") {
     breakdown.investment_property = 8;
-    notes.push("SFR — only qualifies if rental, not primary residence");
+    notes.push("SFR — only qualifies if rental");
   }
 
-  // 3) Owner type — entities almost always investment-held
+  // 3) Owner type
   if (ownerType === "LLC" || ownerType === "Corporation") {
     breakdown.entity_owner = 15;
   } else if (ownerType === "Trust" || ownerType === "Estate") {
@@ -111,23 +119,23 @@ function score(lead: Lead): ScoreResult {
     breakdown.entity_owner = 5;
   }
 
-  // 4) Sale price — bigger sale = bigger tax bill = more 1031 leverage
+  // 4) Sale size
   if (sp >= 5_000_000) breakdown.sale_size = 20;
   else if (sp >= 2_000_000) breakdown.sale_size = 15;
   else if (sp >= 1_000_000) breakdown.sale_size = 10;
   else if (sp >= 500_000) breakdown.sale_size = 5;
 
-  // 5) Recency — 1031 has a 45-day identification window from closing
+  // 5) Recency — 45-day ID window
   const daysSinceSale = daysBetween(lead.sale_date ?? lead.deed_date);
-  let isUrgent = false;
+  let isInsideWindow = false;
   if (daysSinceSale != null) {
     if (daysSinceSale <= 30) {
       breakdown.recent_sale = 20;
-      isUrgent = true;
+      isInsideWindow = true;
       notes.push(`Sold ${daysSinceSale}d ago — inside 45-day ID window`);
     } else if (daysSinceSale <= 45) {
       breakdown.recent_sale = 15;
-      isUrgent = true;
+      isInsideWindow = true;
       notes.push(`Sold ${daysSinceSale}d ago — closing 45-day ID window`);
     } else if (daysSinceSale <= 180) {
       breakdown.recent_sale = 8;
@@ -151,46 +159,59 @@ function score(lead: Lead): ScoreResult {
 
   const total = Object.values(breakdown).reduce((s, n) => s + n, 0);
 
-  // Tier thresholds — must match the lead_tier enum
+  // --- TIER ---
   let tier: "URGENT" | "HOT" | "WARM" | "COLD" | "DISQUALIFIED" = "DISQUALIFIED";
   if (total >= 70) tier = "HOT";
   else if (total >= 50) tier = "WARM";
   else if (total >= 30) tier = "COLD";
-  // URGENT requires real investor signal — not just a recent residential sale
+
+  // --- URGENT (new rule) ---
+  // PRIMARY: high-tax state + 30-day window + investor signal
+  // SECONDARY: NV recent sale w/ investor signal (lower confidence)
   const investorSignal =
     ownerType === "LLC" || ownerType === "Corporation" || ownerType === "Trust" ||
     investmentTypes.has(propertyType) ||
     sp >= 1_000_000;
-  if (isUrgent && total >= 50 && investorSignal) tier = "URGENT";
 
-  // Tax exposure — prefer Smarty-derived values when available (assessed value
-  // gives us the current FMV, sale_price gives us the basis, ownership_years
-  // tells us how much depreciation has been taken).
-  const rate = STATE_BLENDED_RATE[lead.state] ?? 0.25;
-  const fmv = lead.assessed_value ?? 0;
-  const basis = sp ?? 0;
-  let capitalGainsEstimate: number | null = null;
-  let depreciationRecapture: number | null = null;
-
-  if (fmv > 0 && basis > 0 && fmv > basis) {
-    // Have both values from Smarty — compute real gain
-    const gain = fmv - basis;
-    capitalGainsEstimate = Math.round(gain * rate);
-  } else if (basis > 0) {
-    // Only have sale price — assume 60% appreciation as fallback
-    capitalGainsEstimate = Math.round(basis * 0.6 * rate);
+  let isUrgent = false;
+  if (isInsideWindow && investorSignal) {
+    if (isHighTax) {
+      tier = "URGENT";
+      isUrgent = true;
+      notes.push("URGENT: high-tax state + inside ID window");
+    } else if (lead.state === "NV" && total >= 50) {
+      tier = "URGENT";
+      isUrgent = true;
+      notes.push("URGENT (secondary): NV recent investor sale");
+    }
   }
 
+  // --- TAX MATH (separated) ---
+  const stateRateTotal = stateRate ? stateRate.ltcg_rate + stateRate.surcharge : null;
+  const fmv = lead.assessed_value ?? 0;
+  const basis = sp ?? 0;
+  let gain = 0;
+  if (fmv > 0 && basis > 0 && fmv > basis) {
+    gain = fmv - basis;
+  } else if (basis > 0) {
+    gain = basis * 0.6; // fallback: assume 60% appreciation
+  }
+
+  const fedCapGains = gain > 0 ? Math.round(gain * FEDERAL_LTCG_RATE) : null;
+  const stateCapGains = gain > 0 && stateRateTotal != null
+    ? Math.round(gain * stateRateTotal)
+    : null;
+
+  let recapture: number | null = null;
   if ((held ?? 0) >= 1 && basis > 0) {
-    // Straight-line depreciation taken (commercial 39y, residential 27.5y)
     const depYears = Math.min(held ?? 0, 39);
-    const improvementAssumption = basis * 0.7; // assume 70% of basis is improvements
+    const improvementAssumption = basis * 0.7;
     const depTaken = (improvementAssumption / 39) * depYears;
-    depreciationRecapture = Math.round(depTaken * 0.25);
+    recapture = Math.round(depTaken * 0.25);
   }
 
   const totalTaxExposure =
-    (capitalGainsEstimate ?? 0) + (depreciationRecapture ?? 0) || null;
+    (fedCapGains ?? 0) + (stateCapGains ?? 0) + (recapture ?? 0) || null;
 
   if (totalTaxExposure && totalTaxExposure > 500_000) {
     notes.push(`Est. tax exposure ~$${Math.round(totalTaxExposure / 1000)}k`);
@@ -200,8 +221,12 @@ function score(lead: Lead): ScoreResult {
     score: total,
     tier,
     is_urgent: isUrgent,
-    capital_gains_estimate: capitalGainsEstimate,
-    depreciation_recapture_est: depreciationRecapture,
+    state_tax_rate: stateRateTotal,
+    fed_capital_gains_estimate: fedCapGains,
+    state_capital_gains_estimate: stateCapGains,
+    // Keep legacy field populated for backward compat (fed + state combined)
+    capital_gains_estimate: (fedCapGains ?? 0) + (stateCapGains ?? 0) || null,
+    depreciation_recapture_est: recapture,
     total_tax_exposure: totalTaxExposure,
     ownership_years: held,
     score_breakdown: breakdown,
@@ -221,71 +246,95 @@ Deno.serve(async (req) => {
   let body: {
     lead_ids?: string[];
     rescore_all?: boolean;
-    auto_profile?: boolean; // fan out Profiler for ALL scored leads (default true)
-    profile_cap?: number; // max leads to profile in one run (default 50)
+    auto_profile?: boolean;
+    profile_cap?: number;
     run_id?: string;
   } = {};
   try { body = await req.json(); } catch (_) {}
   const autoProfile = body.auto_profile !== false; // default true
-  const profileCap = body.profile_cap ?? 50;
+  const profileCap = body.profile_cap ?? 200;
 
-  // Load target leads
-  let q = supabase
-    .from("leads")
-    .select("id, state, county, property_type, owner_type, owner_name, sale_price, sale_date, deed_date, ownership_years, assessed_value, property_address, trigger_event");
-  if (body.lead_ids?.length) {
-    q = q.in("id", body.lead_ids);
-  } else if (!body.rescore_all) {
-    q = q.eq("tier", "UNSCORED");
-  }
-  const { data: leads, error } = await q.limit(500);
-  if (error) {
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
+  // Load state tax rate cheat sheet once
+  const { data: rateRows } = await supabase
+    .from("state_tax_rates")
+    .select("state, ltcg_rate, surcharge, is_high_tax");
+  const rateMap = new Map<string, StateRate>(
+    (rateRows ?? []).map((r: any) => [r.state, r as StateRate]),
+  );
 
-  const list = (leads ?? []) as Lead[];
+  // Page through leads in 500-row batches until done (no hard cap).
+  const PAGE = 500;
   let qualified = 0;
   const tierUrgent: string[] = [];
   const tierHot: string[] = [];
   const tierWarm: string[] = [];
-  const allScored: string[] = []; // every successfully scored lead, in order
+  const allScored: string[] = [];
 
-  for (const lead of list) {
-    const r = score(lead);
-    const { error: upErr } = await supabase
+  let page = 0;
+  while (true) {
+    let q = supabase
       .from("leads")
-      .update({
-        score: r.score,
-        tier: r.tier,
-        is_urgent: r.is_urgent,
-        capital_gains_estimate: r.capital_gains_estimate,
-        depreciation_recapture_est: r.depreciation_recapture_est,
-        total_tax_exposure: r.total_tax_exposure,
-        ownership_years: r.ownership_years,
-        score_breakdown: r.score_breakdown,
-        qualifier_notes: r.qualifier_notes,
-      })
-      .eq("id", lead.id);
-    if (upErr) { console.warn("Score update failed:", upErr.message); continue; }
-    qualified += 1;
-    if (r.tier === "URGENT") tierUrgent.push(lead.id);
-    else if (r.tier === "HOT") tierHot.push(lead.id);
-    else if (r.tier === "WARM") tierWarm.push(lead.id);
-    allScored.push(lead.id);
+      .select("id, state, county, property_type, owner_type, owner_name, sale_price, sale_date, deed_date, ownership_years, assessed_value, property_address, trigger_event")
+      .order("created_at", { ascending: true })
+      .range(page * PAGE, page * PAGE + PAGE - 1);
+    if (body.lead_ids?.length) {
+      q = q.in("id", body.lead_ids);
+    } else if (!body.rescore_all) {
+      q = q.eq("tier", "UNSCORED");
+    }
+    const { data: leads, error } = await q;
+    if (error) {
+      return new Response(JSON.stringify({ error: error.message }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const list = (leads ?? []) as Lead[];
+    if (!list.length) break;
 
-    await supabase.from("lead_activities").insert({
-      lead_id: lead.id,
-      kind: "qualifier_scored",
-      summary: `Tier ${r.tier} · score ${r.score}${r.is_urgent ? " · URGENT" : ""}`,
-      payload: { breakdown: r.score_breakdown, run_id: body.run_id ?? null },
-    });
+    for (const lead of list) {
+      const stateRate = rateMap.get(lead.state) ?? null;
+      const r = score(lead, stateRate);
+      const newStage = r.tier === "DISQUALIFIED" ? "scored" : "scored";
+      const { error: upErr } = await supabase
+        .from("leads")
+        .update({
+          score: r.score,
+          tier: r.tier,
+          is_urgent: r.is_urgent,
+          state_tax_rate: r.state_tax_rate,
+          fed_capital_gains_estimate: r.fed_capital_gains_estimate,
+          state_capital_gains_estimate: r.state_capital_gains_estimate,
+          capital_gains_estimate: r.capital_gains_estimate,
+          depreciation_recapture_est: r.depreciation_recapture_est,
+          total_tax_exposure: r.total_tax_exposure,
+          ownership_years: r.ownership_years,
+          score_breakdown: r.score_breakdown,
+          qualifier_notes: r.qualifier_notes,
+          pipeline_stage: newStage,
+        })
+        .eq("id", lead.id);
+      if (upErr) { console.warn("Score update failed:", upErr.message); continue; }
+      qualified += 1;
+      if (r.tier === "URGENT") tierUrgent.push(lead.id);
+      else if (r.tier === "HOT") tierHot.push(lead.id);
+      else if (r.tier === "WARM") tierWarm.push(lead.id);
+      if (r.tier !== "DISQUALIFIED") allScored.push(lead.id);
+
+      await supabase.from("lead_activities").insert({
+        lead_id: lead.id,
+        kind: "qualifier_scored",
+        summary: `Tier ${r.tier} · score ${r.score}${r.is_urgent ? " · URGENT" : ""}`,
+        payload: { breakdown: r.score_breakdown, run_id: body.run_id ?? null },
+      });
+    }
+
+    if (list.length < PAGE) break;
+    page += 1;
+    if (body.lead_ids?.length || body.rescore_all) break; // these are explicit batches
   }
 
-  // Fan out the Profiler for EVERY scored lead (urgent + hot first, then warm, then rest)
-  // so seller/owner contact info is pulled automatically for every property.
+  // Fan out the Profiler for every scored lead — urgent/hot first
   let profiled = 0;
   let profileTargetCount = 0;
   if (autoProfile) {
@@ -294,9 +343,9 @@ Deno.serve(async (req) => {
     const targets = [...priority, ...rest].slice(0, profileCap);
     profileTargetCount = targets.length;
     const work = async () => {
-      // Concurrency 3 — Firecrawl rate-limit friendly
       const queue = [...targets];
       const enriched: string[] = [];
+      // Concurrency 5 (was 3) — Firecrawl rate-limit still friendly
       const worker = async () => {
         while (queue.length) {
           const id = queue.shift();
@@ -310,8 +359,8 @@ Deno.serve(async (req) => {
           }
         }
       };
-      await Promise.all([worker(), worker(), worker()]);
-      // Re-score enriched leads so tier/score/tax exposure reflect Smarty data
+      await Promise.all([worker(), worker(), worker(), worker(), worker()]);
+      // Re-score enriched leads so tier/exposure reflect freshly-fetched data
       if (enriched.length) {
         try {
           await supabase.functions.invoke("qualifier-run", {
@@ -337,7 +386,6 @@ Deno.serve(async (req) => {
     }
   }
 
-  // Update run row if linked
   if (body.run_id) {
     await supabase
       .from("scout_runs")
