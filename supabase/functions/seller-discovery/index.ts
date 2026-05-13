@@ -67,9 +67,9 @@ function setField(d: Discovery, field: keyof Discovery, value: any, score: numbe
 }
 
 class Budget {
-  constructor(public fc = 0, public hunter = 0, public ai = 0) {}
+  constructor(public fc = 0, public apollo = 0, public ai = 0) {}
   canFc() { return this.fc < BUDGET.firecrawl; }
-  canHunter() { return this.hunter < BUDGET.hunter; }
+  canApollo() { return this.apollo < BUDGET.apollo; }
   canAi() { return this.ai < BUDGET.openai; }
 }
 
