@@ -17,3 +17,6 @@ verify_jwt = true
 
 [functions.seller-discovery]
 verify_jwt = true
+
+[functions.pipeline-sweeper]
+verify_jwt = false
