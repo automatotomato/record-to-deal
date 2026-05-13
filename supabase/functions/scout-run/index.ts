@@ -543,7 +543,13 @@ Deno.serve(async (req) => {
   if (body.county_ids?.length) {
     countyQuery = countyQuery.in("id", body.county_ids);
   }
-  const { data: counties, error: cErr } = await countyQuery;
+  const { data: countiesRaw, error: cErr } = await countyQuery;
+  // Run high-tax states first, then normal, then low. Lets the scout always
+  // get to CA/NY/FL/etc before burning its budget on lower-priority states.
+  const PRIO: Record<string, number> = { high: 0, normal: 1, low: 2 };
+  const counties = (countiesRaw ?? []).slice().sort(
+    (a: any, b: any) => (PRIO[a.priority ?? "normal"] ?? 1) - (PRIO[b.priority ?? "normal"] ?? 1),
+  );
   if (cErr) {
     await supabase.from("scout_runs").update({
       status: "failed",
