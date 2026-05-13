@@ -20,7 +20,7 @@ const AI_URL = "https://api.openai.com/v1/chat/completions";
 const AI_MODEL = "gpt-4o-mini";
 
 // Per-call budget so a single lead can't burn the day's quota
-const BUDGET = { firecrawl: 12, apollo: 5, openai: 1 };
+const BUDGET = { firecrawl: 12, apollo: 7, openai: 1 };
 
 const STATE_NAMES: Record<string, string> = {
   AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
@@ -139,6 +139,7 @@ async function apolloMatch(
         // Spend a credit to actually unlock the email — without this Apollo
         // returns "email_not_unlocked@domain.com" and we drop it downstream.
         reveal_personal_emails: true,
+        reveal_phone_number: true,
       }),
     });
     if (!r.ok) {
@@ -147,6 +148,52 @@ async function apolloMatch(
     }
     return await r.json();
   } catch (e) { console.warn("apollo match threw", e); return null; }
+}
+
+async function apolloRevealByHints(
+  opts: {
+    first?: string | null;
+    last?: string | null;
+    name?: string | null;
+    linkedin?: string | null;
+    domain?: string | null;
+    organizationName?: string | null;
+    city?: string | null;
+    state?: string | null;
+  },
+  key: string,
+  budget: Budget,
+) {
+  if (!budget.canApollo()) return null;
+  const hasIdentity = (opts.first && opts.last) || opts.name || opts.linkedin;
+  if (!hasIdentity) return null;
+  budget.apollo++;
+  const body: Record<string, unknown> = {
+    reveal_personal_emails: true,
+    reveal_phone_number: true,
+  };
+  if (opts.first) body.first_name = opts.first;
+  if (opts.last) body.last_name = opts.last;
+  if (opts.name && (!opts.first || !opts.last)) body.name = opts.name;
+  if (opts.linkedin) body.linkedin_url = opts.linkedin;
+  if (opts.domain) body.domain = opts.domain;
+  if (opts.organizationName) body.organization_name = opts.organizationName;
+  if (opts.city) body.city = opts.city;
+  if (opts.state) body.state = opts.state;
+
+  try {
+    const r = await fetch(`${APOLLO}/people/match`, {
+      method: "POST",
+      headers: APOLLO_HEADERS(key),
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      console.warn(`apollo reveal ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      return null;
+    }
+    const data = await r.json();
+    return data?.person ?? data?.matched_person ?? null;
+  } catch (e) { console.warn("apollo reveal threw", e); return null; }
 }
 
 // Org-wide search by domain — pulls decision-maker titles.
@@ -205,6 +252,34 @@ function splitName(full: string | null): { first: string; last: string } | null 
   const parts = full.trim().split(/\s+/).filter(Boolean);
   if (parts.length < 2) return null;
   return { first: parts[0], last: parts[parts.length - 1] };
+}
+
+function splitLinkedInName(url: string | null): { first: string; last: string } | null {
+  if (!url) return null;
+  const m = url.match(/linkedin\.com\/in\/([^/?#]+)/i);
+  if (!m) return null;
+  const parts = decodeURIComponent(m[1])
+    .split("-")
+    .filter((p) => p.length > 1 && !/^\d+$/.test(p) && !/^(realestate|realtor|broker|investor)$/i.test(p));
+  if (parts.length < 2) return null;
+  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+  return { first: cap(parts[0]), last: parts.slice(1).map(cap).join(" ") };
+}
+
+function applyApolloPerson(d: Discovery, p: any, source: string) {
+  if (!p) return;
+  const email = isUnlockedEmail(p.email) ? p.email
+    : (p.personal_emails ?? []).find((e: string) => isUnlockedEmail(e));
+  if (email) setField(d, "email", email, 90, source);
+  const phoneList = p.phone_numbers ?? [];
+  const ph = Array.isArray(phoneList)
+    ? phoneList[0]?.sanitized_number ?? phoneList[0]?.raw_number
+    : null;
+  const phone = ph ?? p.mobile_phone ?? p.phone_number;
+  if (phone) setField(d, "phone", phone, 75, source);
+  if (!d.name && (p.first_name || p.last_name)) setField(d, "name", `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim(), 70, source);
+  if (!d.role && p.title) setField(d, "role", p.title, 65, source);
+  if (!d.linkedin && p.linkedin_url) setField(d, "linkedin", p.linkedin_url, 75, source);
 }
 
 function isEntity(ownerType: string | null, ownerName: string | null): boolean {
