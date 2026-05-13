@@ -107,13 +107,21 @@ Return concise, specific, agent-ready prose. No fluff, no marketing language. If
 
     const data = await r.json();
     const raw = data?.choices?.[0]?.message?.content ?? "{}";
-    let brief: { summary?: string; why_good?: string; approach?: string } = {};
+    let brief: { summary?: unknown; why_good?: unknown; approach?: unknown } = {};
     try { brief = JSON.parse(raw); } catch { return jsonErr("AI returned non-JSON", 500); }
 
+    const toText = (v: unknown): string => {
+      if (v == null) return "";
+      if (typeof v === "string") return v.trim();
+      if (Array.isArray(v)) return v.map(toText).filter(Boolean).join("\n");
+      if (typeof v === "object") return Object.values(v as Record<string, unknown>).map(toText).filter(Boolean).join("\n");
+      return String(v).trim();
+    };
+
     const cleaned = {
-      summary: (brief.summary ?? "").trim(),
-      why_good: (brief.why_good ?? "").trim(),
-      approach: (brief.approach ?? "").trim(),
+      summary: toText(brief.summary),
+      why_good: toText(brief.why_good),
+      approach: toText(brief.approach),
     };
 
     await supabase.from("leads").update({
