@@ -293,6 +293,7 @@ function applyApolloPerson(d: Discovery, p: any, source: string) {
 function acceptScrapedEmail(email: string, score: number, name: string | null, domain: string | null): boolean {
   if (!isUnlockedEmail(email) || score <= 0) return false;
   if (domain && email.toLowerCase().endsWith(`@${domain.toLowerCase()}`)) return true;
+  if (/^(info|contact|hello|sales|admin|office|support)@/i.test(email)) return true;
   return score >= 60 && !!name;
 }
 
