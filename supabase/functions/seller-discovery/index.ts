@@ -395,7 +395,7 @@ Deno.serve(async (req) => {
 
   // Cache: only skip when we already have a real email/phone. A LinkedIn-only
   // partial needs another pass because Apollo can often reveal contact details.
-  if (!body.force && !body.company_website && lead.discovery_status === "reachable" && (lead.decision_maker_email || lead.decision_maker_phone)) {
+  if (!body.force && !body.company_website && lead.discovery_status === "reachable" && (isUnlockedEmail(lead.decision_maker_email) || lead.decision_maker_phone)) {
     return new Response(JSON.stringify({ ok: true, cached: true, status: lead.discovery_status }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
@@ -413,7 +413,7 @@ Deno.serve(async (req) => {
   // Pre-seed existing data so we never regress
   if (looksLikePersonName(lead.decision_maker_name)) setField(d, "name", lead.decision_maker_name, 30, "cached");
   if (lead.decision_maker_role) setField(d, "role", lead.decision_maker_role, 30, "cached");
-  if (lead.decision_maker_email && (scoreEmail(lead.decision_maker_email, lead.decision_maker_name) >= 45 || lead.decision_maker_email.toLowerCase().endsWith(`@${String(lead.company_website ?? "").replace(/^https?:\/\//, "").replace(/^www\./, "").toLowerCase()}`))) setField(d, "email", lead.decision_maker_email, 40, "cached");
+  if (isUnlockedEmail(lead.decision_maker_email) && (scoreEmail(lead.decision_maker_email, lead.decision_maker_name) >= 45 || lead.decision_maker_email.toLowerCase().endsWith(`@${String(lead.company_website ?? "").replace(/^https?:\/\//, "").replace(/^www\./, "").toLowerCase()}`))) setField(d, "email", lead.decision_maker_email, 40, "cached");
   if (lead.decision_maker_phone) setField(d, "phone", lead.decision_maker_phone, 30, "cached");
   if (lead.decision_maker_linkedin) setField(d, "linkedin", lead.decision_maker_linkedin, 35, "cached");
   if (lead.company_website) setField(d, "company_website", lead.company_website, 30, "cached");
