@@ -82,14 +82,14 @@ Return concise, specific, agent-ready prose. No fluff, no marketing language. If
   "approach": "3–5 sentences: how the agent should reach out. Channel, tone, what to lead with, what objection to anticipate. Reference personality/motivation if known."
 }`;
 
-    const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${aiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: "gpt-4o-mini",
         messages: [
           { role: "system", content: sys },
           { role: "user", content: user },
@@ -100,9 +100,9 @@ Return concise, specific, agent-ready prose. No fluff, no marketing language. If
 
     if (!r.ok) {
       const txt = await r.text();
-      if (r.status === 429) return jsonErr("Rate limited — try again shortly", 429);
-      if (r.status === 402) return jsonErr("AI credits exhausted — add credits in Workspace settings", 402);
-      return jsonErr(`AI gateway: ${txt}`, 500);
+      if (r.status === 429) return jsonErr("OpenAI rate limited — try again shortly", 429);
+      if (r.status === 401) return jsonErr("OpenAI key invalid", 401);
+      return jsonErr(`OpenAI: ${txt}`, 500);
     }
 
     const data = await r.json();
