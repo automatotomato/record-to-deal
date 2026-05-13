@@ -174,6 +174,14 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
               <Fact label="Held" value={lead.ownership_years ? `${lead.ownership_years}y` : "—"} />
             </div>
 
+            {/* AI Brief — agent-facing summary */}
+            <AIBriefSection
+              brief={lead.ai_brief}
+              generatedAt={lead.ai_brief_generated_at}
+              onGenerate={generateBrief}
+              loading={briefing}
+            />
+
             {/* Workflow — moved to top so changing status is one click after opening */}
             <Section title="Workflow status">
               <div className="flex items-center gap-2">
