@@ -213,7 +213,7 @@ export const OutreachDashboard = () => {
 
   const runScout = async () => {
     setRunning(true);
-    toast.loading("Scanning Nevada county records…", { id: "scout" });
+    toast.loading("Scanning high-priority county records…", { id: "scout" });
     try {
       const { data, error } = await supabase.functions.invoke("scout-run", {
         body: { trigger_kind: "manual" },
@@ -320,7 +320,7 @@ export const OutreachDashboard = () => {
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  Scans Nevada county records for fresh investment property sales (1–2 min)
+                  Scans high-priority county records (CA, NY, NJ, FL, TX, OR, MA, IL, HI, NV…) for fresh investment property sales (1–2 min)
                 </TooltipContent>
               </Tooltip>
             )}
@@ -725,8 +725,8 @@ const EmptyState = ({
       <div className="p-16 text-center">
         <div className="font-display text-3xl mb-3">No leads yet.</div>
         <div className="text-sm text-muted-foreground max-w-md mx-auto mb-6 leading-relaxed">
-          Click <span className="font-semibold text-foreground">Find new leads</span> to scan Nevada
-          county records for recent investment property sales. This usually takes 1–2 minutes.
+          Click <span className="font-semibold text-foreground">Find new leads</span> to scan
+          high-priority county records (CA, NY, NJ, FL, TX, OR, MA, IL, HI, NV…) for recent investment property sales. This usually takes 1–2 minutes.
         </div>
         {onRun && (
           <Button onClick={onRun} disabled={running}>
