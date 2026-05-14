@@ -132,7 +132,7 @@ function isUnlockedEmail(e?: string | null): boolean {
 
 // People match: best when we have first+last+domain. Returns single person.
 async function apolloMatch(
-  domain: string, first: string, last: string, key: string, budget: Budget,
+  domain: string, first: string, last: string, key: string, budget: Budget, phoneWebhookUrl?: string,
 ) {
   if (!budget.canApollo()) return null;
   budget.apollo++;
@@ -147,6 +147,7 @@ async function apolloMatch(
         // Spend a credit to actually unlock the email — without this Apollo
         // returns "email_not_unlocked@domain.com" and we drop it downstream.
         reveal_personal_emails: true,
+        ...(phoneWebhookUrl ? { reveal_phone_number: true, webhook_url: phoneWebhookUrl } : {}),
       }),
     });
     if (!r.ok) {
@@ -170,6 +171,7 @@ async function apolloRevealByHints(
   },
   key: string,
   budget: Budget,
+  phoneWebhookUrl?: string,
 ) {
   if (!budget.canApollo()) return null;
   const hasIdentity = (opts.first && opts.last) || opts.name || opts.linkedin;
@@ -177,8 +179,11 @@ async function apolloRevealByHints(
   budget.apollo++;
   const body: Record<string, unknown> = {
     reveal_personal_emails: true,
-    // phone reveal requires async webhook_url on Apollo — omitted
   };
+  if (phoneWebhookUrl) {
+    body.reveal_phone_number = true;
+    body.webhook_url = phoneWebhookUrl;
+  }
   if (opts.first) body.first_name = opts.first;
   if (opts.last) body.last_name = opts.last;
   if (opts.name && (!opts.first || !opts.last)) body.name = opts.name;
