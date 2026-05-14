@@ -23,7 +23,11 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
-  const summary = { stuck_reset: 0, requalified: 0, re_enriched: 0, re_drafted: 0, expired: 0, cleaned: 0 };
+  const summary = {
+    stuck_reset: 0, requalified: 0, re_enriched: 0, re_discovered: 0,
+    re_briefed: 0, re_drafted: 0, expired: 0, cleaned: 0,
+  };
+  const BRIEF_STALE_MIN = 30;
 
   // 1) Reset stuck running jobs (worker died mid-run)
   const stuckCutoff = new Date(Date.now() - STUCK_MINUTES * 60 * 1000).toISOString();
