@@ -625,6 +625,34 @@ Deno.serve(async (req) => {
     if (contactMd) evidence.push(`CONTACT ${domain}\n${contactMd.slice(0, 4000)}`);
   }
 
+  // Source records and broker/listing pages often carry the only reachable
+  // path (broker phone, listing contact, press release contact). Scrape them
+  // before paid/AI fallbacks so website-less owners are still actionable.
+  if (lead.source_record_url) {
+    d.passes.source_record_contact = true;
+    const sourceMd = await fcScrape(lead.source_record_url, fcKey, budget);
+    if (sourceMd) {
+      evidence.push(`SOURCE RECORD ${lead.source_record_url}\n${sourceMd.slice(0, 6000)}`);
+      const host = pickHostFromUrl(lead.source_record_url);
+      if (!d.company_website && host && !SOCIAL_RE.test(host)) setField(d, "company_website", normalizeWebsite(host), 45, "source_record");
+      const emails = pullEmails(sourceMd);
+      let bestEmail: { e: string; s: number } | null = null;
+      for (const e of emails) {
+        const s = Math.max(scoreEmail(e, targetName), host && e.endsWith(`@${host}`) ? 55 : 0);
+        if (acceptScrapedEmail(e, s, targetName, host) && (!bestEmail || s > bestEmail.s)) bestEmail = { e, s };
+      }
+      if (bestEmail) setField(d, "email", bestEmail.e, bestEmail.s, "source_record");
+      const phones = pullPhones(sourceMd);
+      let bestPhone: { p: string; s: number } | null = null;
+      for (const p of phones) {
+        const s = scorePhone(sourceMd, p, targetName, ownerName, host);
+        if ((!bestPhone || s > bestPhone.s) && s >= 40) bestPhone = { p, s };
+      }
+      if (bestPhone) setField(d, "phone", bestPhone.p, bestPhone.s, "source_record");
+      d.sources.push("source_record");
+    }
+  }
+
   // ============ PASS 4 — Apollo.io ============
   if (apolloKey) {
     d.passes.apollo = true;
