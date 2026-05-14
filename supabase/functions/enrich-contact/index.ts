@@ -68,11 +68,15 @@ async function apolloReveal(
     city?: string | null; state?: string | null;
   },
   key: string,
+  phoneWebhookUrl?: string,
 ) {
   const body: Record<string, unknown> = {
     reveal_personal_emails: true,
-    // reveal_phone_number requires an async webhook_url on Apollo — omitted here.
   };
+  if (phoneWebhookUrl) {
+    body.reveal_phone_number = true;
+    body.webhook_url = phoneWebhookUrl;
+  }
   if (opts.first) body.first_name = opts.first;
   if (opts.last) body.last_name = opts.last;
   if (opts.name && !opts.first && !opts.last) body.name = opts.name;
@@ -165,6 +169,7 @@ Deno.serve(async (req) => {
   );
   const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY");
   const apolloKey = Deno.env.get("APOLLO_API_KEY");
+  const phoneWebhookUrl = `${Deno.env.get("SUPABASE_URL")!}/functions/v1/apollo-phone-webhook`;
 
   let body: { job_id?: string } = {};
   try { body = await req.json(); } catch (_) {}
@@ -235,7 +240,7 @@ Deno.serve(async (req) => {
             first: pick.first_name, last: pick.last_name, domain,
             organizationName: ownerName,
             city: lead.property_city, state: lead.state,
-          }, apolloKey);
+          }, apolloKey, phoneWebhookUrl);
           if (revealed) confidence += applyRevealed(revealed, cur);
         }
         if (!cur.dmName && (pick.first_name || pick.last_name)) cur.dmName = `${pick.first_name ?? ""} ${pick.last_name ?? ""}`.trim();
@@ -270,7 +275,7 @@ Deno.serve(async (req) => {
         linkedinUrl: cur.dmLinkedIn,
         organizationName: isEntity ? ownerName : null,
         city: lead.property_city, state: lead.state,
-      }, apolloKey);
+      }, apolloKey, phoneWebhookUrl);
       if (revealed) {
         const bumped = applyRevealed(revealed, cur);
         if (bumped > 0) sources.push("apollo.io:reveal");
