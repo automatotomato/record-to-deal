@@ -109,13 +109,6 @@ async function fcScrape(url: string, key: string, budget: Budget): Promise<strin
   } catch (_) { return null; }
 }
 
-const APOLLO_HEADERS = (key: string) => ({
-  "X-Api-Key": key,
-  "Content-Type": "application/json",
-  "Accept": "application/json",
-  "Cache-Control": "no-cache",
-});
-
 const GATEWAY_HEADERS = (key: string) => ({
   "Lovable-API-Key": key,
   "X-Lovable-AIG-SDK": "vercel-ai-sdk",
@@ -126,110 +119,6 @@ function isUnlockedEmail(e?: string | null): boolean {
   if (!e) return false;
   if (!/[^@\s]+@[^@\s]+\.[a-z]{2,}/i.test(e)) return false;
   return !/email_not_unlocked|domain\.com$|@apollo-locked/i.test(e);
-}
-
-// People match: best when we have first+last+domain. Returns single person.
-async function apolloMatch(
-  domain: string, first: string, last: string, key: string, budget: Budget, phoneWebhookUrl?: string,
-) {
-  if (!budget.canApollo()) return null;
-  budget.apollo++;
-  try {
-    const r = await fetch(`${APOLLO}/people/match`, {
-      method: "POST",
-      headers: APOLLO_HEADERS(key),
-      body: JSON.stringify({
-        first_name: first,
-        last_name: last,
-        domain,
-        // Spend a credit to actually unlock the email — without this Apollo
-        // returns "email_not_unlocked@domain.com" and we drop it downstream.
-        reveal_personal_emails: true,
-        ...(phoneWebhookUrl ? { reveal_phone_number: true, webhook_url: phoneWebhookUrl } : {}),
-      }),
-    });
-    if (!r.ok) {
-      console.warn(`apollo match ${r.status}: ${(await r.text()).slice(0, 200)}`);
-      return null;
-    }
-    return await r.json();
-  } catch (e) { console.warn("apollo match threw", e); return null; }
-}
-
-async function apolloRevealByHints(
-  opts: {
-    first?: string | null;
-    last?: string | null;
-    name?: string | null;
-    linkedin?: string | null;
-    domain?: string | null;
-    organizationName?: string | null;
-    city?: string | null;
-    state?: string | null;
-  },
-  key: string,
-  budget: Budget,
-  phoneWebhookUrl?: string,
-) {
-  if (!budget.canApollo()) return null;
-  const hasIdentity = (opts.first && opts.last) || opts.name || opts.linkedin;
-  if (!hasIdentity) return null;
-  budget.apollo++;
-  const body: Record<string, unknown> = {
-    reveal_personal_emails: true,
-  };
-  if (phoneWebhookUrl) {
-    body.reveal_phone_number = true;
-    body.webhook_url = phoneWebhookUrl;
-  }
-  if (opts.first) body.first_name = opts.first;
-  if (opts.last) body.last_name = opts.last;
-  if (opts.name && (!opts.first || !opts.last)) body.name = opts.name;
-  if (opts.linkedin) body.linkedin_url = opts.linkedin;
-  if (opts.domain) body.domain = opts.domain;
-  if (opts.organizationName) body.organization_name = opts.organizationName;
-  if (opts.city) body.city = opts.city;
-  if (opts.state) body.state = opts.state;
-
-  try {
-    const r = await fetch(`${APOLLO}/people/match`, {
-      method: "POST",
-      headers: APOLLO_HEADERS(key),
-      body: JSON.stringify(body),
-    });
-    if (!r.ok) {
-      console.warn(`apollo reveal ${r.status}: ${(await r.text()).slice(0, 200)}`);
-      return null;
-    }
-    const data = await r.json();
-    return data?.person ?? data?.matched_person ?? null;
-  } catch (e) { console.warn("apollo reveal threw", e); return null; }
-}
-
-// Org-wide search by domain — pulls decision-maker titles.
-async function apolloOrgPeople(domain: string, key: string, budget: Budget) {
-  if (!budget.canApollo()) return null;
-  budget.apollo++;
-  try {
-    const r = await fetch(`${APOLLO}/mixed_people/search`, {
-      method: "POST",
-      headers: APOLLO_HEADERS(key),
-      body: JSON.stringify({
-        q_organization_domains_list: [domain],
-        person_titles: [
-          "owner", "principal", "managing member", "manager",
-          "president", "ceo", "founder", "partner", "director",
-        ],
-        page: 1,
-        per_page: 10,
-      }),
-    });
-    if (!r.ok) {
-      console.warn(`apollo search ${r.status}: ${(await r.text()).slice(0, 200)}`);
-      return null;
-    }
-    return await r.json();
-  } catch (e) { console.warn("apollo search threw", e); return null; }
 }
 
 function pickHostFromUrl(url: string): string | null {
