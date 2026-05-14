@@ -229,6 +229,7 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
   const lovableKey = Deno.env.get("OPENAI_API_KEY");
+  const fcKey = Deno.env.get("FIRECRAWL_API_KEY");
 
   let body: { job_id?: string; enqueue?: boolean } = {};
   try { body = await req.json(); } catch (_) {}
@@ -259,6 +260,7 @@ Deno.serve(async (req) => {
   // ---- Worker mode: process one (state, source) job ----
   if (!body.job_id) return jsonErr("job_id or enqueue required", 400);
   if (!lovableKey) return jsonErr("OPENAI_API_KEY not configured", 500);
+  if (!fcKey) return jsonErr("FIRECRAWL_API_KEY not configured", 500);
 
   const { data: job } = await supabase
     .from("pipeline_jobs").select("*").eq("id", body.job_id).maybeSingle();
@@ -286,7 +288,7 @@ Deno.serve(async (req) => {
   const errors: string[] = [];
   let candidates: Candidate[] = [];
   try {
-    candidates = await geminiGroundedExtract(promptFor(source, state, countyNames), lovableKey);
+    candidates = await webGroundedExtract(source, state, countyNames, fcKey, lovableKey);
   } catch (e) {
     errors.push(e instanceof Error ? e.message : String(e));
   }
