@@ -72,11 +72,15 @@ function promptFor(source: SourceKind, state: string, counties: string[]): strin
 
 ${guidance[source]}
 
-Return ONLY this JSON shape (max 12 leads):
+Return ONLY this JSON shape (max 12 leads). A lead is only useful if you can also cite at least one reachability field: owner_contact_email, owner_contact_phone, owner_website, or a decision-maker/contact page URL.
 {
   "leads": [
     {
       "owner_name": "string (seller / current owner — required)",
+      "owner_contact_name": "string|null (person behind the seller if found)",
+      "owner_contact_email": "string|null (public email only)",
+      "owner_contact_phone": "string|null (public phone only)",
+      "owner_website": "string|null (official website/contact page only)",
       "property_address": "string (street address — required)",
       "property_city": "string",
       "property_zip": "string",
@@ -89,7 +93,7 @@ Return ONLY this JSON shape (max 12 leads):
   ]
 }
 
-Skip any record missing owner_name, property_address, or source_record_url.`;
+Skip any record missing owner_name, property_address, source_record_url, and at least one reachable contact path.`;
 }
 
 async function geminiGroundedExtract(
@@ -98,7 +102,7 @@ async function geminiGroundedExtract(
 ): Promise<Candidate[]> {
   const r = await fetch(AI_URL, {
     method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    headers: GATEWAY_HEADERS(apiKey),
     body: JSON.stringify({
       model: AI_MODEL,
       messages: [
