@@ -273,6 +273,10 @@ function looksLikePersonName(name: string | null): boolean {
   return !/\b(LLC|INC|CORP|COMPANY|FRESH|BRANDS|HOLDINGS|ACQUISITION|PROPERTIES|GROUP|DOCUMENTS|FUNDING)\b/i.test(name);
 }
 
+function isKnownOwnerName(name: string | null): boolean {
+  return !!name && !/^unknown$/i.test(name.trim()) && name.trim().length > 2;
+}
+
 function splitLinkedInName(url: string | null): { first: string; last: string } | null {
   if (!url) return null;
   const m = url.match(/linkedin\.com\/in\/([^/?#]+)/i);
@@ -326,6 +330,18 @@ function scoreEmail(email: string, name: string | null): number {
     else if (local.includes(first) || local.includes(last)) s = 60;
   }
   return s;
+}
+
+function scorePhone(text: string, phone: string, targetName: string | null, ownerName: string | null, domain: string | null): number {
+  let score = 25;
+  const lower = text.toLowerCase();
+  if (domain && lower.includes(domain.toLowerCase())) score += 20;
+  if (targetName && lower.includes(targetName.toLowerCase())) score += 20;
+  if (ownerName && lower.includes(ownerName.toLowerCase())) score += 15;
+  const idx = lower.indexOf(phone.toLowerCase());
+  const window = idx >= 0 ? lower.slice(Math.max(0, idx - 180), idx + 180) : lower;
+  if (/owner|principal|broker|agent|leasing|sales|contact|mobile|direct|office/.test(window)) score += 20;
+  return score;
 }
 
 function pullEmails(text: string): string[] {
