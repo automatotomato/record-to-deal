@@ -74,7 +74,7 @@ async function geminiGroundedExtract(
 ): Promise<Candidate[]> {
   const r = await fetch(AI_URL, {
     method: "POST",
-    headers: GATEWAY_HEADERS(apiKey),
+    headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: AI_MODEL,
         messages: [
@@ -162,7 +162,7 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
-  const lovableKey = Deno.env.get("LOVABLE_API_KEY");
+  const lovableKey = Deno.env.get("OPENAI_API_KEY");
 
   let body: { job_id?: string; enqueue?: boolean } = {};
   try { body = await req.json(); } catch (_) {}
@@ -192,7 +192,7 @@ Deno.serve(async (req) => {
 
   // ---- Worker mode: process one (state, source) job ----
   if (!body.job_id) return jsonErr("job_id or enqueue required", 400);
-  if (!lovableKey) return jsonErr("LOVABLE_API_KEY not configured", 500);
+  if (!lovableKey) return jsonErr("OPENAI_API_KEY not configured", 500);
 
   const { data: job } = await supabase
     .from("pipeline_jobs").select("*").eq("id", body.job_id).maybeSingle();
