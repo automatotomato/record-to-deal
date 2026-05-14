@@ -16,6 +16,8 @@ const KINDS: { kind: string; fn: string; cap: number }[] = [
   { kind: "qualify_lead",     fn: "qualify-lead",     cap: 20 },
   { kind: "enrich_contact",   fn: "enrich-contact",   cap: 5 },
   { kind: "seller_discovery", fn: "seller-discovery", cap: 3 },
+  { kind: "wealth_scan",      fn: "wealth-scan",      cap: 4 },
+  { kind: "profile_seller",   fn: "profile-seller",   cap: 6 },
   { kind: "lead_brief",       fn: "lead-brief",       cap: 8 },
   { kind: "draft_outreach",   fn: "draft-outreach",   cap: 5 },
 ];
