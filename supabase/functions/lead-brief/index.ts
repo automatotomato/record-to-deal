@@ -91,7 +91,8 @@ Return concise, specific, agent-ready prose. No fluff, no marketing language. If
 {
   "summary": "3–4 sentences: what the agent uncovered about this property and owner. Reference specific facts (address, sale price, owner). Plain English.",
   "why_good": "3–5 bullet-style sentences explaining why this is a strong 1031 lead. Tie each reason to a specific fact (tax exposure, urgency, owner type, holding period, wealth signal). If the lead is weak, say so honestly.",
-  "approach": "3–5 sentences: how the agent should reach out. Channel, tone, what to lead with, what objection to anticipate. Reference personality/motivation if known."
+  "approach": "3–5 sentences: how the agent should reach out. Channel, tone, what to lead with, what objection to anticipate. Reference personality/motivation if known.",
+  "best_next_action": "1 sentence: the single most effective next step the agent should take right now (e.g. 'Call John at 702-555-1234 mentioning the depreciation recapture exposure')."
 }`;
 
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
