@@ -1,0 +1,1 @@
+ALTER TABLE public.leads DROP COLUMN IF EXISTS mailing_address;

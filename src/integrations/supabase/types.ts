@@ -187,7 +187,6 @@ export type Database = {
           list_date: string | null
           list_price: number | null
           lv_property_recommendation: string | null
-          mailing_address: string | null
           motivation_type: string | null
           next_action: string | null
           next_action_at: string | null
@@ -265,7 +264,6 @@ export type Database = {
           list_date?: string | null
           list_price?: number | null
           lv_property_recommendation?: string | null
-          mailing_address?: string | null
           motivation_type?: string | null
           next_action?: string | null
           next_action_at?: string | null
@@ -343,7 +341,6 @@ export type Database = {
           list_date?: string | null
           list_price?: number | null
           lv_property_recommendation?: string | null
-          mailing_address?: string | null
           motivation_type?: string | null
           next_action?: string | null
           next_action_at?: string | null

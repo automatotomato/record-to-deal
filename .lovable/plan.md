@@ -1,102 +1,52 @@
-# AI 1031 Deal Finder — Product Overhaul
+## Goal
 
-## 1. Automatic enrichment pipeline (no manual buttons)
+Stop using Apollo for contact discovery (it's been the main blocker — locked emails, missing phone webhooks, low hit rate). Lean on what actually works: Firecrawl scraping + Gemini grounded Google Search via the Lovable AI Gateway. Then fix the remaining broken pieces in the pipeline.
 
-Today, `verify-property → qualify-lead → enrich-contact → draft-outreach` already auto-chain via `pipeline_jobs`, but `seller-discovery` and `lead-brief` are only triggered by drawer buttons. Wire them into the same auto-chain:
+## 1. Rip Apollo out of contact discovery
 
-- After `enrich-contact` finishes, if there is no usable email/phone, automatically enqueue a `seller_discovery` job (Apollo + Firecrawl + web fallbacks) instead of stopping at "needs_review".
-- After `seller-discovery` finishes (success OR partial), automatically enqueue a `lead_brief` job so every qualified lead gets an AI brief without the user clicking.
-- Register both `seller_discovery` and `lead_brief` as kinds in `job-dispatcher` (with sensible concurrency caps).
-- Backfill: a one-shot job that enqueues `seller_discovery` + `lead_brief` for every existing lead missing contact/brief.
+**`supabase/functions/seller-discovery/index.ts`**
+- Delete Pass 4 (Apollo people/match, reveal-by-hints, org-people search) entirely.
+- Remove `apolloMatch`, `apolloRevealByHints`, `apolloOrgPeople`, `applyApolloPerson`, `APOLLO_HEADERS`, `APOLLO` constant, `phoneWebhookUrl`, `BUDGET.apollo`, and `Budget.apollo`/`canApollo`.
+- Renumber passes: entity unmask → person identity → website discovery → source record scrape → Gemini public hunt → personal contact scrape → AI consolidation.
+- Bump Gemini hunt budget from 2 → 3 calls and Firecrawl budget from 12 → 15 to compensate.
+- Update activity log line to drop "Apollo" wording.
 
-The drawer's "Find contact info" and "Generate brief" buttons stay, but only as secondary "Refresh research / Regenerate brief" fallbacks.
+**`supabase/functions/enrich-contact/index.ts`**
+- Remove all Apollo logic (`apolloSearch`, `apolloReveal`, `applyRevealed`, key checks).
+- Keep the lightweight Firecrawl LinkedIn lookup so we still seed `decision_maker_linkedin` early.
+- After the Firecrawl pass, always enqueue `seller_discovery` (which is now Gemini-driven) instead of trying to short-circuit with Apollo.
+- Update `data_sources` tags accordingly.
 
-## 2. Lead readiness model
+**`supabase/functions/apollo-phone-webhook/index.ts`**
+- Delete the function file.
 
-Add a single source of truth for client-facing status, computed by a DB trigger on every `leads` UPDATE so the UI never has to recalc:
+**`supabase/config.toml`**
+- Remove the `[functions.apollo-phone-webhook]` block if present (nothing to add — function is gone).
 
-New column `readiness` (text), one of:
-- `researching` — pipeline still running
-- `needs_contact_info` — has owner + reason but only LinkedIn / mailing addr (no email/phone)
-- `contact_found` — has email or phone but brief not generated yet
-- `ready_for_outreach` — has property, owner, reason, contact person, AND verified/likely email or phone, AND ai_brief
-- `needs_manual_review` — enrichment exhausted, partial data, human required
-- `low_confidence` — score/confidence below threshold
+**`supabase/functions/job-dispatcher/index.ts`**
+- No code change needed (it never dispatched the webhook directly).
 
-Critical rule (per request): LinkedIn alone NEVER counts as a usable contact. Only `decision_maker_email` (unlocked) or `decision_maker_phone`/`contact_phone` (≥10 digits) qualify.
+## 2. Fix lead-brief to use Lovable AI Gateway
 
-## 3. Stronger contact fallback chain
+**`supabase/functions/lead-brief/index.ts`**
+- Switch from `OPENAI_API_KEY` + OpenAI endpoint to `LOVABLE_API_KEY` + `https://ai.gateway.lovable.dev/v1/chat/completions` with model `google/gemini-3-flash-preview` and the standard `Lovable-API-Key` / `X-Lovable-AIG-SDK` headers.
+- Drop the `mailing_address` field from the facts blob (it's no longer surfaced).
 
-Extend `seller-discovery` (and the auto-retry path) so it does not stop at LinkedIn. Order of attempts when email/phone missing:
+## 3. Database cleanup — drop mailing_address
 
-1. Apollo `/people/match` by LinkedIn URL
-2. Apollo by person name + company
-3. Apollo by company domain → officers
-4. Firecrawl scrape of company website `/contact`, `/about`, `/team`, `/leadership`
-5. Firecrawl Google search: `"Owner Name" email OR phone "Company"`
-6. OpenCorporates / SoS officers lookup for the entity
-7. Common email-pattern guesses against the verified domain (first.last@, flast@, first@)
-8. OpenAI extraction pass over collected page text to pull any email/phone strings
+The column is no longer used in UI or pipeline. Migration to:
+- `ALTER TABLE public.leads DROP COLUMN mailing_address;`
+- Update `compute_lead_readiness` trigger if it touches it (it doesn't, confirmed).
 
-LinkedIn URL is always saved as supporting context; readiness stays `needs_contact_info` until step 1–8 yields email or phone.
+## 4. Re-queue stuck leads
 
-## 4. Redesigned lead drawer (client-ready brief)
+After deploy, re-queue leads currently stuck in `needs_review` / `discovery_status in ('failed','partial','none')` for fresh `seller_discovery` runs through the new Apollo-free path. Reset any `pipeline_jobs` left in `running` > 15 min to `retry`.
 
-Replace the current top-down dump with an ordered, hide-when-empty layout:
+## What stays the same
 
-1. **AI Deal Brief** (from `ai_brief`)
-   - Summary · Why this is a good 1031 lead · How to approach · Best next action
-2. **Contact Card** — only fields with real data
-   - Name, role, email, phone, LinkedIn, company website
-3. **Property Snapshot** — address, type, sale date + recency, sale price, owner/entity, state-tax flag
-4. **1031 Fit Score** — score, top 3 reasons, confidence, red flags (only if any)
-5. **Research Sources** — collapsed `<details>` containing public records, OpenCorporates, deed links, Google/LinkedIn searches, related entities, raw enrichment payload, mailing address from county
+- 8-stage worker chain, dispatcher, scoring, frontend dashboard, drawer, scout runs, draft-outreach, send-outreach-email — untouched.
+- Apollo secret stays in the project (harmless), just no code path uses it.
 
-Helper rule: a `<Field>` / `<Section>` component returns `null` when its value is empty, "N/A", or a placeholder. No empty rows, no blank sections.
+## Open question
 
-Manual fallback buttons ("Refresh Research", "Regenerate Brief", "Re-find contact") move into a small overflow menu in the drawer header.
-
-## 5. Dashboard as an intelligence desk
-
-`OutreachDashboard` becomes status-grouped sections (collapsible cards) instead of a single filtered table:
-
-- Urgent Opportunities (sold ≤30 days)
-- Ready for Outreach
-- High-Value Leads (top tax exposure, any status)
-- Contact Found (brief pending)
-- Needs Contact Info
-- Needs Review
-- Recently Found
-
-Each lead card shows: property · owner · score · readiness pill · contact availability icons (✉ ☎ in/—) · one-line `ai_brief.why_good` excerpt.
-
-Existing filters/search remain in a toolbar above the sections.
-
-## 6. Persistence & regeneration
-
-`ai_brief` and `seller-discovery` results are already saved to the lead row. Reads in the drawer use the stored values; the edge functions are only re-invoked via the explicit "Refresh / Regenerate" actions or the auto-pipeline when a lead is first created.
-
----
-
-## Technical section
-
-**DB migration**
-- `leads.readiness text not null default 'researching'`
-- Trigger `compute_lead_readiness()` on `BEFORE UPDATE` of leads recomputes readiness from `pipeline_stage`, `has_outreach_contact`, `decision_maker_email/phone`, `contact_phone`, `ai_brief`, `score`, `enrichment_confidence`.
-- Index `leads(readiness, is_urgent desc, score desc)`.
-
-**Edge functions**
-- `enrich-contact/index.ts`: when `!hasOutreach`, also `insert pipeline_jobs { kind: 'seller_discovery', priority: 50 }`.
-- `seller-discovery/index.ts`: accept `{ job_id }` shape, on finish always `insert pipeline_jobs { kind: 'lead_brief' }`. Add fallback steps 4–8 above.
-- `lead-brief/index.ts`: accept `{ job_id }` shape (alongside existing `{ lead_id }`).
-- `job-dispatcher/index.ts`: add `{ kind:'seller_discovery', fn:'seller-discovery', cap:5 }` and `{ kind:'lead_brief', fn:'lead-brief', cap:10 }`.
-- One-shot `backfill-enrichment` function (admin-only) to enqueue jobs for existing leads.
-
-**Frontend**
-- `LeadDrawer.tsx`: rewrite render tree to the 5-section order; introduce `<Field>`/`<Section>` helpers that suppress empty values; move manual actions to a header dropdown.
-- `OutreachDashboard.tsx`: replace single table with `<ReadinessSection>` cards driven by `readiness` groupings; new `<LeadCard>` component with the one-line brief excerpt and contact icons.
-- Status pill component reused in both drawer header and lead cards.
-
-**Out of scope**
-- No removal of existing enrichment data or public-record links (kept under "Research Sources").
-- No backend behavior changes to email sending or Gmail flow.
+Currently `draft-outreach` may run before contact info exists. Do you want me to also gate `draft_outreach` enqueue on `has_outreach_contact = true` only (it mostly already does, but `enrich-contact` still queues it on website-only matches)? Default: yes, only enqueue when there is an email or phone — websites alone won't yield a sendable email.
