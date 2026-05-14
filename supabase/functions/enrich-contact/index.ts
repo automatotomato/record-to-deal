@@ -71,7 +71,7 @@ async function apolloReveal(
 ) {
   const body: Record<string, unknown> = {
     reveal_personal_emails: true,
-    reveal_phone_number: true,
+    // reveal_phone_number requires an async webhook_url on Apollo — omitted here.
   };
   if (opts.first) body.first_name = opts.first;
   if (opts.last) body.last_name = opts.last;
