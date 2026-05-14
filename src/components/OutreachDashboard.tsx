@@ -644,7 +644,7 @@ const SellerIcons = ({ lead }: { lead: any }) => {
     { icon: <Mail className="h-3 w-3" />, on: !!lead.contact_email, label: "Email", value: lead.contact_email },
     { icon: <Phone className="h-3 w-3" />, on: !!lead.contact_phone, label: "Phone", value: lead.contact_phone },
     { icon: <Linkedin className="h-3 w-3" />, on: !!lead.contact_linkedin, label: "LinkedIn", value: lead.contact_linkedin },
-    { icon: <Home className="h-3 w-3" />, on: !!lead.mailing_address, label: "Mailing", value: lead.mailing_address },
+    
   ];
   return (
     <div className="mt-1.5 flex items-center gap-1">
