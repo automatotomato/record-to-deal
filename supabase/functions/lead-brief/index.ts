@@ -24,8 +24,9 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
-    const aiKey = Deno.env.get("LOVABLE_API_KEY");
-    if (!aiKey) return jsonErr("LOVABLE_API_KEY missing", 500);
+    const aiKey = Deno.env.get("OPENAI_API_KEY");
+    if (!aiKey) return jsonErr("OPENAI_API_KEY missing", 500);
+    const aiModel = Deno.env.get("OPENAI_MODEL") || "gpt-5.5";
 
     const body = await req.json().catch(() => ({}));
     let leadId = body?.lead_id;
@@ -94,15 +95,14 @@ Return concise, specific, agent-ready prose. No fluff, no marketing language. If
   "best_next_action": "1 sentence: the single most effective next step the agent should take right now (e.g. 'Call John at 702-555-1234 mentioning the depreciation recapture exposure')."
 }`;
 
-    const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        "Lovable-API-Key": aiKey,
-        "X-Lovable-AIG-SDK": "vercel-ai-sdk",
+        "Authorization": `Bearer ${aiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "openai/gpt-5.5",
+        model: aiModel,
         messages: [
           { role: "system", content: sys },
           { role: "user", content: user },

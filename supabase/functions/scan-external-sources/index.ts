@@ -22,36 +22,8 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
-const AI_MODEL = "openai/gpt-5.5";
-const HARD_BUDGET_MS = 50_000;
-
-type SourceKind = "commercial" | "residential" | "court" | "sec";
-
-type Candidate = {
-  owner_name?: string;
-  owner_contact_name?: string;
-  owner_contact_email?: string;
-  owner_contact_phone?: string;
-  owner_website?: string;
-  property_address?: string;
-  property_city?: string;
-  property_zip?: string;
-  parcel_number?: string;
-  sale_price?: number;
-  sale_date?: string;
-  property_type?: string;
-  source_record_url?: string;
-  trigger_event?: string;
-};
-
-const SOURCES: SourceKind[] = ["commercial", "residential", "court", "sec"];
-
-const GATEWAY_HEADERS = (key: string) => ({
-  "Lovable-API-Key": key,
-  "X-Lovable-AIG-SDK": "vercel-ai-sdk",
-  "Content-Type": "application/json",
-});
+const AI_URL = "https://api.openai.com/v1/chat/completions";
+const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-5.5";
 
 function promptFor(source: SourceKind, state: string, counties: string[]): string {
   const countyList = counties.slice(0, 12).join(", ");
