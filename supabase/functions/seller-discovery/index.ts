@@ -449,6 +449,7 @@ Deno.serve(async (req) => {
   const fcKey = Deno.env.get("FIRECRAWL_API_KEY");
   const apolloKey = Deno.env.get("APOLLO_API_KEY");
   const lovableKey = Deno.env.get("LOVABLE_API_KEY");
+  const phoneWebhookUrl = `${supabaseUrl}/functions/v1/apollo-phone-webhook`;
 
   if (!fcKey || !lovableKey) {
     return new Response(JSON.stringify({ error: "FIRECRAWL_API_KEY and LOVABLE_API_KEY are required" }), {
@@ -614,7 +615,7 @@ Deno.serve(async (req) => {
     // People match first if we have a name + domain.
     const split = splitName(targetName) ?? splitLinkedInName(d.linkedin);
     if (domain && split) {
-      const matched = await apolloMatch(domain, split.first, split.last, apolloKey, budget);
+      const matched = await apolloMatch(domain, split.first, split.last, apolloKey, budget, phoneWebhookUrl);
       const p = matched?.person ?? matched?.matched_person ?? null;
       if (p) {
         applyApolloPerson(d, p, "apollo.match");
@@ -633,7 +634,7 @@ Deno.serve(async (req) => {
         organizationName: entity ? ownerName : null,
         city,
         state,
-      }, apolloKey, budget);
+      }, apolloKey, budget, phoneWebhookUrl);
       if (revealed) {
         applyApolloPerson(d, revealed, "apollo.reveal");
         d.sources.push("apollo.io");
@@ -654,7 +655,7 @@ Deno.serve(async (req) => {
         // to actually unlock the address.
         let unlockedEmail: string | null = null;
         if (pick.first_name && pick.last_name) {
-          const matched = await apolloMatch(domain, pick.first_name, pick.last_name, apolloKey, budget);
+          const matched = await apolloMatch(domain, pick.first_name, pick.last_name, apolloKey, budget, phoneWebhookUrl);
           const mp = matched?.person ?? matched?.matched_person ?? null;
           applyApolloPerson(d, mp, "apollo.match");
           if (mp && isUnlockedEmail(mp.email)) unlockedEmail = mp.email;
