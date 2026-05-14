@@ -376,10 +376,23 @@ Deno.serve(async (req) => {
     });
   }
 
-  let body: { lead_id?: string; force?: boolean; company_website?: string } = {};
+  let body: { lead_id?: string; job_id?: string; force?: boolean; company_website?: string } = {};
   try { body = await req.json(); } catch (_) {}
-  const leadId = body.lead_id;
+
+  // If invoked by the dispatcher we'll get a job_id — resolve to lead_id.
+  let leadId = body.lead_id;
+  const jobId = body.job_id;
+  const supabaseEarly = createClient(supabaseUrl, serviceKey);
+  if (!leadId && jobId) {
+    const { data: job } = await supabaseEarly.from("pipeline_jobs").select("lead_id").eq("id", jobId).maybeSingle();
+    leadId = job?.lead_id ?? undefined;
+  }
   if (!leadId) {
+    if (jobId) {
+      await supabaseEarly.from("pipeline_jobs").update({
+        status: "failed", finished_at: new Date().toISOString(), last_error: "no lead_id",
+      }).eq("id", jobId);
+    }
     return new Response(JSON.stringify({ error: "lead_id required" }), {
       status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
