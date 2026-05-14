@@ -732,9 +732,9 @@ Deno.serve(async (req) => {
       const c = ai.confidence ?? {};
       if (ai.name) setField(d, "name", ai.name, c.name ?? 50, "ai");
       if (ai.role) setField(d, "role", ai.role, c.role ?? 50, "ai");
-      if (ai.email) setField(d, "email", ai.email, c.email ?? 45, "ai");
-      if (ai.phone) setField(d, "phone", ai.phone, c.phone ?? 35, "ai");
-      if (ai.linkedin) setField(d, "linkedin", ai.linkedin, c.linkedin ?? 50, "ai");
+      if (isUnlockedEmail(ai.email)) setField(d, "email", ai.email, c.email ?? 45, "ai");
+      if (ai.phone && String(ai.phone).replace(/\D/g, "").length >= 10) setField(d, "phone", ai.phone, c.phone ?? 35, "ai");
+      if (ai.linkedin && /linkedin\.com\/in\//i.test(ai.linkedin)) setField(d, "linkedin", ai.linkedin, c.linkedin ?? 50, "ai");
       if (ai.company_website) {
         const h = pickHostFromUrl(ai.company_website.startsWith("http") ? ai.company_website : `https://${ai.company_website}`);
         if (h) setField(d, "company_website", normalizeWebsite(h), c.company_website ?? 50, "ai");
