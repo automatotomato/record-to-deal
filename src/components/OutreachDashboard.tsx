@@ -485,7 +485,7 @@ export const OutreachDashboard = () => {
                       <TableHead>Priority</TableHead>
                       <TableHead>Property</TableHead>
                       <TableHead>Owner</TableHead>
-                      <TableHead>Mailing</TableHead>
+                      
                       <TableHead className="text-right">Sale price</TableHead>
                       <TableHead className="text-right">Tax exposure</TableHead>
                       <TableHead>Last sale</TableHead>
@@ -521,20 +521,6 @@ export const OutreachDashboard = () => {
                             {l.owner_type ?? "Unknown"}
                           </div>
                           <SellerIcons lead={l} />
-                        </TableCell>
-                        <TableCell className="max-w-[220px]">
-                          {l.mailing_address ? (
-                            <div
-                              className="text-xs text-muted-foreground leading-snug"
-                              title={l.mailing_address}
-                            >
-                              {l.mailing_address}
-                            </div>
-                          ) : (
-                            <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">
-                              no address
-                            </Badge>
-                          )}
                         </TableCell>
                         <TableCell className="text-right tabular font-mono text-sm">
                           {fmtMoney(l.sale_price, { compact: true })}
@@ -658,7 +644,7 @@ const SellerIcons = ({ lead }: { lead: any }) => {
     { icon: <Mail className="h-3 w-3" />, on: !!lead.contact_email, label: "Email", value: lead.contact_email },
     { icon: <Phone className="h-3 w-3" />, on: !!lead.contact_phone, label: "Phone", value: lead.contact_phone },
     { icon: <Linkedin className="h-3 w-3" />, on: !!lead.contact_linkedin, label: "LinkedIn", value: lead.contact_linkedin },
-    { icon: <Home className="h-3 w-3" />, on: !!lead.mailing_address, label: "Mailing", value: lead.mailing_address },
+    
   ];
   return (
     <div className="mt-1.5 flex items-center gap-1">
