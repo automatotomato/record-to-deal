@@ -16,8 +16,8 @@ const corsHeaders = {
 };
 
 const FC_V2 = "https://api.firecrawl.dev/v2";
-const AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
-const AI_MODEL = "openai/gpt-5.5";
+const AI_URL = "https://api.openai.com/v1/chat/completions";
+const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-5.5";
 
 // Per-call budget so a single lead can't burn the day's quota
 const BUDGET = { firecrawl: 15, ai: 3 };
@@ -110,8 +110,7 @@ async function fcScrape(url: string, key: string, budget: Budget): Promise<strin
 }
 
 const GATEWAY_HEADERS = (key: string) => ({
-  "Lovable-API-Key": key,
-  "X-Lovable-AIG-SDK": "vercel-ai-sdk",
+  "Authorization": `Bearer ${key}`,
   "Content-Type": "application/json",
 });
 
@@ -336,10 +335,10 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const fcKey = Deno.env.get("FIRECRAWL_API_KEY");
-  const lovableKey = Deno.env.get("LOVABLE_API_KEY");
+  const lovableKey = Deno.env.get("OPENAI_API_KEY");
 
   if (!fcKey || !lovableKey) {
-    return new Response(JSON.stringify({ error: "FIRECRAWL_API_KEY and LOVABLE_API_KEY are required" }), {
+    return new Response(JSON.stringify({ error: "FIRECRAWL_API_KEY and OPENAI_API_KEY are required" }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
