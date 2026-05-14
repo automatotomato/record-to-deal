@@ -103,7 +103,7 @@ export function PipelineHealthCard() {
         ) : (
           <>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-              {(["scan_county", "qualify_lead", "enrich_contact", "seller_discovery", "lead_brief", "draft_outreach"] as const).map((k) => {
+              {(["scan_sources", "scan_external", "qualify_lead", "enrich_contact", "seller_discovery", "lead_brief", "draft_outreach_step"] as const).map((k) => {
                 const c = data?.counts[k] ?? { queued: 0, running: 0, failed: 0 };
                 return (
                   <div key={k} className="rounded-md border bg-muted/30 px-2 py-1.5">

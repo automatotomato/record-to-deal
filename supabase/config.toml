@@ -12,8 +12,8 @@ verify_jwt = false
 [functions.enrich-contact]
 verify_jwt = false
 
-[functions.draft-outreach]
-verify_jwt = false
+
+
 
 [functions.job-dispatcher]
 verify_jwt = false
