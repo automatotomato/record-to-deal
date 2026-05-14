@@ -23,78 +23,144 @@ const corsHeaders = {
 };
 
 const AI_URL = "https://api.openai.com/v1/chat/completions";
-const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-5.5";
+const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-5.1";
+const FC_V2 = "https://api.firecrawl.dev/v2";
 
-function promptFor(source: SourceKind, state: string, counties: string[]): string {
-  const countyList = counties.slice(0, 12).join(", ");
-  const base = `You are a 1031-exchange deal scout. Use Google Search to find REAL, RECENT property transactions in ${state} (focus counties: ${countyList}). Only include transactions you can cite from a real URL — never fabricate. Return JSON only.`;
+if (!(globalThis as any).__sesLogged) {
+  console.log(`[scan-external-sources] OpenAI model: ${AI_MODEL}`);
+  (globalThis as any).__sesLogged = true;
+}
 
-  const guidance: Record<SourceKind, string> = {
-    commercial:
-      `Search site:crexi.com and site:loopnet.com for recently SOLD commercial / multifamily / industrial / retail / NNN properties in ${state} in the last 60 days. Sale price ≥ $750k. Skip active listings. Skip residential.`,
-    residential:
-      `Search site:redfin.com for recently SOLD investment-grade residential in ${state} in the last 45 days: 2-4 unit multifamily, SFR rentals owned by an LLC/Trust/Corp, sale price ≥ $500k. Skip primary residences and skip anything where the buyer is an owner-occupant.`,
-    court:
-      `Search county court / clerk / recorder sites in ${state} for probate sales, tax-lien auctions, and divorce-driven property dispositions filed or scheduled in the last 60 days. These owners are forced sellers and prime 1031 candidates if they're swapping into other property. Include the case/filing URL.`,
-    sec:
-      `Search site:sec.gov for 8-K filings filed in the last 90 days disclosing the disposition / sale of real estate located in ${state}. Capture the seller entity (registrant), property address if disclosed, sale price, and filing URL.`,
-  };
+function searchQueriesFor(source: SourceKind, state: string, counties: string[]): string[] {
+  const top = counties.slice(0, 3).join(" OR ");
+  switch (source) {
+    case "commercial":
+      return [
+        `site:crexi.com sold ${state} commercial multifamily 2025 ${top}`,
+        `site:loopnet.com sold ${state} ${top} 2025`,
+      ];
+    case "residential":
+      return [
+        `site:redfin.com sold ${state} ${top} multifamily 2025`,
+        `site:redfin.com sold ${state} duplex triplex 2025`,
+      ];
+    case "court":
+      return [
+        `${state} probate sale notice ${top} 2025`,
+        `${state} tax lien auction property 2025 ${top}`,
+      ];
+    case "sec":
+      return [
+        `site:sec.gov 8-K disposition real estate ${state} 2025`,
+        `site:sec.gov 8-K sold property ${state}`,
+      ];
+  }
+}
 
-  return `${base}
+async function firecrawlSearch(query: string, fcKey: string, limit = 6): Promise<Array<{ url?: string; title?: string; markdown?: string; description?: string }>> {
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), 30_000);
+  try {
+    const r = await fetch(`${FC_V2}/search`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${fcKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query, limit,
+        scrapeOptions: { formats: ["markdown"], onlyMainContent: true },
+      }),
+      signal: ctrl.signal,
+    });
+    if (!r.ok) {
+      console.warn(`firecrawl ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      return [];
+    }
+    const d = await r.json();
+    const arr = d?.data?.web ?? d?.data ?? d?.web ?? [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { console.warn("firecrawl threw", e); return []; }
+  finally { clearTimeout(tid); }
+}
 
-${guidance[source]}
+async function extractFromEvidence(
+  source: SourceKind,
+  state: string,
+  evidence: string,
+  apiKey: string,
+): Promise<Candidate[]> {
+  const sys = `You extract real-estate transactions from scraped web evidence into structured JSON. Use ONLY facts present in the evidence. Never invent emails, phones, or owner names. Return an empty list when nothing usable is present.`;
+  const user = `Source family: ${source}. State: ${state}.
 
-Return ONLY this JSON shape (max 12 leads). A lead is only useful if you can also cite at least one reachability field: owner_contact_email, owner_contact_phone, owner_website, or a decision-maker/contact page URL.
+Extract up to 12 distinct candidate 1031 leads from the evidence below. Each lead requires owner_name, property_address, and source_record_url, plus at least ONE reachability field (owner_contact_email, owner_contact_phone, or owner_website).
+
+Return ONLY:
 {
   "leads": [
     {
-      "owner_name": "string (seller / current owner — required)",
-      "owner_contact_name": "string|null (person behind the seller if found)",
-      "owner_contact_email": "string|null (public email only)",
-      "owner_contact_phone": "string|null (public phone only)",
-      "owner_website": "string|null (official website/contact page only)",
-      "property_address": "string (street address — required)",
-      "property_city": "string",
-      "property_zip": "string",
-      "sale_price": number,
-      "sale_date": "YYYY-MM-DD",
+      "owner_name": "string",
+      "owner_contact_name": "string|null",
+      "owner_contact_email": "string|null",
+      "owner_contact_phone": "string|null",
+      "owner_website": "string|null",
+      "property_address": "string",
+      "property_city": "string|null",
+      "property_zip": "string|null",
+      "sale_price": number|null,
+      "sale_date": "YYYY-MM-DD"|null,
       "property_type": "SFR|Multifamily|Commercial|Industrial|Land|Mixed|Unknown",
       "trigger_event": "recent_sale|probate|tax_lien|divorce|sec_disposition",
-      "source_record_url": "string (the page you cited — required)"
+      "source_record_url": "string"
     }
   ]
 }
 
-Skip any record missing owner_name, property_address, source_record_url, and at least one reachable contact path.`;
-}
+EVIDENCE:
+${evidence.slice(0, 28000)}`;
 
-async function geminiGroundedExtract(
-  prompt: string,
-  apiKey: string,
-): Promise<Candidate[]> {
-  const r = await fetch(AI_URL, {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), 30_000);
+  try {
+    const r = await fetch(AI_URL, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: AI_MODEL,
-        messages: [
-          { role: "system", content: "You return ONLY valid JSON. No prose, no markdown fences." },
-          { role: "user", content: prompt },
-        ],
+        messages: [{ role: "system", content: sys }, { role: "user", content: user }],
         response_format: { type: "json_object" },
       }),
+      signal: ctrl.signal,
     });
     if (!r.ok) {
       const txt = (await r.text()).slice(0, 300);
-      throw new Error(`openai ${r.status}: ${txt}`);
+      console.warn(`openai ${r.status}: ${txt}`);
+      return [];
     }
-  const data = await r.json();
-  const raw = data?.choices?.[0]?.message?.content ?? "{}";
-  // Strip ```json fences if the model adds them despite the system prompt.
-  const cleaned = String(raw).replace(/^```json\s*|\s*```$/g, "").trim();
-  let parsed: { leads?: Candidate[] } = {};
-  try { parsed = JSON.parse(cleaned); } catch { /* ignore */ }
-  return Array.isArray(parsed.leads) ? parsed.leads.slice(0, 12) : [];
+    const data = await r.json();
+    const raw = data?.choices?.[0]?.message?.content ?? "{}";
+    const cleaned = String(raw).replace(/^```json\s*|\s*```$/g, "").trim();
+    let parsed: { leads?: Candidate[] } = {};
+    try { parsed = JSON.parse(cleaned); } catch { /* ignore */ }
+    return Array.isArray(parsed.leads) ? parsed.leads.slice(0, 12) : [];
+  } finally { clearTimeout(tid); }
+}
+
+async function webGroundedExtract(
+  source: SourceKind,
+  state: string,
+  counties: string[],
+  fcKey: string,
+  aiKey: string,
+): Promise<Candidate[]> {
+  const queries = searchQueriesFor(source, state, counties);
+  const evidenceParts: string[] = [];
+  for (const q of queries) {
+    const results = await firecrawlSearch(q, fcKey, 6);
+    for (const r of results) {
+      const chunk = `URL: ${r.url ?? ""}\nTITLE: ${r.title ?? ""}\n${(r.markdown ?? r.description ?? "").slice(0, 4000)}`;
+      evidenceParts.push(chunk);
+    }
+  }
+  if (!evidenceParts.length) return [];
+  return extractFromEvidence(source, state, evidenceParts.join("\n---\n"), aiKey);
 }
 
 function inferOwnerType(name?: string | null) {
