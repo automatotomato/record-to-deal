@@ -147,8 +147,7 @@ function isOutreachContact(l: any): boolean {
   const okEmail = isUnlockedEmail(l.decision_maker_email);
   const okPhone = (l.decision_maker_phone || l.contact_phone) && String(l.decision_maker_phone || l.contact_phone).replace(/\D/g, "").length >= 10;
   const okWeb = l.company_website && /^https?:\/\//i.test(l.company_website);
-  const okLi = l.decision_maker_linkedin || l.contact_linkedin;
-  return !!(okEmail || okPhone || okWeb || okLi);
+  return !!(okEmail || okPhone || okWeb);
 }
 
 function isAnyContact(l: any): boolean {
