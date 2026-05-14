@@ -746,17 +746,25 @@ Deno.serve(async (req) => {
 
   // ============ Determine status ============
   let status: "none" | "partial" | "reachable" | "failed" = "none";
-  if (d.email || d.phone) status = "reachable";
-  else if (d.linkedin) status = "partial";
+  if (d.email || d.phone || d.company_website) status = "reachable";
+  else if (d.linkedin || d.entity_registry_url) status = "partial";
   else status = "failed";
 
   // Compute completeness (0-100)
   let completeness = 0;
-  if (lead.mailing_address) completeness += 30;
+  if (d.company_website) completeness += 20;
   if (d.name) completeness += 15;
   if (d.email) completeness += 30;
   if (d.phone) completeness += 15;
   if (d.linkedin) completeness += 10;
+  if (d.entity_registry_url) completeness += 10;
+
+  const willBeUseful = isUsefulLead({
+    decision_maker_email: d.email,
+    decision_maker_phone: d.phone,
+    contact_phone: d.phone ?? lead.contact_phone,
+    company_website: d.company_website,
+  });
 
   // Persist
   const updates: Record<string, unknown> = {
@@ -773,6 +781,9 @@ Deno.serve(async (req) => {
     related_entities: d.related_entities,
     discovery_confidence_by_field: d.confidence_by_field,
     discovery_status: status,
+    has_contact: willBeUseful,
+    has_outreach_contact: willBeUseful,
+    pipeline_stage: willBeUseful ? "enriched" : "needs_review",
     enrichment_confidence: Math.max(
       lead.enrichment_confidence ?? 0,
       Math.round(Object.values(d.confidence_by_field).reduce((a: number, v: any) => a + v.score, 0) / Math.max(1, Object.keys(d.confidence_by_field).length)),
@@ -810,8 +821,8 @@ Deno.serve(async (req) => {
     kind: "lead_brief", lead_id: leadId, priority: 80,
   });
 
-  // If reachable and no draft exists yet, queue an outreach draft.
-  if (status === "reachable") {
+  // Only draft outreach when there is an actual path to reach the seller.
+  if (willBeUseful && (d.email || d.phone || d.company_website)) {
     await supabase.from("pipeline_jobs").insert({
       kind: "draft_outreach", lead_id: leadId, priority: 70,
     });
@@ -820,7 +831,7 @@ Deno.serve(async (req) => {
   if (jobId) {
     await supabase.from("pipeline_jobs").update({
       status: "done", finished_at: new Date().toISOString(),
-      result: { status, has_email: !!d.email, has_phone: !!d.phone },
+      result: { status, useful: willBeUseful, has_email: !!d.email, has_phone: !!d.phone, has_website: !!d.company_website },
     }).eq("id", jobId);
   }
 
