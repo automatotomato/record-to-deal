@@ -136,6 +136,28 @@ function inferOwnerType(name?: string | null) {
   return "Individual";
 }
 
+function isUnlockedEmail(e?: string | null): boolean {
+  if (!e) return false;
+  if (!/[^@\s]+@[^@\s]+\.[a-z]{2,}/i.test(e)) return false;
+  return !/email_not_unlocked|domain\.com$|@apollo-locked/i.test(e);
+}
+
+function hasUsablePhone(p?: string | null): boolean {
+  return String(p ?? "").replace(/\D/g, "").length >= 10;
+}
+
+function normalizeWebsite(value?: string | null): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value.startsWith("http") ? value : `https://${value}`);
+    return `https://${url.hostname.replace(/^www\./, "")}${url.pathname === "/" ? "" : url.pathname}`;
+  } catch { return null; }
+}
+
+function hasReachability(c: Candidate): boolean {
+  return isUnlockedEmail(c.owner_contact_email) || hasUsablePhone(c.owner_contact_phone) || !!normalizeWebsite(c.owner_website);
+}
+
 function mapPropertyType(raw?: string): string {
   const valid = ["SFR", "Multifamily", "Commercial", "Industrial", "Land", "Mixed", "Unknown"];
   if (raw && valid.includes(raw)) return raw;
