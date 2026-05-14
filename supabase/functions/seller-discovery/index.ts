@@ -323,10 +323,13 @@ Return JSON exactly:
 async function aiConsolidate(blob: string, apiKey: string, budget: Budget): Promise<any> {
   if (!budget.canAi()) return null;
   budget.ai++;
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), 30_000);
   try {
     const r = await fetch(AI_URL, {
       method: "POST",
       headers: GATEWAY_HEADERS(apiKey),
+      signal: ctrl.signal,
       body: JSON.stringify({
         model: AI_MODEL,
         messages: [
@@ -346,12 +349,14 @@ async function aiConsolidate(blob: string, apiKey: string, budget: Budget): Prom
 Evidence:
 ${blob.slice(0, 14000)}` },
         ],
+        response_format: { type: "json_object" },
       }),
     });
     if (!r.ok) return null;
     const d = await r.json();
     return parseJsonObject(d?.choices?.[0]?.message?.content);
   } catch (_) { return null; }
+  finally { clearTimeout(tid); }
 }
 
 Deno.serve(async (req) => {
