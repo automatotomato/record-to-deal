@@ -4,8 +4,9 @@
 //   2. Person identity (LinkedIn / RocketReach / ZoomInfo / Bizapedia / Crunchbase)
 //   3. Company website discovery
 //   4. Apollo.io people/match + organization people search
-//   5. Personal contact scrape (regex + scoring)
-//   6. AI consolidation (OpenAI picks best per field with confidence)
+//   5. Gemini grounded public-contact hunt (non-Apollo fallback)
+//   6. Personal contact scrape (regex + scoring)
+//   7. AI consolidation (Gemini picks best per field with confidence)
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {
@@ -16,11 +17,11 @@ const corsHeaders = {
 
 const FC_V2 = "https://api.firecrawl.dev/v2";
 const APOLLO = "https://api.apollo.io/api/v1";
-const AI_URL = "https://api.openai.com/v1/chat/completions";
-const AI_MODEL = "gpt-4o-mini";
+const AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
+const AI_MODEL = "google/gemini-2.5-flash";
 
 // Per-call budget so a single lead can't burn the day's quota
-const BUDGET = { firecrawl: 12, apollo: 7, openai: 1 };
+const BUDGET = { firecrawl: 12, apollo: 7, ai: 2 };
 
 const STATE_NAMES: Record<string, string> = {
   AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
