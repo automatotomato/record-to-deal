@@ -4,8 +4,9 @@
 //   2. Person identity (LinkedIn / RocketReach / ZoomInfo / Bizapedia / Crunchbase)
 //   3. Company website discovery
 //   4. Apollo.io people/match + organization people search
-//   5. Personal contact scrape (regex + scoring)
-//   6. AI consolidation (OpenAI picks best per field with confidence)
+//   5. Gemini grounded public-contact hunt (non-Apollo fallback)
+//   6. Personal contact scrape (regex + scoring)
+//   7. AI consolidation (Gemini picks best per field with confidence)
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {
@@ -16,11 +17,11 @@ const corsHeaders = {
 
 const FC_V2 = "https://api.firecrawl.dev/v2";
 const APOLLO = "https://api.apollo.io/api/v1";
-const AI_URL = "https://api.openai.com/v1/chat/completions";
-const AI_MODEL = "gpt-4o-mini";
+const AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
+const AI_MODEL = "google/gemini-2.5-flash";
 
 // Per-call budget so a single lead can't burn the day's quota
-const BUDGET = { firecrawl: 12, apollo: 7, openai: 1 };
+const BUDGET = { firecrawl: 12, apollo: 7, ai: 2 };
 
 const STATE_NAMES: Record<string, string> = {
   AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
@@ -70,7 +71,7 @@ class Budget {
   constructor(public fc = 0, public apollo = 0, public ai = 0) {}
   canFc() { return this.fc < BUDGET.firecrawl; }
   canApollo() { return this.apollo < BUDGET.apollo; }
-  canAi() { return this.ai < BUDGET.openai; }
+  canAi() { return this.ai < BUDGET.ai; }
 }
 
 async function fcSearch(query: string, key: string, limit: number, scrape: boolean, budget: Budget) {
@@ -325,13 +326,69 @@ function pullPhones(text: string): string[] {
     .map((p) => p.trim())));
 }
 
-async function aiConsolidate(blob: string, openaiKey: string, budget: Budget): Promise<any> {
+function parseJsonObject(raw: unknown): any {
+  const text = String(raw ?? "{}").trim().replace(/^```json\s*|\s*```$/g, "");
+  try { return JSON.parse(text); } catch (_) {
+    const m = text.match(/\{[\s\S]*\}/);
+    if (!m) return null;
+    try { return JSON.parse(m[0]); } catch { return null; }
+  }
+}
+
+async function geminiPublicContactHunt(lead: any, targetName: string | null, entity: boolean, apiKey: string, budget: Budget): Promise<any> {
+  if (!budget.canAi()) return null;
+  budget.ai++;
+  const owner = lead.owner_name ?? "unknown owner";
+  const address = [lead.property_address, lead.property_city, lead.state].filter(Boolean).join(", ");
+  try {
+    const r = await fetch(AI_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: AI_MODEL,
+        messages: [
+          { role: "system", content: "You are a contact-data researcher. Use Google Search. Return ONLY valid JSON. Never invent contact details; include only publicly cited emails, phones, LinkedIn profiles, or official websites." },
+          { role: "user", content: `Find publicly available contact details for the decision-maker behind this real-estate seller.
+
+Owner/entity: ${owner}
+Known decision-maker/person: ${targetName ?? "unknown"}
+Owner type: ${entity ? "entity/company/trust" : "individual"}
+Property: ${address || "unknown"}
+
+Prefer official company pages, Secretary of State/registry pages, LinkedIn profile pages, broker/team pages, SEC filings, court filings, and credible business directories. Avoid generic lead-gen placeholders and locked emails.
+
+Return JSON exactly:
+{
+  "name": string|null,
+  "role": string|null,
+  "email": string|null,
+  "phone": string|null,
+  "linkedin": string|null,
+  "company_website": string|null,
+  "source_urls": string[],
+  "confidence": { "name": 0-100, "role": 0-100, "email": 0-100, "phone": 0-100, "linkedin": 0-100, "company_website": 0-100 },
+  "reasoning": "one short sentence"
+}` },
+        ],
+        tools: [{ google_search: {} }],
+      }),
+    });
+    if (!r.ok) {
+      console.warn(`gemini public hunt ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      return null;
+    }
+    const data = await r.json();
+    return parseJsonObject(data?.choices?.[0]?.message?.content);
+  } catch (e) { console.warn("gemini public hunt threw", e); return null; }
+}
+
+async function aiConsolidate(blob: string, apiKey: string, budget: Budget): Promise<any> {
   if (!budget.canAi()) return null;
   budget.ai++;
   try {
     const r = await fetch(AI_URL, {
       method: "POST",
-      headers: { Authorization: `Bearer ${openaiKey}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: AI_MODEL,
         messages: [
@@ -351,12 +408,11 @@ async function aiConsolidate(blob: string, openaiKey: string, budget: Budget): P
 Evidence:
 ${blob.slice(0, 14000)}` },
         ],
-        response_format: { type: "json_object" },
       }),
     });
     if (!r.ok) return null;
     const d = await r.json();
-    return JSON.parse(d?.choices?.[0]?.message?.content ?? "{}");
+    return parseJsonObject(d?.choices?.[0]?.message?.content);
   } catch (_) { return null; }
 }
 
@@ -367,10 +423,10 @@ Deno.serve(async (req) => {
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const fcKey = Deno.env.get("FIRECRAWL_API_KEY");
   const apolloKey = Deno.env.get("APOLLO_API_KEY");
-  const openaiKey = Deno.env.get("OPENAI_API_KEY");
+  const lovableKey = Deno.env.get("LOVABLE_API_KEY");
 
-  if (!fcKey || !openaiKey) {
-    return new Response(JSON.stringify({ error: "FIRECRAWL_API_KEY and OPENAI_API_KEY are required" }), {
+  if (!fcKey || !lovableKey) {
+    return new Response(JSON.stringify({ error: "FIRECRAWL_API_KEY and LOVABLE_API_KEY are required" }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
@@ -593,7 +649,32 @@ Deno.serve(async (req) => {
     }
   }
 
-  // ============ PASS 5 — Personal contact scrape (regex + scoring) ============
+  // ============ PASS 5 — Gemini grounded public-contact hunt ============
+  if ((!d.email || !d.phone) && lovableKey) {
+    d.passes.gemini_public_contact = true;
+    const publicHit = await geminiPublicContactHunt(lead, targetName, entity, lovableKey, budget);
+    if (publicHit && typeof publicHit === "object") {
+      const c = publicHit.confidence ?? {};
+      if (publicHit.name && looksLikePersonName(publicHit.name)) setField(d, "name", publicHit.name, c.name ?? 55, "gemini.public_search");
+      if (publicHit.role) setField(d, "role", publicHit.role, c.role ?? 45, "gemini.public_search");
+      if (isUnlockedEmail(publicHit.email)) setField(d, "email", publicHit.email, c.email ?? 65, "gemini.public_search");
+      if (publicHit.phone && String(publicHit.phone).replace(/\D/g, "").length >= 10) setField(d, "phone", publicHit.phone, c.phone ?? 55, "gemini.public_search");
+      if (publicHit.linkedin && /linkedin\.com\/in\//i.test(publicHit.linkedin)) setField(d, "linkedin", publicHit.linkedin, c.linkedin ?? 55, "gemini.public_search");
+      if (publicHit.company_website) {
+        const h = pickHostFromUrl(publicHit.company_website.startsWith("http") ? publicHit.company_website : `https://${publicHit.company_website}`);
+        if (h) setField(d, "company_website", h, c.company_website ?? 50, "gemini.public_search");
+      }
+      if (Array.isArray(publicHit.source_urls)) {
+        d.sources.push("gemini:public_search", ...publicHit.source_urls.filter((u: unknown) => typeof u === "string").slice(0, 5));
+        evidence.push(`GEMINI PUBLIC SEARCH\n${publicHit.source_urls.join("\n")}\n${publicHit.reasoning ?? ""}`);
+      } else {
+        d.sources.push("gemini:public_search");
+      }
+      if (publicHit.reasoning) d.notes.push(publicHit.reasoning);
+    }
+  }
+
+  // ============ PASS 6 — Personal contact scrape (regex + scoring) ============
   if (!d.email || !d.phone) {
     d.passes.scrape = true;
     if (targetName) {
@@ -622,11 +703,11 @@ Deno.serve(async (req) => {
     }
   }
 
-  // ============ PASS 6 — AI consolidation ============
+  // ============ PASS 7 — AI consolidation ============
   if (evidence.length && (!d.email || !d.linkedin || !d.name)) {
     d.passes.ai_consolidate = true;
     const blob = evidence.join("\n---\n");
-    const ai = await aiConsolidate(blob, openaiKey, budget);
+    const ai = await aiConsolidate(blob, lovableKey, budget);
     if (ai && typeof ai === "object") {
       const c = ai.confidence ?? {};
       if (ai.name) setField(d, "name", ai.name, c.name ?? 50, "ai");
@@ -639,7 +720,7 @@ Deno.serve(async (req) => {
         if (h) setField(d, "company_website", h, c.company_website ?? 50, "ai");
       }
       if (ai.reasoning) d.notes.push(ai.reasoning);
-      d.sources.push("openai");
+      d.sources.push("gemini:consolidate");
     }
   }
 
