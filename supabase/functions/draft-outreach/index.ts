@@ -10,7 +10,7 @@ const corsHeaders = {
 };
 
 const AI_URL = "https://api.openai.com/v1/chat/completions";
-const AI_MODEL = "gpt-4o-mini";
+const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-5.1";
 
 function fmtMoney(n: number | null | undefined): string {
   if (!n) return "unknown";
@@ -39,6 +39,13 @@ Deno.serve(async (req) => {
 
   const { data: lead } = await supabase.from("leads").select("*").eq("id", leadId).maybeSingle();
   if (!lead) { await markFailed(supabase, body.job_id, "lead missing"); return jsonOk({ ok: false }); }
+  if (!lead.has_outreach_contact) {
+    await supabase.from("pipeline_jobs").update({
+      status: "done", finished_at: new Date().toISOString(),
+      result: { skipped: "no outreach contact" },
+    }).eq("id", body.job_id);
+    return jsonOk({ ok: true, skipped: true });
+  }
 
   const dmName = lead.decision_maker_name ?? lead.owner_name;
   const greeting = dmName ? `Hi ${String(dmName).split(/\s+/)[0]},` : "Hello,";
