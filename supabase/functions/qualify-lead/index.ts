@@ -11,8 +11,19 @@ const corsHeaders = {
 };
 
 const FEDERAL_LTCG_RATE = 0.238;
+// Default seller cost basis when assessed_value is missing — 40% of sale price.
+// Real basis is usually unknown for off-market sellers; this errs on the side of
+// implying a meaningful gain so we don't under-pitch tax exposure.
+const DEFAULT_BASIS_PCT = 0.40;
 
-interface StateRate { state: string; ltcg_rate: number; surcharge: number; is_high_tax: boolean; }
+interface StateRate {
+  state: string;
+  ltcg_rate: number;
+  surcharge: number;
+  is_high_tax: boolean;
+  is_target: boolean;
+  priority_rank: number;
+}
 type Tier = "CRITICAL" | "URGENT" | "ACTIVE" | "FOLLOW_UP" | "EXPIRED" | "DISQUALIFIED";
 
 function daysSince(d?: string | null): number | null {
