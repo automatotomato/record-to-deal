@@ -360,6 +360,8 @@ export const OutreachDashboard = () => {
           />
         </div>
 
+        {isAdmin && <PipelineHealthCard />}
+
         {/* Tabs + toolbar */}
         <Card>
           <CardHeader className="space-y-4 pb-4">
