@@ -725,7 +725,7 @@ Deno.serve(async (req) => {
     const publicHit = await geminiPublicContactHunt(lead, targetName, entity, lovableKey, budget);
     if (publicHit && typeof publicHit === "object") {
       const c = publicHit.confidence ?? {};
-      if (publicHit.name && looksLikePersonName(publicHit.name)) setField(d, "name", publicHit.name, c.name ?? 55, "gemini.public_search");
+      if (publicHit.name && isKnownOwnerName(publicHit.name) && looksLikePersonName(publicHit.name)) setField(d, "name", publicHit.name, c.name ?? 55, "gemini.public_search");
       if (publicHit.role) setField(d, "role", publicHit.role, c.role ?? 45, "gemini.public_search");
       if (isUnlockedEmail(publicHit.email)) setField(d, "email", publicHit.email, c.email ?? 65, "gemini.public_search");
       if (publicHit.phone && String(publicHit.phone).replace(/\D/g, "").length >= 10) setField(d, "phone", publicHit.phone, c.phone ?? 55, "gemini.public_search");
@@ -780,7 +780,7 @@ Deno.serve(async (req) => {
     const ai = await aiConsolidate(blob, lovableKey, budget);
     if (ai && typeof ai === "object") {
       const c = ai.confidence ?? {};
-      if (ai.name) setField(d, "name", ai.name, c.name ?? 50, "ai");
+      if (ai.name && isKnownOwnerName(ai.name)) setField(d, "name", ai.name, c.name ?? 50, "ai");
       if (ai.role) setField(d, "role", ai.role, c.role ?? 50, "ai");
       if (isUnlockedEmail(ai.email)) setField(d, "email", ai.email, c.email ?? 45, "ai");
       if (ai.phone && String(ai.phone).replace(/\D/g, "").length >= 10) setField(d, "phone", ai.phone, c.phone ?? 35, "ai");
