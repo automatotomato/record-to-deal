@@ -65,6 +65,8 @@ interface ScoreOut {
   fed_capital_gains_estimate: number | null;
   state_capital_gains_estimate: number | null;
   total_tax_exposure: number | null;
+  actual_capital_gain: number | null;
+  effective_tax_rate: number | null;
   disqualified: boolean;
   needs_review: boolean;
 }
