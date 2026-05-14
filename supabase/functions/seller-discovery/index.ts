@@ -375,7 +375,7 @@ Deno.serve(async (req) => {
   }
 
   // Cache: only skip when we already have a real email/phone. A LinkedIn-only
-  // partial needs another pass because Apollo can often reveal contact details.
+  // partial needs another pass because Gemini search may now succeed.
   if (!body.force && !body.company_website && lead.discovery_status === "reachable" && (isUnlockedEmail(lead.decision_maker_email) || lead.decision_maker_phone)) {
     return new Response(JSON.stringify({ ok: true, cached: true, status: lead.discovery_status }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
