@@ -176,21 +176,7 @@ function splitLinkedInName(url: string | null): { first: string; last: string } 
   return { first: cap(parts[0]), last: parts.slice(1).map(cap).join(" ") };
 }
 
-function applyApolloPerson(d: Discovery, p: any, source: string) {
-  if (!p) return;
-  const email = isUnlockedEmail(p.email) ? p.email
-    : (p.personal_emails ?? []).find((e: string) => isUnlockedEmail(e));
-  if (email) setField(d, "email", email, 90, source);
-  const phoneList = p.phone_numbers ?? [];
-  const ph = Array.isArray(phoneList)
-    ? phoneList[0]?.sanitized_number ?? phoneList[0]?.raw_number
-    : null;
-  const phone = ph ?? p.mobile_phone ?? p.phone_number;
-  if (phone) setField(d, "phone", phone, 75, source);
-  if (!d.name && (p.first_name || p.last_name)) setField(d, "name", `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim(), 70, source);
-  if (!d.role && p.title) setField(d, "role", p.title, 65, source);
-  if (!d.linkedin && p.linkedin_url) setField(d, "linkedin", p.linkedin_url, 75, source);
-}
+
 
 function acceptScrapedEmail(email: string, score: number, name: string | null, domain: string | null): boolean {
   if (!isUnlockedEmail(email) || score <= 0) return false;
