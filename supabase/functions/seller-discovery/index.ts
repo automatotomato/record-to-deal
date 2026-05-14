@@ -1,10 +1,10 @@
 // Seller Discovery agent — dedicated multi-pass contact hunt for one lead.
-// Passes:
+// Passes (Apollo removed — Gemini grounded search + Firecrawl scraping only):
 //   1. Entity unmask (OpenCorporates + state SoS via Firecrawl)
-//   2. Person identity (LinkedIn / RocketReach / ZoomInfo / Bizapedia / Crunchbase)
-//   3. Company website discovery
-//   4. Apollo.io people/match + organization people search
-//   5. Gemini grounded public-contact hunt (non-Apollo fallback)
+//   2. Person identity (LinkedIn / RocketReach / ZoomInfo / Bizapedia)
+//   3. Company website discovery + homepage/contact scrape
+//   4. Source record scrape (broker/listing pages)
+//   5. Gemini grounded public-contact hunt (Google Search)
 //   6. Personal contact scrape (regex + scoring)
 //   7. AI consolidation (Gemini picks best per field with confidence)
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
