@@ -102,7 +102,7 @@ Return concise, specific, agent-ready prose. No fluff, no marketing language. If
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: "openai/gpt-5.5",
         messages: [
           { role: "system", content: sys },
           { role: "user", content: user },

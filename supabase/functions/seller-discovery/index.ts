@@ -17,7 +17,7 @@ const corsHeaders = {
 
 const FC_V2 = "https://api.firecrawl.dev/v2";
 const AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
-const AI_MODEL = "google/gemini-3-flash-preview";
+const AI_MODEL = "openai/gpt-5.5";
 
 // Per-call budget so a single lead can't burn the day's quota
 const BUDGET = { firecrawl: 15, ai: 3 };
@@ -261,7 +261,7 @@ async function geminiPublicContactHunt(lead: any, targetName: string | null, ent
       body: JSON.stringify({
         model: AI_MODEL,
         messages: [
-          { role: "system", content: "You are a contact-data researcher. Use Google Search. Return ONLY valid JSON. Never invent contact details; include only publicly cited emails, phones, LinkedIn profiles, or official websites." },
+          { role: "system", content: "You are a contact-data researcher. Return ONLY valid JSON. Use only contact details you are highly confident are publicly published (official company sites, SEC filings, court filings, registries, LinkedIn). Never invent emails or phone numbers — leave fields null when unsure." },
           { role: "user", content: `Find publicly available contact details for the decision-maker behind this real-estate seller.
 
 Owner/entity: ${owner}
@@ -284,11 +284,11 @@ Return JSON exactly:
   "reasoning": "one short sentence"
 }` },
         ],
-        tools: [{ google_search: {} }],
+        response_format: { type: "json_object" },
       }),
     });
     if (!r.ok) {
-      console.warn(`gemini public hunt ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      console.warn(`openai public hunt ${r.status}: ${(await r.text()).slice(0, 200)}`);
       return null;
     }
     const data = await r.json();
