@@ -26,7 +26,8 @@ Deno.serve(async (req) => {
     );
     const aiKey = Deno.env.get("OPENAI_API_KEY");
     if (!aiKey) return jsonErr("OPENAI_API_KEY missing", 500);
-    const aiModel = Deno.env.get("OPENAI_MODEL") || "gpt-5.5";
+    const aiModel = Deno.env.get("OPENAI_MODEL") || "gpt-5.1";
+    if (!(globalThis as any).__modelLogged) { console.log(`[lead-brief] OpenAI model: ${aiModel}`); (globalThis as any).__modelLogged = true; }
 
     const body = await req.json().catch(() => ({}));
     let leadId = body?.lead_id;
@@ -95,21 +96,24 @@ Return concise, specific, agent-ready prose. No fluff, no marketing language. If
   "best_next_action": "1 sentence: the single most effective next step the agent should take right now (e.g. 'Call John at 702-555-1234 mentioning the depreciation recapture exposure')."
 }`;
 
-    const r = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${aiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: aiModel,
-        messages: [
-          { role: "system", content: sys },
-          { role: "user", content: user },
-        ],
-        response_format: { type: "json_object" },
-      }),
-    });
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), 30_000);
+    let r: Response;
+    try {
+      r = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${aiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: aiModel,
+          messages: [
+            { role: "system", content: sys },
+            { role: "user", content: user },
+          ],
+          response_format: { type: "json_object" },
+        }),
+        signal: ctrl.signal,
+      });
+    } finally { clearTimeout(tid); }
 
     if (!r.ok) {
       const txt = await r.text();
