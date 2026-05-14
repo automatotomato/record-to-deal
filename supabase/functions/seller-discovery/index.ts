@@ -326,13 +326,69 @@ function pullPhones(text: string): string[] {
     .map((p) => p.trim())));
 }
 
-async function aiConsolidate(blob: string, openaiKey: string, budget: Budget): Promise<any> {
+function parseJsonObject(raw: unknown): any {
+  const text = String(raw ?? "{}").trim().replace(/^```json\s*|\s*```$/g, "");
+  try { return JSON.parse(text); } catch (_) {
+    const m = text.match(/\{[\s\S]*\}/);
+    if (!m) return null;
+    try { return JSON.parse(m[0]); } catch { return null; }
+  }
+}
+
+async function geminiPublicContactHunt(lead: any, targetName: string | null, entity: boolean, apiKey: string, budget: Budget): Promise<any> {
+  if (!budget.canAi()) return null;
+  budget.ai++;
+  const owner = lead.owner_name ?? "unknown owner";
+  const address = [lead.property_address, lead.property_city, lead.state].filter(Boolean).join(", ");
+  try {
+    const r = await fetch(AI_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: AI_MODEL,
+        messages: [
+          { role: "system", content: "You are a contact-data researcher. Use Google Search. Return ONLY valid JSON. Never invent contact details; include only publicly cited emails, phones, LinkedIn profiles, or official websites." },
+          { role: "user", content: `Find publicly available contact details for the decision-maker behind this real-estate seller.
+
+Owner/entity: ${owner}
+Known decision-maker/person: ${targetName ?? "unknown"}
+Owner type: ${entity ? "entity/company/trust" : "individual"}
+Property: ${address || "unknown"}
+
+Prefer official company pages, Secretary of State/registry pages, LinkedIn profile pages, broker/team pages, SEC filings, court filings, and credible business directories. Avoid generic lead-gen placeholders and locked emails.
+
+Return JSON exactly:
+{
+  "name": string|null,
+  "role": string|null,
+  "email": string|null,
+  "phone": string|null,
+  "linkedin": string|null,
+  "company_website": string|null,
+  "source_urls": string[],
+  "confidence": { "name": 0-100, "role": 0-100, "email": 0-100, "phone": 0-100, "linkedin": 0-100, "company_website": 0-100 },
+  "reasoning": "one short sentence"
+}` },
+        ],
+        tools: [{ google_search: {} }],
+      }),
+    });
+    if (!r.ok) {
+      console.warn(`gemini public hunt ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      return null;
+    }
+    const data = await r.json();
+    return parseJsonObject(data?.choices?.[0]?.message?.content);
+  } catch (e) { console.warn("gemini public hunt threw", e); return null; }
+}
+
+async function aiConsolidate(blob: string, apiKey: string, budget: Budget): Promise<any> {
   if (!budget.canAi()) return null;
   budget.ai++;
   try {
     const r = await fetch(AI_URL, {
       method: "POST",
-      headers: { Authorization: `Bearer ${openaiKey}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: AI_MODEL,
         messages: [
@@ -352,12 +408,11 @@ async function aiConsolidate(blob: string, openaiKey: string, budget: Budget): P
 Evidence:
 ${blob.slice(0, 14000)}` },
         ],
-        response_format: { type: "json_object" },
       }),
     });
     if (!r.ok) return null;
     const d = await r.json();
-    return JSON.parse(d?.choices?.[0]?.message?.content ?? "{}");
+    return parseJsonObject(d?.choices?.[0]?.message?.content);
   } catch (_) { return null; }
 }
 
