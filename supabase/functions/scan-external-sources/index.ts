@@ -22,36 +22,8 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
-const AI_MODEL = "openai/gpt-5.5";
-const HARD_BUDGET_MS = 50_000;
-
-type SourceKind = "commercial" | "residential" | "court" | "sec";
-
-type Candidate = {
-  owner_name?: string;
-  owner_contact_name?: string;
-  owner_contact_email?: string;
-  owner_contact_phone?: string;
-  owner_website?: string;
-  property_address?: string;
-  property_city?: string;
-  property_zip?: string;
-  parcel_number?: string;
-  sale_price?: number;
-  sale_date?: string;
-  property_type?: string;
-  source_record_url?: string;
-  trigger_event?: string;
-};
-
-const SOURCES: SourceKind[] = ["commercial", "residential", "court", "sec"];
-
-const GATEWAY_HEADERS = (key: string) => ({
-  "Lovable-API-Key": key,
-  "X-Lovable-AIG-SDK": "vercel-ai-sdk",
-  "Content-Type": "application/json",
-});
+const AI_URL = "https://api.openai.com/v1/chat/completions";
+const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-5.5";
 
 function promptFor(source: SourceKind, state: string, counties: string[]): string {
   const countyList = counties.slice(0, 12).join(", ");
@@ -102,7 +74,7 @@ async function geminiGroundedExtract(
 ): Promise<Candidate[]> {
   const r = await fetch(AI_URL, {
     method: "POST",
-    headers: GATEWAY_HEADERS(apiKey),
+    headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: AI_MODEL,
         messages: [
@@ -190,7 +162,7 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
-  const lovableKey = Deno.env.get("LOVABLE_API_KEY");
+  const lovableKey = Deno.env.get("OPENAI_API_KEY");
 
   let body: { job_id?: string; enqueue?: boolean } = {};
   try { body = await req.json(); } catch (_) {}
@@ -220,7 +192,7 @@ Deno.serve(async (req) => {
 
   // ---- Worker mode: process one (state, source) job ----
   if (!body.job_id) return jsonErr("job_id or enqueue required", 400);
-  if (!lovableKey) return jsonErr("LOVABLE_API_KEY not configured", 500);
+  if (!lovableKey) return jsonErr("OPENAI_API_KEY not configured", 500);
 
   const { data: job } = await supabase
     .from("pipeline_jobs").select("*").eq("id", body.job_id).maybeSingle();
