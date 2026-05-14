@@ -706,6 +706,14 @@ Deno.serve(async (req) => {
     kind: "lead_brief", lead_id: leadId, priority: 80,
   });
 
+  // Track 3: profile + wealth scan for promising leads (score >= 50)
+  if ((lead.score ?? 0) >= 50) {
+    await supabase.from("pipeline_jobs").insert([
+      { kind: "wealth_scan", lead_id: leadId, priority: 65 },
+      { kind: "profile_seller", lead_id: leadId, priority: 68 },
+    ]);
+  }
+
   // Only draft outreach when there is an actual path to reach the seller.
   if (willBeUseful && (d.email || d.phone || d.company_website)) {
     await supabase.from("pipeline_jobs").insert({
