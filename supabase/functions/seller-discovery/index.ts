@@ -238,7 +238,7 @@ function pickHostFromUrl(url: string): string | null {
   try { return new URL(url).hostname.replace(/^www\./, ""); } catch (_) { return null; }
 }
 
-const SOCIAL_RE = /(linkedin|facebook|twitter|x\.com|instagram|youtube|google|maps|wikipedia|opencorporates|secretary|sos\.|gov$|bizapedia|zoominfo|rocketreach|crunchbase|signalhire|apollo|yelp|bbb\.org|yellowpages)/i;
+const SOCIAL_RE = /(linkedin|facebook|twitter|x\.com|instagram|youtube|google|maps|wikipedia|opencorporates|secretary|sos\.|gov$|bizapedia|zoominfo|rocketreach|crunchbase|signalhire|apollo|yelp|bbb\.org|yellowpages|loopnet|crexi|redfin|zillow|realtor\.com|sec\.gov)/i;
 
 function pickDomainFromText(text: string, ownerName: string | null): string | null {
   const slug = (ownerName ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
