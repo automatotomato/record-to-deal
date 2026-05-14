@@ -18,20 +18,27 @@ const Admin = () => {
   const [running, setRunning] = useState(false);
 
   const runScout = async () => {
-    // Enqueue one scan_sources job per enabled county. Dispatcher (cron, 1/min)
-    // picks them up and fans out the rest of the pipeline asynchronously.
+    // Enqueue one scan_sources job per enabled county. Job priority is set from
+    // state_tax_rates.priority_rank so high-tax states (CA, NY, NJ, OR…) and
+    // federal-only targets (FL, TX) drain BEFORE everything else.
     setRunning(true);
     try {
-      const { data: counties, error: cErr } = await supabase
-        .from("counties").select("id").eq("enabled", true);
+      const [{ data: counties, error: cErr }, { data: rates }] = await Promise.all([
+        supabase.from("counties").select("id, state").eq("enabled", true),
+        supabase.from("state_tax_rates").select("state, priority_rank, is_target"),
+      ]);
       if (cErr) throw cErr;
+      const rankByState = new Map<string, number>();
+      for (const r of rates ?? []) rankByState.set(r.state, r.priority_rank ?? 99);
       const rows = (counties ?? []).map((c) => ({
-        kind: "scan_sources", county_id: c.id, priority: 100,
+        kind: "scan_sources",
+        county_id: c.id,
+        priority: (rankByState.get(c.state) ?? 99) * 10,
       }));
       if (!rows.length) { toast.error("No enabled counties."); return; }
       const { error } = await supabase.from("pipeline_jobs").insert(rows);
       if (error) throw error;
-      toast.success(`Queued ${rows.length} county scans — results will appear over the next few minutes.`);
+      toast.success(`Queued ${rows.length} county scans — high-tax states first.`);
       qc.invalidateQueries({ queryKey: ["counties"] });
       qc.invalidateQueries({ queryKey: ["leads"] });
       qc.invalidateQueries({ queryKey: ["pipeline-job-counts"] });

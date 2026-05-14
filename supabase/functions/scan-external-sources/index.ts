@@ -239,20 +239,28 @@ Deno.serve(async (req) => {
 
   // ---- Bootstrap mode: fan out one job per (state × source) ----
   if (body.enqueue) {
-    const { data: counties } = await supabase
-      .from("counties").select("state, county").eq("enabled", true);
+    const [{ data: counties }, { data: rates }] = await Promise.all([
+      supabase.from("counties").select("state, county").eq("enabled", true),
+      supabase.from("state_tax_rates").select("state, priority_rank, is_target"),
+    ]);
     const byState = new Map<string, string[]>();
     for (const c of counties ?? []) {
       if (!byState.has(c.state)) byState.set(c.state, []);
       byState.get(c.state)!.push(c.county);
     }
+    const rankByState = new Map<string, number>();
+    for (const r of rates ?? []) rankByState.set(r.state, r.priority_rank ?? 99);
     const rows: any[] = [];
     for (const [state] of byState) {
+      const rank = rankByState.get(state) ?? 99;
       for (const source of SOURCES) {
+        // Commercial drains first within each state. State priority then sets the
+        // per-state band: CA commercial (10+0) < NY commercial (20+0) < FL court (120+10) < ...
+        const sourceOffset = source === "commercial" ? 0 : source === "residential" ? 5 : 10;
         rows.push({
           kind: "scan_external",
           payload: { state, source },
-          priority: source === "commercial" ? 90 : 110,
+          priority: rank * 10 + sourceOffset,
         });
       }
     }

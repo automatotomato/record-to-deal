@@ -11,8 +11,19 @@ const corsHeaders = {
 };
 
 const FEDERAL_LTCG_RATE = 0.238;
+// Default seller cost basis when assessed_value is missing — 40% of sale price.
+// Real basis is usually unknown for off-market sellers; this errs on the side of
+// implying a meaningful gain so we don't under-pitch tax exposure.
+const DEFAULT_BASIS_PCT = 0.40;
 
-interface StateRate { state: string; ltcg_rate: number; surcharge: number; is_high_tax: boolean; }
+interface StateRate {
+  state: string;
+  ltcg_rate: number;
+  surcharge: number;
+  is_high_tax: boolean;
+  is_target: boolean;
+  priority_rank: number;
+}
 type Tier = "CRITICAL" | "URGENT" | "ACTIVE" | "FOLLOW_UP" | "EXPIRED" | "DISQUALIFIED";
 
 function daysSince(d?: string | null): number | null {
@@ -54,6 +65,8 @@ interface ScoreOut {
   fed_capital_gains_estimate: number | null;
   state_capital_gains_estimate: number | null;
   total_tax_exposure: number | null;
+  actual_capital_gain: number | null;
+  effective_tax_rate: number | null;
   disqualified: boolean;
   needs_review: boolean;
 }
@@ -157,10 +170,13 @@ function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
   breakdown.sale_price = ps;
   if (sp > 0) reasons.push(`sale price $${Math.round(sp / 1000)}k`);
 
-  // High-tax state (max 10)
-  const ht = isHighTax ? 10 : 0;
+  // High-tax state (max 15) — bumped from 10. Federal-only target (FL/TX) gets +8.
+  let ht = 0;
+  if (isHighTax) ht = 15;
+  else if (stateRate?.is_target) ht = 8;
   breakdown.high_tax_state = ht;
-  if (isHighTax) reasons.push(`in ${lead.state} (high tax)`);
+  if (isHighTax) reasons.push(`in ${lead.state} (high state tax)`);
+  else if (stateRate?.is_target) reasons.push(`in ${lead.state} (federal-only target market)`);
 
   // Outreach contactability (max 15)
   let cc = 0;
@@ -177,40 +193,51 @@ function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
 
   const total = recency + pt + ot + ps + ht + cc + sc;
 
-  // --- Tier from sale-recency window ---
+  // --- Tier from sale-recency window + state targeting ---
+  // URGENT now REQUIRES is_high_tax. Federal-only targets (FL/TX) max out at CRITICAL.
   let tier: Tier = "EXPIRED";
   let urgent = false;
   const strongFit = INVESTMENT_TYPES.has(propType) || ENTITY_OWNERS.has(ownerType) || sp >= 1_000_000;
   if (days != null) {
-    if (days <= 30 && cc > 0 && strongFit) { tier = "URGENT"; urgent = true; }
-    else if (days <= 45 && cc > 0 && strongFit) { tier = "CRITICAL"; urgent = true; }
-    else if (days <= 90 && strongFit) tier = "ACTIVE";
-    else if (days <= 180) tier = "FOLLOW_UP";
-    else tier = "EXPIRED";
-  }
-  // If contactability missing but window-eligible, still qualify but note missing
-  if (!cc && (days != null && days <= 90) && strongFit) {
-    tier = "ACTIVE";
-    urgent = false;
-    reasons.push("contact info pending — needs enrichment");
+    if (isHighTax && days <= 30 && sp >= 1_000_000 && strongFit) {
+      tier = "URGENT"; urgent = true;
+    } else if (isHighTax && days <= 45 && strongFit) {
+      tier = "CRITICAL"; urgent = true;
+    } else if (stateRate?.is_target && days <= 30 && sp >= 1_000_000 && strongFit) {
+      // Federal-only target market with very fresh + large sale → CRITICAL, not URGENT
+      tier = "CRITICAL"; urgent = false;
+    } else if (days <= 90 && strongFit) {
+      tier = "ACTIVE";
+    } else if (days <= 180) {
+      tier = "FOLLOW_UP";
+    } else {
+      tier = "EXPIRED";
+    }
   }
 
-  // Tax math
+  // Tax math — fix: actual_capital_gain is the GAIN (sale - basis), not the tax owed.
+  // capital_gains_estimate kept as alias for actual_capital_gain for back-compat.
+  // total_tax_exposure stays as fed + state tax owed.
   const stateTotalRate = stateRate ? stateRate.ltcg_rate + stateRate.surcharge : null;
   const fmv = lead.assessed_value ?? 0;
-  let gain = 0;
-  if (fmv > 0 && sp > 0 && fmv > sp) gain = fmv - sp;
-  else if (sp > 0) gain = sp * 0.6;
+  let basis = 0;
+  if (fmv > 0 && sp > 0 && fmv < sp) basis = fmv;          // assessed value as basis
+  else if (sp > 0) basis = Math.round(sp * DEFAULT_BASIS_PCT);
+  const gain = sp > basis ? sp - basis : 0;
   const fed = gain > 0 ? Math.round(gain * FEDERAL_LTCG_RATE) : null;
   const stateTax = gain > 0 && stateTotalRate != null ? Math.round(gain * stateTotalRate) : null;
   const totalTax = (fed ?? 0) + (stateTax ?? 0) || null;
+  const effectiveRate = gain > 0 && totalTax ? +(totalTax / gain).toFixed(4) : null;
 
   const reason = `Qualified because ${reasons.join(", ")}.`;
   return {
     score: total, tier, is_urgent: urgent, reason, breakdown,
     days_since_sale: days, state_tax_rate: stateTotalRate,
     fed_capital_gains_estimate: fed, state_capital_gains_estimate: stateTax,
-    total_tax_exposure: totalTax, disqualified: false, needs_review: false,
+    total_tax_exposure: totalTax,
+    actual_capital_gain: gain || null,
+    effective_tax_rate: effectiveRate,
+    disqualified: false, needs_review: false,
   };
 }
 
@@ -220,7 +247,8 @@ function disq(reason: string, days: number | null, sr: StateRate | null): ScoreO
     breakdown: {}, days_since_sale: days,
     state_tax_rate: sr ? sr.ltcg_rate + sr.surcharge : null,
     fed_capital_gains_estimate: null, state_capital_gains_estimate: null,
-    total_tax_exposure: null, disqualified: true, needs_review: false,
+    total_tax_exposure: null, actual_capital_gain: null, effective_tax_rate: null,
+    disqualified: true, needs_review: false,
   };
 }
 function needsReview(reason: string, days: number | null, sr: StateRate | null): ScoreOut {
@@ -229,7 +257,8 @@ function needsReview(reason: string, days: number | null, sr: StateRate | null):
     breakdown: {}, days_since_sale: days,
     state_tax_rate: sr ? sr.ltcg_rate + sr.surcharge : null,
     fed_capital_gains_estimate: null, state_capital_gains_estimate: null,
-    total_tax_exposure: null, disqualified: false, needs_review: true,
+    total_tax_exposure: null, actual_capital_gain: null, effective_tax_rate: null,
+    disqualified: false, needs_review: true,
   };
 }
 
@@ -255,7 +284,7 @@ Deno.serve(async (req) => {
 
   const { data: rate } = await supabase
     .from("state_tax_rates")
-    .select("state, ltcg_rate, surcharge, is_high_tax")
+    .select("state, ltcg_rate, surcharge, is_high_tax, is_target, priority_rank")
     .eq("state", lead.state)
     .maybeSingle();
 
@@ -275,8 +304,12 @@ Deno.serve(async (req) => {
     state_tax_rate: r.state_tax_rate,
     fed_capital_gains_estimate: r.fed_capital_gains_estimate,
     state_capital_gains_estimate: r.state_capital_gains_estimate,
-    capital_gains_estimate: (r.fed_capital_gains_estimate ?? 0) + (r.state_capital_gains_estimate ?? 0) || null,
+    // Realigned: capital_gains_estimate now stores the actual gain (sale - basis).
+    // total_tax_exposure stays as fed + state tax owed.
+    capital_gains_estimate: r.actual_capital_gain,
+    actual_capital_gain: r.actual_capital_gain,
     total_tax_exposure: r.total_tax_exposure,
+    effective_tax_rate: r.effective_tax_rate,
     has_contact: isAnyContact(lead),
     has_outreach_contact: isOutreachContact(lead),
     pipeline_stage: stage,

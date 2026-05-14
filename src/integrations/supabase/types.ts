@@ -149,6 +149,7 @@ export type Database = {
       }
       leads: {
         Row: {
+          actual_capital_gain: number | null
           ai_brief: Json | null
           ai_brief_generated_at: string | null
           assessed_value: number | null
@@ -173,6 +174,7 @@ export type Database = {
           depreciation_recapture_est: number | null
           discovery_confidence_by_field: Json
           discovery_status: string
+          effective_tax_rate: number | null
           enrichment_confidence: number
           enrichment_payload: Json
           entity_registry_url: string | null
@@ -191,6 +193,9 @@ export type Database = {
           next_action: string | null
           next_action_at: string | null
           notes: string | null
+          outreach_next_step_at: string | null
+          outreach_sequence_id: string | null
+          outreach_step_index: number
           owner_name: string | null
           owner_type: Database["public"]["Enums"]["owner_type"] | null
           ownership_years: number | null
@@ -224,8 +229,10 @@ export type Database = {
           trigger_event: Database["public"]["Enums"]["trigger_event"] | null
           updated_at: string
           wealth_signals: Json | null
+          wealth_tier: string
         }
         Insert: {
+          actual_capital_gain?: number | null
           ai_brief?: Json | null
           ai_brief_generated_at?: string | null
           assessed_value?: number | null
@@ -250,6 +257,7 @@ export type Database = {
           depreciation_recapture_est?: number | null
           discovery_confidence_by_field?: Json
           discovery_status?: string
+          effective_tax_rate?: number | null
           enrichment_confidence?: number
           enrichment_payload?: Json
           entity_registry_url?: string | null
@@ -268,6 +276,9 @@ export type Database = {
           next_action?: string | null
           next_action_at?: string | null
           notes?: string | null
+          outreach_next_step_at?: string | null
+          outreach_sequence_id?: string | null
+          outreach_step_index?: number
           owner_name?: string | null
           owner_type?: Database["public"]["Enums"]["owner_type"] | null
           ownership_years?: number | null
@@ -301,8 +312,10 @@ export type Database = {
           trigger_event?: Database["public"]["Enums"]["trigger_event"] | null
           updated_at?: string
           wealth_signals?: Json | null
+          wealth_tier?: string
         }
         Update: {
+          actual_capital_gain?: number | null
           ai_brief?: Json | null
           ai_brief_generated_at?: string | null
           assessed_value?: number | null
@@ -327,6 +340,7 @@ export type Database = {
           depreciation_recapture_est?: number | null
           discovery_confidence_by_field?: Json
           discovery_status?: string
+          effective_tax_rate?: number | null
           enrichment_confidence?: number
           enrichment_payload?: Json
           entity_registry_url?: string | null
@@ -345,6 +359,9 @@ export type Database = {
           next_action?: string | null
           next_action_at?: string | null
           notes?: string | null
+          outreach_next_step_at?: string | null
+          outreach_sequence_id?: string | null
+          outreach_step_index?: number
           owner_name?: string | null
           owner_type?: Database["public"]["Enums"]["owner_type"] | null
           ownership_years?: number | null
@@ -378,6 +395,7 @@ export type Database = {
           trigger_event?: Database["public"]["Enums"]["trigger_event"] | null
           updated_at?: string
           wealth_signals?: Json | null
+          wealth_tier?: string
         }
         Relationships: [
           {
@@ -444,6 +462,125 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      outreach_sequences: {
+        Row: {
+          audience: string
+          created_at: string
+          description: string | null
+          id: string
+          is_active: boolean
+          key: string
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          audience: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          key: string
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          audience?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          key?: string
+          name?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      outreach_steps: {
+        Row: {
+          branch_condition: string | null
+          channel: string
+          created_at: string
+          delay_days: number
+          id: string
+          notes: string | null
+          sequence_id: string
+          step_index: number
+          template_key: string
+        }
+        Insert: {
+          branch_condition?: string | null
+          channel: string
+          created_at?: string
+          delay_days?: number
+          id?: string
+          notes?: string | null
+          sequence_id: string
+          step_index: number
+          template_key: string
+        }
+        Update: {
+          branch_condition?: string | null
+          channel?: string
+          created_at?: string
+          delay_days?: number
+          id?: string
+          notes?: string | null
+          sequence_id?: string
+          step_index?: number
+          template_key?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "outreach_steps_sequence_id_fkey"
+            columns: ["sequence_id"]
+            isOneToOne: false
+            referencedRelation: "outreach_sequences"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      outreach_touches: {
+        Row: {
+          channel: string
+          created_at: string
+          id: string
+          lead_id: string
+          outreach_email_id: string | null
+          payload: Json
+          sequence_id: string
+          status: string
+          step_index: number
+          template_key: string
+          updated_at: string
+        }
+        Insert: {
+          channel: string
+          created_at?: string
+          id?: string
+          lead_id: string
+          outreach_email_id?: string | null
+          payload?: Json
+          sequence_id: string
+          status?: string
+          step_index: number
+          template_key: string
+          updated_at?: string
+        }
+        Update: {
+          channel?: string
+          created_at?: string
+          id?: string
+          lead_id?: string
+          outreach_email_id?: string | null
+          payload?: Json
+          sequence_id?: string
+          status?: string
+          step_index?: number
+          template_key?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       pipeline_jobs: {
         Row: {
@@ -571,8 +708,10 @@ export type Database = {
       state_tax_rates: {
         Row: {
           is_high_tax: boolean
+          is_target: boolean
           ltcg_rate: number
           notes: string | null
+          priority_rank: number
           state: string
           state_name: string
           surcharge: number
@@ -580,8 +719,10 @@ export type Database = {
         }
         Insert: {
           is_high_tax?: boolean
+          is_target?: boolean
           ltcg_rate?: number
           notes?: string | null
+          priority_rank?: number
           state: string
           state_name: string
           surcharge?: number
@@ -589,8 +730,10 @@ export type Database = {
         }
         Update: {
           is_high_tax?: boolean
+          is_target?: boolean
           ltcg_rate?: number
           notes?: string | null
+          priority_rank?: number
           state?: string
           state_name?: string
           surcharge?: number
