@@ -24,8 +24,8 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
-    const aiKey = Deno.env.get("OPENAI_API_KEY");
-    if (!aiKey) return jsonErr("OPENAI_API_KEY missing", 500);
+    const aiKey = Deno.env.get("LOVABLE_API_KEY");
+    if (!aiKey) return jsonErr("LOVABLE_API_KEY missing", 500);
 
     const body = await req.json().catch(() => ({}));
     let leadId = body?.lead_id;
@@ -57,7 +57,6 @@ Deno.serve(async (req) => {
       assessed_value: lead.assessed_value ? fmtMoney(lead.assessed_value) : null,
       owner_name: lead.owner_name,
       owner_type: lead.owner_type,
-      mailing_address: lead.mailing_address,
       decision_maker_name: lead.decision_maker_name,
       decision_maker_role: lead.decision_maker_role,
       decision_maker_email: lead.decision_maker_email,
@@ -95,14 +94,15 @@ Return concise, specific, agent-ready prose. No fluff, no marketing language. If
   "best_next_action": "1 sentence: the single most effective next step the agent should take right now (e.g. 'Call John at 702-555-1234 mentioning the depreciation recapture exposure')."
 }`;
 
-    const r = await fetch("https://api.openai.com/v1/chat/completions", {
+    const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${aiKey}`,
+        "Lovable-API-Key": aiKey,
+        "X-Lovable-AIG-SDK": "vercel-ai-sdk",
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
+        model: "google/gemini-3-flash-preview",
         messages: [
           { role: "system", content: sys },
           { role: "user", content: user },
@@ -113,9 +113,9 @@ Return concise, specific, agent-ready prose. No fluff, no marketing language. If
 
     if (!r.ok) {
       const txt = await r.text();
-      if (r.status === 429) return jsonErr("OpenAI rate limited — try again shortly", 429);
-      if (r.status === 401) return jsonErr("OpenAI key invalid", 401);
-      return jsonErr(`OpenAI: ${txt}`, 500);
+      if (r.status === 429) return jsonErr("AI gateway rate limited — try again shortly", 429);
+      if (r.status === 402) return jsonErr("AI gateway credits exhausted — top up workspace", 402);
+      return jsonErr(`AI gateway: ${txt}`, 500);
     }
 
     const data = await r.json();

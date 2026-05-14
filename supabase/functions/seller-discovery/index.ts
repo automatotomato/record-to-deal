@@ -1,10 +1,10 @@
 // Seller Discovery agent — dedicated multi-pass contact hunt for one lead.
-// Passes:
+// Passes (Apollo removed — Gemini grounded search + Firecrawl scraping only):
 //   1. Entity unmask (OpenCorporates + state SoS via Firecrawl)
-//   2. Person identity (LinkedIn / RocketReach / ZoomInfo / Bizapedia / Crunchbase)
-//   3. Company website discovery
-//   4. Apollo.io people/match + organization people search
-//   5. Gemini grounded public-contact hunt (non-Apollo fallback)
+//   2. Person identity (LinkedIn / RocketReach / ZoomInfo / Bizapedia)
+//   3. Company website discovery + homepage/contact scrape
+//   4. Source record scrape (broker/listing pages)
+//   5. Gemini grounded public-contact hunt (Google Search)
 //   6. Personal contact scrape (regex + scoring)
 //   7. AI consolidation (Gemini picks best per field with confidence)
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
@@ -16,12 +16,11 @@ const corsHeaders = {
 };
 
 const FC_V2 = "https://api.firecrawl.dev/v2";
-const APOLLO = "https://api.apollo.io/api/v1";
 const AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
 const AI_MODEL = "google/gemini-3-flash-preview";
 
 // Per-call budget so a single lead can't burn the day's quota
-const BUDGET = { firecrawl: 12, apollo: 7, ai: 2 };
+const BUDGET = { firecrawl: 15, ai: 3 };
 
 const STATE_NAMES: Record<string, string> = {
   AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
@@ -68,9 +67,8 @@ function setField(d: Discovery, field: keyof Discovery, value: any, score: numbe
 }
 
 class Budget {
-  constructor(public fc = 0, public apollo = 0, public ai = 0) {}
+  constructor(public fc = 0, public ai = 0) {}
   canFc() { return this.fc < BUDGET.firecrawl; }
-  canApollo() { return this.apollo < BUDGET.apollo; }
   canAi() { return this.ai < BUDGET.ai; }
 }
 
@@ -111,13 +109,6 @@ async function fcScrape(url: string, key: string, budget: Budget): Promise<strin
   } catch (_) { return null; }
 }
 
-const APOLLO_HEADERS = (key: string) => ({
-  "X-Api-Key": key,
-  "Content-Type": "application/json",
-  "Accept": "application/json",
-  "Cache-Control": "no-cache",
-});
-
 const GATEWAY_HEADERS = (key: string) => ({
   "Lovable-API-Key": key,
   "X-Lovable-AIG-SDK": "vercel-ai-sdk",
@@ -128,110 +119,6 @@ function isUnlockedEmail(e?: string | null): boolean {
   if (!e) return false;
   if (!/[^@\s]+@[^@\s]+\.[a-z]{2,}/i.test(e)) return false;
   return !/email_not_unlocked|domain\.com$|@apollo-locked/i.test(e);
-}
-
-// People match: best when we have first+last+domain. Returns single person.
-async function apolloMatch(
-  domain: string, first: string, last: string, key: string, budget: Budget, phoneWebhookUrl?: string,
-) {
-  if (!budget.canApollo()) return null;
-  budget.apollo++;
-  try {
-    const r = await fetch(`${APOLLO}/people/match`, {
-      method: "POST",
-      headers: APOLLO_HEADERS(key),
-      body: JSON.stringify({
-        first_name: first,
-        last_name: last,
-        domain,
-        // Spend a credit to actually unlock the email — without this Apollo
-        // returns "email_not_unlocked@domain.com" and we drop it downstream.
-        reveal_personal_emails: true,
-        ...(phoneWebhookUrl ? { reveal_phone_number: true, webhook_url: phoneWebhookUrl } : {}),
-      }),
-    });
-    if (!r.ok) {
-      console.warn(`apollo match ${r.status}: ${(await r.text()).slice(0, 200)}`);
-      return null;
-    }
-    return await r.json();
-  } catch (e) { console.warn("apollo match threw", e); return null; }
-}
-
-async function apolloRevealByHints(
-  opts: {
-    first?: string | null;
-    last?: string | null;
-    name?: string | null;
-    linkedin?: string | null;
-    domain?: string | null;
-    organizationName?: string | null;
-    city?: string | null;
-    state?: string | null;
-  },
-  key: string,
-  budget: Budget,
-  phoneWebhookUrl?: string,
-) {
-  if (!budget.canApollo()) return null;
-  const hasIdentity = (opts.first && opts.last) || opts.name || opts.linkedin;
-  if (!hasIdentity) return null;
-  budget.apollo++;
-  const body: Record<string, unknown> = {
-    reveal_personal_emails: true,
-  };
-  if (phoneWebhookUrl) {
-    body.reveal_phone_number = true;
-    body.webhook_url = phoneWebhookUrl;
-  }
-  if (opts.first) body.first_name = opts.first;
-  if (opts.last) body.last_name = opts.last;
-  if (opts.name && (!opts.first || !opts.last)) body.name = opts.name;
-  if (opts.linkedin) body.linkedin_url = opts.linkedin;
-  if (opts.domain) body.domain = opts.domain;
-  if (opts.organizationName) body.organization_name = opts.organizationName;
-  if (opts.city) body.city = opts.city;
-  if (opts.state) body.state = opts.state;
-
-  try {
-    const r = await fetch(`${APOLLO}/people/match`, {
-      method: "POST",
-      headers: APOLLO_HEADERS(key),
-      body: JSON.stringify(body),
-    });
-    if (!r.ok) {
-      console.warn(`apollo reveal ${r.status}: ${(await r.text()).slice(0, 200)}`);
-      return null;
-    }
-    const data = await r.json();
-    return data?.person ?? data?.matched_person ?? null;
-  } catch (e) { console.warn("apollo reveal threw", e); return null; }
-}
-
-// Org-wide search by domain — pulls decision-maker titles.
-async function apolloOrgPeople(domain: string, key: string, budget: Budget) {
-  if (!budget.canApollo()) return null;
-  budget.apollo++;
-  try {
-    const r = await fetch(`${APOLLO}/mixed_people/search`, {
-      method: "POST",
-      headers: APOLLO_HEADERS(key),
-      body: JSON.stringify({
-        q_organization_domains_list: [domain],
-        person_titles: [
-          "owner", "principal", "managing member", "manager",
-          "president", "ceo", "founder", "partner", "director",
-        ],
-        page: 1,
-        per_page: 10,
-      }),
-    });
-    if (!r.ok) {
-      console.warn(`apollo search ${r.status}: ${(await r.text()).slice(0, 200)}`);
-      return null;
-    }
-    return await r.json();
-  } catch (e) { console.warn("apollo search threw", e); return null; }
 }
 
 function pickHostFromUrl(url: string): string | null {
@@ -289,21 +176,7 @@ function splitLinkedInName(url: string | null): { first: string; last: string } 
   return { first: cap(parts[0]), last: parts.slice(1).map(cap).join(" ") };
 }
 
-function applyApolloPerson(d: Discovery, p: any, source: string) {
-  if (!p) return;
-  const email = isUnlockedEmail(p.email) ? p.email
-    : (p.personal_emails ?? []).find((e: string) => isUnlockedEmail(e));
-  if (email) setField(d, "email", email, 90, source);
-  const phoneList = p.phone_numbers ?? [];
-  const ph = Array.isArray(phoneList)
-    ? phoneList[0]?.sanitized_number ?? phoneList[0]?.raw_number
-    : null;
-  const phone = ph ?? p.mobile_phone ?? p.phone_number;
-  if (phone) setField(d, "phone", phone, 75, source);
-  if (!d.name && (p.first_name || p.last_name)) setField(d, "name", `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim(), 70, source);
-  if (!d.role && p.title) setField(d, "role", p.title, 65, source);
-  if (!d.linkedin && p.linkedin_url) setField(d, "linkedin", p.linkedin_url, 75, source);
-}
+
 
 function acceptScrapedEmail(email: string, score: number, name: string | null, domain: string | null): boolean {
   if (!isUnlockedEmail(email) || score <= 0) return false;
@@ -463,9 +336,7 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const fcKey = Deno.env.get("FIRECRAWL_API_KEY");
-  const apolloKey = Deno.env.get("APOLLO_API_KEY");
   const lovableKey = Deno.env.get("LOVABLE_API_KEY");
-  const phoneWebhookUrl = `${supabaseUrl}/functions/v1/apollo-phone-webhook`;
 
   if (!fcKey || !lovableKey) {
     return new Response(JSON.stringify({ error: "FIRECRAWL_API_KEY and LOVABLE_API_KEY are required" }), {
@@ -504,7 +375,7 @@ Deno.serve(async (req) => {
   }
 
   // Cache: only skip when we already have a real email/phone. A LinkedIn-only
-  // partial needs another pass because Apollo can often reveal contact details.
+  // partial needs another pass because Gemini search may now succeed.
   if (!body.force && !body.company_website && lead.discovery_status === "reachable" && (isUnlockedEmail(lead.decision_maker_email) || lead.decision_maker_phone)) {
     return new Response(JSON.stringify({ ok: true, cached: true, status: lead.discovery_status }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -653,73 +524,8 @@ Deno.serve(async (req) => {
     }
   }
 
-  // ============ PASS 4 — Apollo.io ============
-  if (apolloKey) {
-    d.passes.apollo = true;
-    // People match first if we have a name + domain.
-    const split = splitName(targetName) ?? splitLinkedInName(d.linkedin);
-    if (domain && split) {
-      const matched = await apolloMatch(domain, split.first, split.last, apolloKey, budget, phoneWebhookUrl);
-      const p = matched?.person ?? matched?.matched_person ?? null;
-      if (p) {
-        applyApolloPerson(d, p, "apollo.match");
-        d.sources.push("apollo.io");
-      }
-    }
-    // LinkedIn/name/location reveal: this catches the common case where Firecrawl
-    // found a profile but no official company domain was discovered.
-    if (!d.email || !d.phone) {
-      const revealed = await apolloRevealByHints({
-        first: split?.first,
-        last: split?.last,
-        name: targetName,
-        linkedin: d.linkedin,
-        domain,
-        organizationName: entity ? ownerName : null,
-        city,
-        state,
-      }, apolloKey, budget, phoneWebhookUrl);
-      if (revealed) {
-        applyApolloPerson(d, revealed, "apollo.reveal");
-        d.sources.push("apollo.io");
-      }
-    }
-    // Org-wide search as broader fallback to find any decision-maker.
-    if (domain && !d.email) {
-      const search = await apolloOrgPeople(domain, apolloKey, budget);
-      const people: any[] = search?.people ?? [];
-      const ranked = [...people].sort((a, b) => {
-        const w = (e: any) => (/owner|principal|manager|president|ceo|founder|partner/i.test(`${e.title ?? ""} ${e.seniority ?? ""}`) ? 1 : 0);
-        return w(b) - w(a);
-      });
-      // Prefer someone we can actually unlock (has first+last name)
-      const pick = ranked.find((x) => x.first_name && x.last_name) ?? ranked[0];
-      if (pick) {
-        // Org search returns locked emails. Run a /people/match with reveal=true
-        // to actually unlock the address.
-        let unlockedEmail: string | null = null;
-        if (pick.first_name && pick.last_name) {
-          const matched = await apolloMatch(domain, pick.first_name, pick.last_name, apolloKey, budget, phoneWebhookUrl);
-          const mp = matched?.person ?? matched?.matched_person ?? null;
-          applyApolloPerson(d, mp, "apollo.match");
-          if (mp && isUnlockedEmail(mp.email)) unlockedEmail = mp.email;
-        }
-        if (unlockedEmail) {
-          setField(d, "email", unlockedEmail, 85, "apollo.match");
-        } else if (isUnlockedEmail(pick.email)) {
-          setField(d, "email", pick.email, 80, "apollo.search");
-        }
-        if (!d.name && (pick.first_name || pick.last_name)) {
-          setField(d, "name", `${pick.first_name ?? ""} ${pick.last_name ?? ""}`.trim(), 65, "apollo");
-        }
-        if (!d.role && pick.title) setField(d, "role", pick.title, 60, "apollo");
-        if (!d.linkedin && pick.linkedin_url) setField(d, "linkedin", pick.linkedin_url, 65, "apollo");
-        d.sources.push("apollo.io");
-      }
-    }
-  }
 
-  // ============ PASS 5 — Gemini grounded public-contact hunt ============
+  // ============ PASS 4 — Gemini grounded public-contact hunt ============
   if ((!d.email || !d.phone) && lovableKey) {
     d.passes.gemini_public_contact = true;
     const publicHit = await geminiPublicContactHunt(lead, targetName, entity, lovableKey, budget);
@@ -744,7 +550,7 @@ Deno.serve(async (req) => {
     }
   }
 
-  // ============ PASS 6 — Personal contact scrape (regex + scoring) ============
+  // ============ PASS 5 — Personal contact scrape (regex + scoring) ============
   if (!d.email || !d.phone) {
     d.passes.scrape = true;
     if (targetName) {
@@ -773,7 +579,7 @@ Deno.serve(async (req) => {
     }
   }
 
-  // ============ PASS 7 — AI consolidation ============
+  // ============ PASS 6 — AI consolidation ============
   if (evidence.length && (!d.email || !d.linkedin || !d.name)) {
     d.passes.ai_consolidate = true;
     const blob = evidence.join("\n---\n");
@@ -862,7 +668,7 @@ Deno.serve(async (req) => {
   await supabase.from("lead_activities").insert({
     lead_id: leadId,
     kind: "seller_discovery",
-    summary: `Discovery: ${status}${d.email ? ` · email ✓` : ""}${d.phone ? " · phone ✓" : ""}${d.linkedin ? " · LinkedIn ✓" : ""} · used ${budget.fc} FC + ${budget.apollo} Apollo + ${budget.ai} AI`,
+    summary: `Discovery: ${status}${d.email ? ` · email ✓` : ""}${d.phone ? " · phone ✓" : ""}${d.linkedin ? " · LinkedIn ✓" : ""} · used ${budget.fc} FC + ${budget.ai} AI`,
     payload: { discovery: d, budget_used: budget },
   });
 
