@@ -140,7 +140,6 @@ async function apolloMatch(
         // Spend a credit to actually unlock the email — without this Apollo
         // returns "email_not_unlocked@domain.com" and we drop it downstream.
         reveal_personal_emails: true,
-        reveal_phone_number: true,
       }),
     });
     if (!r.ok) {
@@ -171,7 +170,7 @@ async function apolloRevealByHints(
   budget.apollo++;
   const body: Record<string, unknown> = {
     reveal_personal_emails: true,
-    reveal_phone_number: true,
+    // phone reveal requires async webhook_url on Apollo — omitted
   };
   if (opts.first) body.first_name = opts.first;
   if (opts.last) body.last_name = opts.last;
