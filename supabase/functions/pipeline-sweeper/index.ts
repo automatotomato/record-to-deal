@@ -87,6 +87,47 @@ Deno.serve(async (req) => {
     }
   }
 
+  // 2d) Leads in seller-discovery limbo (needs_review, no recent discovery job)
+  const { data: needDiscovery } = await supabase
+    .from("leads")
+    .select("id")
+    .eq("pipeline_stage", "needs_review")
+    .in("tier", ["URGENT", "CRITICAL", "ACTIVE", "HOT", "WARM"])
+    .limit(STAGE_CAP);
+  for (const r of needDiscovery ?? []) {
+    const { count } = await supabase.from("pipeline_jobs")
+      .select("id", { count: "exact", head: true })
+      .eq("lead_id", r.id)
+      .eq("kind", "seller_discovery")
+      .in("status", ["queued", "retry", "running"]);
+    if ((count ?? 0) === 0) {
+      await supabase.from("pipeline_jobs").insert({ kind: "seller_discovery", lead_id: r.id, priority: 60 });
+      summary.re_discovered += 1;
+    }
+  }
+
+  // 2e) Qualified leads missing AI brief — re-enqueue regardless of contact info
+  const briefStaleCutoff = new Date(Date.now() - BRIEF_STALE_MIN * 60_000).toISOString();
+  const { data: needBrief } = await supabase
+    .from("leads")
+    .select("id")
+    .is("ai_brief", null)
+    .in("tier", ["URGENT", "CRITICAL", "ACTIVE", "HOT", "WARM"])
+    .not("pipeline_stage", "in", "(discovered,scoring,disqualified,expired)")
+    .lt("updated_at", briefStaleCutoff)
+    .limit(STAGE_CAP);
+  for (const r of needBrief ?? []) {
+    const { count } = await supabase.from("pipeline_jobs")
+      .select("id", { count: "exact", head: true })
+      .eq("lead_id", r.id)
+      .eq("kind", "lead_brief")
+      .in("status", ["queued", "retry", "running"]);
+    if ((count ?? 0) === 0) {
+      await supabase.from("pipeline_jobs").insert({ kind: "lead_brief", lead_id: r.id, priority: 75 });
+      summary.re_briefed += 1;
+    }
+  }
+
   // 3) Expire 180+ day sales
   const expiredCutoff = new Date(Date.now() - 180 * 86_400_000).toISOString().slice(0, 10);
   const { data: expiredRows } = await supabase
