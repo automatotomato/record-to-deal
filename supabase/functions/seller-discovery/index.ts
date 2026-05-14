@@ -525,7 +525,7 @@ Deno.serve(async (req) => {
   }
 
 
-  // ============ PASS 5 — Gemini grounded public-contact hunt ============
+  // ============ PASS 4 — Gemini grounded public-contact hunt ============
   if ((!d.email || !d.phone) && lovableKey) {
     d.passes.gemini_public_contact = true;
     const publicHit = await geminiPublicContactHunt(lead, targetName, entity, lovableKey, budget);
@@ -550,7 +550,7 @@ Deno.serve(async (req) => {
     }
   }
 
-  // ============ PASS 6 — Personal contact scrape (regex + scoring) ============
+  // ============ PASS 5 — Personal contact scrape (regex + scoring) ============
   if (!d.email || !d.phone) {
     d.passes.scrape = true;
     if (targetName) {
@@ -579,7 +579,7 @@ Deno.serve(async (req) => {
     }
   }
 
-  // ============ PASS 7 — AI consolidation ============
+  // ============ PASS 6 — AI consolidation ============
   if (evidence.length && (!d.email || !d.linkedin || !d.name)) {
     d.passes.ai_consolidate = true;
     const blob = evidence.join("\n---\n");
