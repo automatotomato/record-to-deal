@@ -28,8 +28,20 @@ Deno.serve(async (req) => {
     if (!aiKey) return jsonErr("OPENAI_API_KEY missing", 500);
 
     const body = await req.json().catch(() => ({}));
-    const leadId = body?.lead_id;
-    if (!leadId) return jsonErr("lead_id required", 400);
+    let leadId = body?.lead_id;
+    const jobId = body?.job_id;
+    if (!leadId && jobId) {
+      const { data: job } = await supabase.from("pipeline_jobs").select("lead_id").eq("id", jobId).maybeSingle();
+      leadId = job?.lead_id ?? null;
+    }
+    if (!leadId) {
+      if (jobId) {
+        await supabase.from("pipeline_jobs").update({
+          status: "failed", finished_at: new Date().toISOString(), last_error: "no lead_id",
+        }).eq("id", jobId);
+      }
+      return jsonErr("lead_id required", 400);
+    }
 
     const { data: lead, error } = await supabase.from("leads").select("*").eq("id", leadId).maybeSingle();
     if (error || !lead) return jsonErr("lead not found", 404);
