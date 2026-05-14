@@ -522,20 +522,6 @@ export const OutreachDashboard = () => {
                           </div>
                           <SellerIcons lead={l} />
                         </TableCell>
-                        <TableCell className="max-w-[220px]">
-                          {l.mailing_address ? (
-                            <div
-                              className="text-xs text-muted-foreground leading-snug"
-                              title={l.mailing_address}
-                            >
-                              {l.mailing_address}
-                            </div>
-                          ) : (
-                            <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">
-                              no address
-                            </Badge>
-                          )}
-                        </TableCell>
                         <TableCell className="text-right tabular font-mono text-sm">
                           {fmtMoney(l.sale_price, { compact: true })}
                         </TableCell>
