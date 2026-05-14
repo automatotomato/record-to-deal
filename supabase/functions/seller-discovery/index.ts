@@ -649,7 +649,32 @@ Deno.serve(async (req) => {
     }
   }
 
-  // ============ PASS 5 — Personal contact scrape (regex + scoring) ============
+  // ============ PASS 5 — Gemini grounded public-contact hunt ============
+  if ((!d.email || !d.phone) && lovableKey) {
+    d.passes.gemini_public_contact = true;
+    const publicHit = await geminiPublicContactHunt(lead, targetName, entity, lovableKey, budget);
+    if (publicHit && typeof publicHit === "object") {
+      const c = publicHit.confidence ?? {};
+      if (publicHit.name && looksLikePersonName(publicHit.name)) setField(d, "name", publicHit.name, c.name ?? 55, "gemini.public_search");
+      if (publicHit.role) setField(d, "role", publicHit.role, c.role ?? 45, "gemini.public_search");
+      if (isUnlockedEmail(publicHit.email)) setField(d, "email", publicHit.email, c.email ?? 65, "gemini.public_search");
+      if (publicHit.phone && String(publicHit.phone).replace(/\D/g, "").length >= 10) setField(d, "phone", publicHit.phone, c.phone ?? 55, "gemini.public_search");
+      if (publicHit.linkedin && /linkedin\.com\/in\//i.test(publicHit.linkedin)) setField(d, "linkedin", publicHit.linkedin, c.linkedin ?? 55, "gemini.public_search");
+      if (publicHit.company_website) {
+        const h = pickHostFromUrl(publicHit.company_website.startsWith("http") ? publicHit.company_website : `https://${publicHit.company_website}`);
+        if (h) setField(d, "company_website", h, c.company_website ?? 50, "gemini.public_search");
+      }
+      if (Array.isArray(publicHit.source_urls)) {
+        d.sources.push("gemini:public_search", ...publicHit.source_urls.filter((u: unknown) => typeof u === "string").slice(0, 5));
+        evidence.push(`GEMINI PUBLIC SEARCH\n${publicHit.source_urls.join("\n")}\n${publicHit.reasoning ?? ""}`);
+      } else {
+        d.sources.push("gemini:public_search");
+      }
+      if (publicHit.reasoning) d.notes.push(publicHit.reasoning);
+    }
+  }
+
+  // ============ PASS 6 — Personal contact scrape (regex + scoring) ============
   if (!d.email || !d.phone) {
     d.passes.scrape = true;
     if (targetName) {
@@ -678,11 +703,11 @@ Deno.serve(async (req) => {
     }
   }
 
-  // ============ PASS 6 — AI consolidation ============
+  // ============ PASS 7 — AI consolidation ============
   if (evidence.length && (!d.email || !d.linkedin || !d.name)) {
     d.passes.ai_consolidate = true;
     const blob = evidence.join("\n---\n");
-    const ai = await aiConsolidate(blob, openaiKey, budget);
+    const ai = await aiConsolidate(blob, lovableKey, budget);
     if (ai && typeof ai === "object") {
       const c = ai.confidence ?? {};
       if (ai.name) setField(d, "name", ai.name, c.name ?? 50, "ai");
@@ -695,7 +720,7 @@ Deno.serve(async (req) => {
         if (h) setField(d, "company_website", h, c.company_website ?? 50, "ai");
       }
       if (ai.reasoning) d.notes.push(ai.reasoning);
-      d.sources.push("openai");
+      d.sources.push("gemini:consolidate");
     }
   }
 
