@@ -705,6 +705,25 @@ Deno.serve(async (req) => {
     payload: { discovery: d, budget_used: budget },
   });
 
+  // Queue brief refresh now that discovery is done (so the drawer reflects it).
+  await supabase.from("pipeline_jobs").insert({
+    kind: "lead_brief", lead_id: leadId, priority: 80,
+  });
+
+  // If reachable and no draft exists yet, queue an outreach draft.
+  if (status === "reachable") {
+    await supabase.from("pipeline_jobs").insert({
+      kind: "draft_outreach", lead_id: leadId, priority: 70,
+    });
+  }
+
+  if (jobId) {
+    await supabase.from("pipeline_jobs").update({
+      status: "done", finished_at: new Date().toISOString(),
+      result: { status, has_email: !!d.email, has_phone: !!d.phone },
+    }).eq("id", jobId);
+  }
+
   return new Response(JSON.stringify({ ok: true, status, discovery: d, budget_used: budget }), {
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
