@@ -566,12 +566,12 @@ Deno.serve(async (req) => {
       }
       if (d.name) break;
     }
-  } else if (ownerName) {
+  } else if (isKnownOwnerName(ownerName)) {
     setField(d, "name", ownerName, 50, "deed");
     setField(d, "role", "Owner", 50, "deed");
   }
 
-  const targetName = d.name ?? ownerName;
+  const targetName = isKnownOwnerName(d.name) ? d.name : (isKnownOwnerName(ownerName) ? ownerName : null);
 
   // ============ PASS 2 — Person identity (LinkedIn + people-search) ============
   if (targetName) {
