@@ -94,14 +94,15 @@ Return concise, specific, agent-ready prose. No fluff, no marketing language. If
   "best_next_action": "1 sentence: the single most effective next step the agent should take right now (e.g. 'Call John at 702-555-1234 mentioning the depreciation recapture exposure')."
 }`;
 
-    const r = await fetch("https://api.openai.com/v1/chat/completions", {
+    const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${aiKey}`,
+        "Lovable-API-Key": aiKey,
+        "X-Lovable-AIG-SDK": "vercel-ai-sdk",
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
+        model: "google/gemini-3-flash-preview",
         messages: [
           { role: "system", content: sys },
           { role: "user", content: user },
@@ -112,9 +113,9 @@ Return concise, specific, agent-ready prose. No fluff, no marketing language. If
 
     if (!r.ok) {
       const txt = await r.text();
-      if (r.status === 429) return jsonErr("OpenAI rate limited — try again shortly", 429);
-      if (r.status === 401) return jsonErr("OpenAI key invalid", 401);
-      return jsonErr(`OpenAI: ${txt}`, 500);
+      if (r.status === 429) return jsonErr("AI gateway rate limited — try again shortly", 429);
+      if (r.status === 402) return jsonErr("AI gateway credits exhausted — top up workspace", 402);
+      return jsonErr(`AI gateway: ${txt}`, 500);
     }
 
     const data = await r.json();
