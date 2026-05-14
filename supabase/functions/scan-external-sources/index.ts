@@ -23,7 +23,7 @@ const corsHeaders = {
 };
 
 const AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
-const AI_MODEL = "google/gemini-3-flash-preview";
+const AI_MODEL = "openai/gpt-5.5";
 const HARD_BUDGET_MS = 50_000;
 
 type SourceKind = "commercial" | "residential" | "court" | "sec";
@@ -103,20 +103,19 @@ async function geminiGroundedExtract(
   const r = await fetch(AI_URL, {
     method: "POST",
     headers: GATEWAY_HEADERS(apiKey),
-    body: JSON.stringify({
-      model: AI_MODEL,
-      messages: [
-        { role: "system", content: "You return ONLY valid JSON. No prose, no markdown fences. Use Google Search to verify every transaction." },
-        { role: "user", content: prompt },
-      ],
-      // Gemini-style grounding tool, passed through Lovable AI gateway.
-      tools: [{ google_search: {} }],
-    }),
-  });
-  if (!r.ok) {
-    const txt = (await r.text()).slice(0, 300);
-    throw new Error(`gemini ${r.status}: ${txt}`);
-  }
+      body: JSON.stringify({
+        model: AI_MODEL,
+        messages: [
+          { role: "system", content: "You return ONLY valid JSON. No prose, no markdown fences." },
+          { role: "user", content: prompt },
+        ],
+        response_format: { type: "json_object" },
+      }),
+    });
+    if (!r.ok) {
+      const txt = (await r.text()).slice(0, 300);
+      throw new Error(`openai ${r.status}: ${txt}`);
+    }
   const data = await r.json();
   const raw = data?.choices?.[0]?.message?.content ?? "{}";
   // Strip ```json fences if the model adds them despite the system prompt.
