@@ -52,6 +52,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { LeadDrawer } from "./LeadDrawer";
+import { PipelineHealthCard } from "./PipelineHealthCard";
 import { ReadinessPill } from "./ReadinessPill";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
@@ -358,6 +359,8 @@ export const OutreachDashboard = () => {
             hint="Combined estimated tax bill across all leads — how much a 1031 could defer."
           />
         </div>
+
+        {isAdmin && <PipelineHealthCard />}
 
         {/* Tabs + toolbar */}
         <Card>
