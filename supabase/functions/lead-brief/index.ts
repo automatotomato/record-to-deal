@@ -57,7 +57,6 @@ Deno.serve(async (req) => {
       assessed_value: lead.assessed_value ? fmtMoney(lead.assessed_value) : null,
       owner_name: lead.owner_name,
       owner_type: lead.owner_type,
-      mailing_address: lead.mailing_address,
       decision_maker_name: lead.decision_maker_name,
       decision_maker_role: lead.decision_maker_role,
       decision_maker_email: lead.decision_maker_email,
