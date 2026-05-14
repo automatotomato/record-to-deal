@@ -324,7 +324,19 @@ Deno.serve(async (req) => {
       kind: "draft_outreach", lead_id: leadId,
       priority: lead.is_urgent ? 40 : 70,
     });
+  } else {
+    // No usable contact yet — kick the deeper Apollo+Firecrawl+AI hunt.
+    await supabase.from("pipeline_jobs").insert({
+      kind: "seller_discovery", lead_id: leadId,
+      priority: lead.is_urgent ? 35 : 60,
+    });
   }
+
+  // Always queue an AI brief once we know what we have so the drawer is
+  // immediately useful even if contact hunting is still in flight.
+  await supabase.from("pipeline_jobs").insert({
+    kind: "lead_brief", lead_id: leadId, priority: 80,
+  });
 
   await supabase.from("pipeline_jobs").update({
     status: "done", finished_at: new Date().toISOString(),

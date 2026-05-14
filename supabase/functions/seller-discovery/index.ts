@@ -376,10 +376,23 @@ Deno.serve(async (req) => {
     });
   }
 
-  let body: { lead_id?: string; force?: boolean; company_website?: string } = {};
+  let body: { lead_id?: string; job_id?: string; force?: boolean; company_website?: string } = {};
   try { body = await req.json(); } catch (_) {}
-  const leadId = body.lead_id;
+
+  // If invoked by the dispatcher we'll get a job_id — resolve to lead_id.
+  let leadId = body.lead_id;
+  const jobId = body.job_id;
+  const supabaseEarly = createClient(supabaseUrl, serviceKey);
+  if (!leadId && jobId) {
+    const { data: job } = await supabaseEarly.from("pipeline_jobs").select("lead_id").eq("id", jobId).maybeSingle();
+    leadId = job?.lead_id ?? undefined;
+  }
   if (!leadId) {
+    if (jobId) {
+      await supabaseEarly.from("pipeline_jobs").update({
+        status: "failed", finished_at: new Date().toISOString(), last_error: "no lead_id",
+      }).eq("id", jobId);
+    }
     return new Response(JSON.stringify({ error: "lead_id required" }), {
       status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
@@ -691,6 +704,25 @@ Deno.serve(async (req) => {
     summary: `Discovery: ${status}${d.email ? ` · email ✓` : ""}${d.phone ? " · phone ✓" : ""}${d.linkedin ? " · LinkedIn ✓" : ""} · used ${budget.fc} FC + ${budget.apollo} Apollo + ${budget.ai} AI`,
     payload: { discovery: d, budget_used: budget },
   });
+
+  // Queue brief refresh now that discovery is done (so the drawer reflects it).
+  await supabase.from("pipeline_jobs").insert({
+    kind: "lead_brief", lead_id: leadId, priority: 80,
+  });
+
+  // If reachable and no draft exists yet, queue an outreach draft.
+  if (status === "reachable") {
+    await supabase.from("pipeline_jobs").insert({
+      kind: "draft_outreach", lead_id: leadId, priority: 70,
+    });
+  }
+
+  if (jobId) {
+    await supabase.from("pipeline_jobs").update({
+      status: "done", finished_at: new Date().toISOString(),
+      result: { status, has_email: !!d.email, has_phone: !!d.phone },
+    }).eq("id", jobId);
+  }
 
   return new Response(JSON.stringify({ ok: true, status, discovery: d, budget_used: budget }), {
     headers: { ...corsHeaders, "Content-Type": "application/json" },

@@ -28,8 +28,20 @@ Deno.serve(async (req) => {
     if (!aiKey) return jsonErr("OPENAI_API_KEY missing", 500);
 
     const body = await req.json().catch(() => ({}));
-    const leadId = body?.lead_id;
-    if (!leadId) return jsonErr("lead_id required", 400);
+    let leadId = body?.lead_id;
+    const jobId = body?.job_id;
+    if (!leadId && jobId) {
+      const { data: job } = await supabase.from("pipeline_jobs").select("lead_id").eq("id", jobId).maybeSingle();
+      leadId = job?.lead_id ?? null;
+    }
+    if (!leadId) {
+      if (jobId) {
+        await supabase.from("pipeline_jobs").update({
+          status: "failed", finished_at: new Date().toISOString(), last_error: "no lead_id",
+        }).eq("id", jobId);
+      }
+      return jsonErr("lead_id required", 400);
+    }
 
     const { data: lead, error } = await supabase.from("leads").select("*").eq("id", leadId).maybeSingle();
     if (error || !lead) return jsonErr("lead not found", 404);
@@ -79,7 +91,8 @@ Return concise, specific, agent-ready prose. No fluff, no marketing language. If
 {
   "summary": "3–4 sentences: what the agent uncovered about this property and owner. Reference specific facts (address, sale price, owner). Plain English.",
   "why_good": "3–5 bullet-style sentences explaining why this is a strong 1031 lead. Tie each reason to a specific fact (tax exposure, urgency, owner type, holding period, wealth signal). If the lead is weak, say so honestly.",
-  "approach": "3–5 sentences: how the agent should reach out. Channel, tone, what to lead with, what objection to anticipate. Reference personality/motivation if known."
+  "approach": "3–5 sentences: how the agent should reach out. Channel, tone, what to lead with, what objection to anticipate. Reference personality/motivation if known.",
+  "best_next_action": "1 sentence: the single most effective next step the agent should take right now (e.g. 'Call John at 702-555-1234 mentioning the depreciation recapture exposure')."
 }`;
 
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -107,7 +120,7 @@ Return concise, specific, agent-ready prose. No fluff, no marketing language. If
 
     const data = await r.json();
     const raw = data?.choices?.[0]?.message?.content ?? "{}";
-    let brief: { summary?: unknown; why_good?: unknown; approach?: unknown } = {};
+    let brief: { summary?: unknown; why_good?: unknown; approach?: unknown; best_next_action?: unknown } = {};
     try { brief = JSON.parse(raw); } catch { return jsonErr("AI returned non-JSON", 500); }
 
     const toText = (v: unknown): string => {
@@ -122,6 +135,7 @@ Return concise, specific, agent-ready prose. No fluff, no marketing language. If
       summary: toText(brief.summary),
       why_good: toText(brief.why_good),
       approach: toText(brief.approach),
+      best_next_action: toText(brief.best_next_action),
     };
 
     await supabase.from("leads").update({
@@ -129,6 +143,13 @@ Return concise, specific, agent-ready prose. No fluff, no marketing language. If
       ai_brief_generated_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }).eq("id", leadId);
+
+    if (jobId) {
+      await supabase.from("pipeline_jobs").update({
+        status: "done", finished_at: new Date().toISOString(),
+        result: { ok: true },
+      }).eq("id", jobId);
+    }
 
     return new Response(JSON.stringify({ ok: true, brief: cleaned }), {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },

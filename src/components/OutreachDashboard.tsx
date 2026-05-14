@@ -52,6 +52,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { LeadDrawer } from "./LeadDrawer";
+import { ReadinessPill } from "./ReadinessPill";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
@@ -109,12 +110,11 @@ export const OutreachDashboard = () => {
   const { data: leads, isLoading } = useQuery({
     queryKey: ["leads"],
     queryFn: async () => {
-      // Main dashboard ONLY shows ready-for-outreach leads in actionable tiers.
+      // Show every lead in the intelligence desk — grouped by readiness.
       const { data, error } = await supabase
         .from("leads")
         .select("*")
-        .eq("pipeline_stage", "ready")
-        .in("tier", ["CRITICAL", "URGENT", "ACTIVE"])
+        .neq("tier", "DISQUALIFIED")
         .order("is_urgent", { ascending: false })
         .order("score", { ascending: false })
         .limit(500);
@@ -547,16 +547,19 @@ export const OutreachDashboard = () => {
                           <WindowPill saleDate={l.sale_date} />
                         </TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-1.5">
-                            <span
-                              className={cn(
-                                "inline-block h-1.5 w-1.5 rounded-full",
-                                STATUS_DOT[l.status] ?? "bg-muted-foreground/40",
-                              )}
-                            />
-                            <span className="text-xs text-muted-foreground">
-                              {STATUS_LABEL[l.status] ?? l.status}
-                            </span>
+                          <div className="flex flex-col gap-1">
+                            <ReadinessPill readiness={l.readiness} />
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className={cn(
+                                  "inline-block h-1.5 w-1.5 rounded-full",
+                                  STATUS_DOT[l.status] ?? "bg-muted-foreground/40",
+                                )}
+                              />
+                              <span className="text-[11px] text-muted-foreground">
+                                {STATUS_LABEL[l.status] ?? l.status}
+                              </span>
+                            </div>
                           </div>
                         </TableCell>
                       </TableRow>

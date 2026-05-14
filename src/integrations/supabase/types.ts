@@ -207,6 +207,7 @@ export type Database = {
           property_zip: string | null
           qualification_reason: string | null
           qualifier_notes: string | null
+          readiness: string
           related_entities: Json
           sale_date: string | null
           sale_price: number | null
@@ -284,6 +285,7 @@ export type Database = {
           property_zip?: string | null
           qualification_reason?: string | null
           qualifier_notes?: string | null
+          readiness?: string
           related_entities?: Json
           sale_date?: string | null
           sale_price?: number | null
@@ -361,6 +363,7 @@ export type Database = {
           property_zip?: string | null
           qualification_reason?: string | null
           qualifier_notes?: string | null
+          readiness?: string
           related_entities?: Json
           sale_date?: string | null
           sale_price?: number | null
