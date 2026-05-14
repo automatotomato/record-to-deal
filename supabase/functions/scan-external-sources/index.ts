@@ -259,6 +259,7 @@ Deno.serve(async (req) => {
   const fresh: Candidate[] = [];
   for (const c of candidates) {
     if (!c.owner_name || !c.property_address || !c.source_record_url) continue;
+    if (!hasReachability(c)) continue;
     const k = `${norm(c.property_address)}|${norm(c.owner_name)}`;
     if (seen.has(k)) continue;
     seen.add(k);
@@ -293,6 +294,14 @@ Deno.serve(async (req) => {
         property_address: c.property_address,
         property_city: c.property_city ?? null,
         property_zip: c.property_zip ?? null,
+        decision_maker_name: c.owner_contact_name ?? null,
+        decision_maker_email: isUnlockedEmail(c.owner_contact_email) ? c.owner_contact_email : null,
+        decision_maker_phone: hasUsablePhone(c.owner_contact_phone) ? c.owner_contact_phone : null,
+        contact_email: isUnlockedEmail(c.owner_contact_email) ? c.owner_contact_email : null,
+        contact_phone: hasUsablePhone(c.owner_contact_phone) ? c.owner_contact_phone : null,
+        company_website: normalizeWebsite(c.owner_website),
+        has_contact: true,
+        has_outreach_contact: true,
         property_type: propertyType,
         sale_price: c.sale_price ?? null,
         sale_date: c.sale_date ?? null,
@@ -301,7 +310,7 @@ Deno.serve(async (req) => {
         source_record_url: c.source_record_url,
         data_sources: [sourceTag],
         scout_confidence: source === "sec" ? 70 : 55,
-        pipeline_stage: "raw_candidate",
+        pipeline_stage: "enriched",
       })
       .select("id").single();
 
