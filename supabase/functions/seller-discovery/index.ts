@@ -332,6 +332,20 @@ function pullPhones(text: string): string[] {
     .map((p) => p.trim())));
 }
 
+function normalizeWebsite(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const host = pickHostFromUrl(value.startsWith("http") ? value : `https://${value}`);
+  return host ? `https://${host}` : null;
+}
+
+function hasUsablePhone(...phones: Array<string | null | undefined>): boolean {
+  return phones.some((p) => String(p ?? "").replace(/\D/g, "").length >= 10);
+}
+
+function isUsefulLead(l: { decision_maker_email?: string | null; decision_maker_phone?: string | null; contact_phone?: string | null; company_website?: string | null }) {
+  return isUnlockedEmail(l.decision_maker_email) || hasUsablePhone(l.decision_maker_phone, l.contact_phone) || !!normalizeWebsite(l.company_website);
+}
+
 function parseJsonObject(raw: unknown): any {
   const text = String(raw ?? "{}").trim().replace(/^```json\s*|\s*```$/g, "");
   try { return JSON.parse(text); } catch (_) {
