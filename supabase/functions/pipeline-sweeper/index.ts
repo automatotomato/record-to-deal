@@ -79,10 +79,10 @@ Deno.serve(async (req) => {
     const { count } = await supabase.from("pipeline_jobs")
       .select("id", { count: "exact", head: true })
       .eq("lead_id", r.id)
-      .eq("kind", "draft_outreach")
+      .eq("kind", "draft_outreach_step")
       .in("status", ["queued", "retry", "running"]);
     if ((count ?? 0) === 0) {
-      await supabase.from("pipeline_jobs").insert({ kind: "draft_outreach", lead_id: r.id, priority: 70 });
+      await supabase.from("pipeline_jobs").insert({ kind: "draft_outreach_step", lead_id: r.id, priority: 70 });
       summary.re_drafted += 1;
     }
   }

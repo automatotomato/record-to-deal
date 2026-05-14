@@ -714,12 +714,8 @@ Deno.serve(async (req) => {
     ]);
   }
 
-  // Only draft outreach when there is an actual path to reach the seller.
-  if (willBeUseful && (d.email || d.phone || d.company_website)) {
-    await supabase.from("pipeline_jobs").insert({
-      kind: "draft_outreach", lead_id: leadId, priority: 70,
-    });
-  }
+  // Outreach drafting is now handled by outreach-cadence-tick (assigns a
+  // sequence) + draft-outreach-step (drafts each step). No direct enqueue here.
 
   if (jobId) {
     await supabase.from("pipeline_jobs").update({
