@@ -9,7 +9,7 @@ import { fmtRelative } from "@/lib/format";
 import { toast } from "sonner";
 import { useState } from "react";
 
-const HOT_TIERS = ["URGENT", "CRITICAL", "ACTIVE", "HOT", "WARM"];
+const HOT_TIERS = ["URGENT", "CRITICAL", "ACTIVE", "HOT", "WARM"] as const;
 
 export function PipelineHealthCard() {
   const [sweeping, setSweeping] = useState(false);
