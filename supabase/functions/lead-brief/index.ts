@@ -24,8 +24,8 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
-    const aiKey = Deno.env.get("OPENAI_API_KEY");
-    if (!aiKey) return jsonErr("OPENAI_API_KEY missing", 500);
+    const aiKey = Deno.env.get("LOVABLE_API_KEY");
+    if (!aiKey) return jsonErr("LOVABLE_API_KEY missing", 500);
 
     const body = await req.json().catch(() => ({}));
     let leadId = body?.lead_id;
