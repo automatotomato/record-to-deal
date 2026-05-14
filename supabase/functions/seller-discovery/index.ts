@@ -17,7 +17,8 @@ const corsHeaders = {
 
 const FC_V2 = "https://api.firecrawl.dev/v2";
 const AI_URL = "https://api.openai.com/v1/chat/completions";
-const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-5.5";
+const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-5.1";
+if (!(globalThis as any).__sdLogged) { console.log(`[seller-discovery] OpenAI model: ${AI_MODEL}`); (globalThis as any).__sdLogged = true; }
 
 // Per-call budget so a single lead can't burn the day's quota
 const BUDGET = { firecrawl: 15, ai: 3 };
@@ -248,27 +249,50 @@ function parseJsonObject(raw: unknown): any {
   }
 }
 
-async function geminiPublicContactHunt(lead: any, targetName: string | null, entity: boolean, apiKey: string, budget: Budget): Promise<any> {
+async function geminiPublicContactHunt(lead: any, targetName: string | null, entity: boolean, apiKey: string, fcKey: string, budget: Budget): Promise<any> {
   if (!budget.canAi()) return null;
-  budget.ai++;
   const owner = lead.owner_name ?? "unknown owner";
   const address = [lead.property_address, lead.property_city, lead.state].filter(Boolean).join(", ");
+
+  // Step 1: gather REAL evidence via Firecrawl search (no fake "use Google Search").
+  const queries = [
+    targetName ? `"${targetName}" ${lead.property_city ?? ""} email contact` : null,
+    targetName ? `"${targetName}" linkedin OR rocketreach` : null,
+    `"${owner}" contact email phone`,
+    entity ? `"${owner}" site:opencorporates.com OR site:bizapedia.com` : null,
+  ].filter(Boolean) as string[];
+
+  const evidence: string[] = [];
+  for (const q of queries.slice(0, 3)) {
+    const res = await fcSearch(q, fcKey, 4, true, budget);
+    for (const r of res) {
+      evidence.push(`URL: ${r.url ?? ""}\nTITLE: ${r.title ?? ""}\n${(r.markdown ?? r.description ?? "").slice(0, 3500)}`);
+    }
+    if (evidence.length >= 8) break;
+  }
+  if (!evidence.length) return null;
+
+  budget.ai++;
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), 30_000);
   try {
     const r = await fetch(AI_URL, {
       method: "POST",
       headers: GATEWAY_HEADERS(apiKey),
+      signal: ctrl.signal,
       body: JSON.stringify({
         model: AI_MODEL,
         messages: [
-          { role: "system", content: "You are a contact-data researcher. Return ONLY valid JSON. Use only contact details you are highly confident are publicly published (official company sites, SEC filings, court filings, registries, LinkedIn). Never invent emails or phone numbers — leave fields null when unsure." },
-          { role: "user", content: `Find publicly available contact details for the decision-maker behind this real-estate seller.
+          { role: "system", content: "You extract decision-maker contact info from scraped web evidence. Use ONLY facts present in the evidence — never invent emails, phones, or names. Leave fields null when uncertain. Return ONLY valid JSON." },
+          { role: "user", content: `Identify the decision-maker behind this real-estate seller using the evidence below.
 
 Owner/entity: ${owner}
-Known decision-maker/person: ${targetName ?? "unknown"}
+Known person (if any): ${targetName ?? "unknown"}
 Owner type: ${entity ? "entity/company/trust" : "individual"}
 Property: ${address || "unknown"}
 
-Prefer official company pages, Secretary of State/registry pages, LinkedIn profile pages, broker/team pages, SEC filings, court filings, and credible business directories. Avoid generic lead-gen placeholders and locked emails.
+EVIDENCE:
+${evidence.join("\n---\n").slice(0, 18000)}
 
 Return JSON exactly:
 {
@@ -292,7 +316,8 @@ Return JSON exactly:
     }
     const data = await r.json();
     return parseJsonObject(data?.choices?.[0]?.message?.content);
-  } catch (e) { console.warn("gemini public hunt threw", e); return null; }
+  } catch (e) { console.warn("public hunt threw", e); return null; }
+  finally { clearTimeout(tid); }
 }
 
 async function aiConsolidate(blob: string, apiKey: string, budget: Budget): Promise<any> {
