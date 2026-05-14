@@ -26,6 +26,9 @@ const AI_URL = "https://api.openai.com/v1/chat/completions";
 const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-5.1";
 const FC_V2 = "https://api.firecrawl.dev/v2";
 
+type SourceKind = "commercial" | "residential" | "court" | "sec";
+const SOURCES: SourceKind[] = ["commercial", "residential", "court", "sec"];
+
 if (!(globalThis as any).__sesLogged) {
   console.log(`[scan-external-sources] OpenAI model: ${AI_MODEL}`);
   (globalThis as any).__sesLogged = true;
