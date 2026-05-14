@@ -552,7 +552,7 @@ Deno.serve(async (req) => {
   // ============ PASS 4 — Gemini grounded public-contact hunt ============
   if ((!d.email || !d.phone) && lovableKey) {
     d.passes.gemini_public_contact = true;
-    const publicHit = await geminiPublicContactHunt(lead, targetName, entity, lovableKey, budget);
+    const publicHit = await geminiPublicContactHunt(lead, targetName, entity, lovableKey, fcKey, budget);
     if (publicHit && typeof publicHit === "object") {
       const c = publicHit.confidence ?? {};
       if (publicHit.name && isKnownOwnerName(publicHit.name) && looksLikePersonName(publicHit.name)) setField(d, "name", publicHit.name, c.name ?? 55, "gemini.public_search");
