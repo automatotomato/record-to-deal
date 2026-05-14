@@ -336,9 +336,7 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const fcKey = Deno.env.get("FIRECRAWL_API_KEY");
-  const apolloKey = Deno.env.get("APOLLO_API_KEY");
   const lovableKey = Deno.env.get("LOVABLE_API_KEY");
-  const phoneWebhookUrl = `${supabaseUrl}/functions/v1/apollo-phone-webhook`;
 
   if (!fcKey || !lovableKey) {
     return new Response(JSON.stringify({ error: "FIRECRAWL_API_KEY and LOVABLE_API_KEY are required" }), {
