@@ -284,7 +284,7 @@ Deno.serve(async (req) => {
 
   const { data: rate } = await supabase
     .from("state_tax_rates")
-    .select("state, ltcg_rate, surcharge, is_high_tax")
+    .select("state, ltcg_rate, surcharge, is_high_tax, is_target, priority_rank")
     .eq("state", lead.state)
     .maybeSingle();
 
@@ -304,8 +304,12 @@ Deno.serve(async (req) => {
     state_tax_rate: r.state_tax_rate,
     fed_capital_gains_estimate: r.fed_capital_gains_estimate,
     state_capital_gains_estimate: r.state_capital_gains_estimate,
-    capital_gains_estimate: (r.fed_capital_gains_estimate ?? 0) + (r.state_capital_gains_estimate ?? 0) || null,
+    // Realigned: capital_gains_estimate now stores the actual gain (sale - basis).
+    // total_tax_exposure stays as fed + state tax owed.
+    capital_gains_estimate: r.actual_capital_gain,
+    actual_capital_gain: r.actual_capital_gain,
     total_tax_exposure: r.total_tax_exposure,
+    effective_tax_rate: r.effective_tax_rate,
     has_contact: isAnyContact(lead),
     has_outreach_contact: isOutreachContact(lead),
     pipeline_stage: stage,
