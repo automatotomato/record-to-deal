@@ -113,9 +113,17 @@ Return concise, specific, agent-ready prose. No fluff, no marketing language. If
 
     if (!r.ok) {
       const txt = await r.text();
-      if (r.status === 429) return jsonErr("AI gateway rate limited — try again shortly", 429);
-      if (r.status === 402) return jsonErr("AI gateway credits exhausted — top up workspace", 402);
-      return jsonErr(`AI gateway: ${txt}`, 500);
+      const code = r.status === 402 ? "AI_CREDITS_EXHAUSTED"
+                 : r.status === 429 ? "AI_RATE_LIMITED"
+                 : "AI_GATEWAY_ERROR";
+      const message = r.status === 402 ? "AI gateway credits exhausted — top up workspace in Settings → Workspace → Usage"
+                    : r.status === 429 ? "AI gateway rate limited — try again shortly"
+                    : `AI gateway error: ${txt}`;
+      console.error("lead-brief AI error", r.status, txt);
+      return new Response(
+        JSON.stringify({ ok: false, fallback: true, error: code, message }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
 
     const data = await r.json();
