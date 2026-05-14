@@ -588,11 +588,11 @@ Deno.serve(async (req) => {
     const blob = res.map((r: any) => `${r.url}\n${r.title ?? ""}\n${r.description ?? ""}`).join("\n");
     domain = pickDomainFromText(blob, ownerName);
     if (domain) {
-      setField(d, "company_website", domain, 55, "search");
+      setField(d, "company_website", normalizeWebsite(domain), 55, "search");
       d.sources.push(domain);
     }
   } else if (domain) {
-    setField(d, "company_website", domain, body.company_website ? 90 : 60, body.company_website ? "user" : "cached");
+    setField(d, "company_website", normalizeWebsite(domain), body.company_website ? 90 : 60, body.company_website ? "user" : "cached");
   }
 
   // Confirm/scrape homepage + contact page
@@ -682,7 +682,7 @@ Deno.serve(async (req) => {
       if (publicHit.linkedin && /linkedin\.com\/in\//i.test(publicHit.linkedin)) setField(d, "linkedin", publicHit.linkedin, c.linkedin ?? 55, "gemini.public_search");
       if (publicHit.company_website) {
         const h = pickHostFromUrl(publicHit.company_website.startsWith("http") ? publicHit.company_website : `https://${publicHit.company_website}`);
-        if (h) setField(d, "company_website", h, c.company_website ?? 50, "gemini.public_search");
+        if (h) setField(d, "company_website", normalizeWebsite(h), c.company_website ?? 50, "gemini.public_search");
       }
       if (Array.isArray(publicHit.source_urls)) {
         d.sources.push("gemini:public_search", ...publicHit.source_urls.filter((u: unknown) => typeof u === "string").slice(0, 5));
@@ -737,7 +737,7 @@ Deno.serve(async (req) => {
       if (ai.linkedin) setField(d, "linkedin", ai.linkedin, c.linkedin ?? 50, "ai");
       if (ai.company_website) {
         const h = pickHostFromUrl(ai.company_website.startsWith("http") ? ai.company_website : `https://${ai.company_website}`);
-        if (h) setField(d, "company_website", h, c.company_website ?? 50, "ai");
+        if (h) setField(d, "company_website", normalizeWebsite(h), c.company_website ?? 50, "ai");
       }
       if (ai.reasoning) d.notes.push(ai.reasoning);
       d.sources.push("gemini:consolidate");
