@@ -16,12 +16,11 @@ const corsHeaders = {
 };
 
 const FC_V2 = "https://api.firecrawl.dev/v2";
-const APOLLO = "https://api.apollo.io/api/v1";
 const AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
 const AI_MODEL = "google/gemini-3-flash-preview";
 
 // Per-call budget so a single lead can't burn the day's quota
-const BUDGET = { firecrawl: 12, apollo: 7, ai: 2 };
+const BUDGET = { firecrawl: 15, ai: 3 };
 
 const STATE_NAMES: Record<string, string> = {
   AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
