@@ -23,13 +23,17 @@ const corsHeaders = {
 };
 
 const AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
-const AI_MODEL = "google/gemini-2.5-flash";
+const AI_MODEL = "google/gemini-3-flash-preview";
 const HARD_BUDGET_MS = 50_000;
 
 type SourceKind = "commercial" | "residential" | "court" | "sec";
 
 type Candidate = {
   owner_name?: string;
+  owner_contact_name?: string;
+  owner_contact_email?: string;
+  owner_contact_phone?: string;
+  owner_website?: string;
   property_address?: string;
   property_city?: string;
   property_zip?: string;
@@ -42,6 +46,12 @@ type Candidate = {
 };
 
 const SOURCES: SourceKind[] = ["commercial", "residential", "court", "sec"];
+
+const GATEWAY_HEADERS = (key: string) => ({
+  "Lovable-API-Key": key,
+  "X-Lovable-AIG-SDK": "vercel-ai-sdk",
+  "Content-Type": "application/json",
+});
 
 function promptFor(source: SourceKind, state: string, counties: string[]): string {
   const countyList = counties.slice(0, 12).join(", ");
@@ -62,11 +72,15 @@ function promptFor(source: SourceKind, state: string, counties: string[]): strin
 
 ${guidance[source]}
 
-Return ONLY this JSON shape (max 12 leads):
+Return ONLY this JSON shape (max 12 leads). A lead is only useful if you can also cite at least one reachability field: owner_contact_email, owner_contact_phone, owner_website, or a decision-maker/contact page URL.
 {
   "leads": [
     {
       "owner_name": "string (seller / current owner — required)",
+      "owner_contact_name": "string|null (person behind the seller if found)",
+      "owner_contact_email": "string|null (public email only)",
+      "owner_contact_phone": "string|null (public phone only)",
+      "owner_website": "string|null (official website/contact page only)",
       "property_address": "string (street address — required)",
       "property_city": "string",
       "property_zip": "string",
@@ -79,7 +93,7 @@ Return ONLY this JSON shape (max 12 leads):
   ]
 }
 
-Skip any record missing owner_name, property_address, or source_record_url.`;
+Skip any record missing owner_name, property_address, source_record_url, and at least one reachable contact path.`;
 }
 
 async function geminiGroundedExtract(
@@ -88,7 +102,7 @@ async function geminiGroundedExtract(
 ): Promise<Candidate[]> {
   const r = await fetch(AI_URL, {
     method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    headers: GATEWAY_HEADERS(apiKey),
     body: JSON.stringify({
       model: AI_MODEL,
       messages: [
@@ -120,6 +134,28 @@ function inferOwnerType(name?: string | null) {
   if (/\bcorp\b|\binc\b|\bcompany\b|\bco\.\b|\breit\b/.test(n)) return "Corporation";
   if (/\bestate of\b/.test(n)) return "Estate";
   return "Individual";
+}
+
+function isUnlockedEmail(e?: string | null): boolean {
+  if (!e) return false;
+  if (!/[^@\s]+@[^@\s]+\.[a-z]{2,}/i.test(e)) return false;
+  return !/email_not_unlocked|domain\.com$|@apollo-locked/i.test(e);
+}
+
+function hasUsablePhone(p?: string | null): boolean {
+  return String(p ?? "").replace(/\D/g, "").length >= 10;
+}
+
+function normalizeWebsite(value?: string | null): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value.startsWith("http") ? value : `https://${value}`);
+    return `https://${url.hostname.replace(/^www\./, "")}${url.pathname === "/" ? "" : url.pathname}`;
+  } catch { return null; }
+}
+
+function hasReachability(c: Candidate): boolean {
+  return isUnlockedEmail(c.owner_contact_email) || hasUsablePhone(c.owner_contact_phone) || !!normalizeWebsite(c.owner_website);
 }
 
 function mapPropertyType(raw?: string): string {
@@ -223,6 +259,7 @@ Deno.serve(async (req) => {
   const fresh: Candidate[] = [];
   for (const c of candidates) {
     if (!c.owner_name || !c.property_address || !c.source_record_url) continue;
+    if (!hasReachability(c)) continue;
     const k = `${norm(c.property_address)}|${norm(c.owner_name)}`;
     if (seen.has(k)) continue;
     seen.add(k);
@@ -257,6 +294,14 @@ Deno.serve(async (req) => {
         property_address: c.property_address,
         property_city: c.property_city ?? null,
         property_zip: c.property_zip ?? null,
+        decision_maker_name: c.owner_contact_name ?? null,
+        decision_maker_email: isUnlockedEmail(c.owner_contact_email) ? c.owner_contact_email : null,
+        decision_maker_phone: hasUsablePhone(c.owner_contact_phone) ? c.owner_contact_phone : null,
+        contact_email: isUnlockedEmail(c.owner_contact_email) ? c.owner_contact_email : null,
+        contact_phone: hasUsablePhone(c.owner_contact_phone) ? c.owner_contact_phone : null,
+        company_website: normalizeWebsite(c.owner_website),
+        has_contact: true,
+        has_outreach_contact: true,
         property_type: propertyType,
         sale_price: c.sale_price ?? null,
         sale_date: c.sale_date ?? null,
@@ -265,7 +310,7 @@ Deno.serve(async (req) => {
         source_record_url: c.source_record_url,
         data_sources: [sourceTag],
         scout_confidence: source === "sec" ? 70 : 55,
-        pipeline_stage: "raw_candidate",
+        pipeline_stage: "enriched",
       })
       .select("id").single();
 

@@ -18,7 +18,7 @@ const corsHeaders = {
 const FC_V2 = "https://api.firecrawl.dev/v2";
 const APOLLO = "https://api.apollo.io/api/v1";
 const AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
-const AI_MODEL = "google/gemini-2.5-flash";
+const AI_MODEL = "google/gemini-3-flash-preview";
 
 // Per-call budget so a single lead can't burn the day's quota
 const BUDGET = { firecrawl: 12, apollo: 7, ai: 2 };
@@ -118,6 +118,12 @@ const APOLLO_HEADERS = (key: string) => ({
   "Cache-Control": "no-cache",
 });
 
+const GATEWAY_HEADERS = (key: string) => ({
+  "Lovable-API-Key": key,
+  "X-Lovable-AIG-SDK": "vercel-ai-sdk",
+  "Content-Type": "application/json",
+});
+
 function isUnlockedEmail(e?: string | null): boolean {
   if (!e) return false;
   if (!/[^@\s]+@[^@\s]+\.[a-z]{2,}/i.test(e)) return false;
@@ -126,7 +132,7 @@ function isUnlockedEmail(e?: string | null): boolean {
 
 // People match: best when we have first+last+domain. Returns single person.
 async function apolloMatch(
-  domain: string, first: string, last: string, key: string, budget: Budget,
+  domain: string, first: string, last: string, key: string, budget: Budget, phoneWebhookUrl?: string,
 ) {
   if (!budget.canApollo()) return null;
   budget.apollo++;
@@ -141,6 +147,7 @@ async function apolloMatch(
         // Spend a credit to actually unlock the email — without this Apollo
         // returns "email_not_unlocked@domain.com" and we drop it downstream.
         reveal_personal_emails: true,
+        ...(phoneWebhookUrl ? { reveal_phone_number: true, webhook_url: phoneWebhookUrl } : {}),
       }),
     });
     if (!r.ok) {
@@ -164,6 +171,7 @@ async function apolloRevealByHints(
   },
   key: string,
   budget: Budget,
+  phoneWebhookUrl?: string,
 ) {
   if (!budget.canApollo()) return null;
   const hasIdentity = (opts.first && opts.last) || opts.name || opts.linkedin;
@@ -171,8 +179,11 @@ async function apolloRevealByHints(
   budget.apollo++;
   const body: Record<string, unknown> = {
     reveal_personal_emails: true,
-    // phone reveal requires async webhook_url on Apollo — omitted
   };
+  if (phoneWebhookUrl) {
+    body.reveal_phone_number = true;
+    body.webhook_url = phoneWebhookUrl;
+  }
   if (opts.first) body.first_name = opts.first;
   if (opts.last) body.last_name = opts.last;
   if (opts.name && (!opts.first || !opts.last)) body.name = opts.name;
@@ -227,7 +238,7 @@ function pickHostFromUrl(url: string): string | null {
   try { return new URL(url).hostname.replace(/^www\./, ""); } catch (_) { return null; }
 }
 
-const SOCIAL_RE = /(linkedin|facebook|twitter|x\.com|instagram|youtube|google|maps|wikipedia|opencorporates|secretary|sos\.|gov$|bizapedia|zoominfo|rocketreach|crunchbase|signalhire|apollo|yelp|bbb\.org|yellowpages)/i;
+const SOCIAL_RE = /(linkedin|facebook|twitter|x\.com|instagram|youtube|google|maps|wikipedia|opencorporates|secretary|sos\.|gov$|bizapedia|zoominfo|rocketreach|crunchbase|signalhire|apollo|yelp|bbb\.org|yellowpages|loopnet|crexi|redfin|zillow|realtor\.com|sec\.gov)/i;
 
 function pickDomainFromText(text: string, ownerName: string | null): string | null {
   const slug = (ownerName ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -260,6 +271,10 @@ function looksLikePersonName(name: string | null): boolean {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length < 2 || parts.length > 4) return false;
   return !/\b(LLC|INC|CORP|COMPANY|FRESH|BRANDS|HOLDINGS|ACQUISITION|PROPERTIES|GROUP|DOCUMENTS|FUNDING)\b/i.test(name);
+}
+
+function isKnownOwnerName(name: string | null): boolean {
+  return !!name && !/^unknown$/i.test(name.trim()) && name.trim().length > 2;
 }
 
 function splitLinkedInName(url: string | null): { first: string; last: string } | null {
@@ -317,6 +332,18 @@ function scoreEmail(email: string, name: string | null): number {
   return s;
 }
 
+function scorePhone(text: string, phone: string, targetName: string | null, ownerName: string | null, domain: string | null): number {
+  let score = 25;
+  const lower = text.toLowerCase();
+  if (domain && lower.includes(domain.toLowerCase())) score += 20;
+  if (targetName && lower.includes(targetName.toLowerCase())) score += 20;
+  if (ownerName && lower.includes(ownerName.toLowerCase())) score += 15;
+  const idx = lower.indexOf(phone.toLowerCase());
+  const window = idx >= 0 ? lower.slice(Math.max(0, idx - 180), idx + 180) : lower;
+  if (/owner|principal|broker|agent|leasing|sales|contact|mobile|direct|office/.test(window)) score += 20;
+  return score;
+}
+
 function pullEmails(text: string): string[] {
   return Array.from(new Set((text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) ?? [])
     .map((e) => e.toLowerCase())));
@@ -324,6 +351,20 @@ function pullEmails(text: string): string[] {
 function pullPhones(text: string): string[] {
   return Array.from(new Set((text.match(/\+?1?[\s.-]?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/g) ?? [])
     .map((p) => p.trim())));
+}
+
+function normalizeWebsite(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const host = pickHostFromUrl(value.startsWith("http") ? value : `https://${value}`);
+  return host ? `https://${host}` : null;
+}
+
+function hasUsablePhone(...phones: Array<string | null | undefined>): boolean {
+  return phones.some((p) => String(p ?? "").replace(/\D/g, "").length >= 10);
+}
+
+function isUsefulLead(l: { decision_maker_email?: string | null; decision_maker_phone?: string | null; contact_phone?: string | null; company_website?: string | null }) {
+  return isUnlockedEmail(l.decision_maker_email) || hasUsablePhone(l.decision_maker_phone, l.contact_phone) || !!normalizeWebsite(l.company_website);
 }
 
 function parseJsonObject(raw: unknown): any {
@@ -343,7 +384,7 @@ async function geminiPublicContactHunt(lead: any, targetName: string | null, ent
   try {
     const r = await fetch(AI_URL, {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      headers: GATEWAY_HEADERS(apiKey),
       body: JSON.stringify({
         model: AI_MODEL,
         messages: [
@@ -388,7 +429,7 @@ async function aiConsolidate(blob: string, apiKey: string, budget: Budget): Prom
   try {
     const r = await fetch(AI_URL, {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      headers: GATEWAY_HEADERS(apiKey),
       body: JSON.stringify({
         model: AI_MODEL,
         messages: [
@@ -424,6 +465,7 @@ Deno.serve(async (req) => {
   const fcKey = Deno.env.get("FIRECRAWL_API_KEY");
   const apolloKey = Deno.env.get("APOLLO_API_KEY");
   const lovableKey = Deno.env.get("LOVABLE_API_KEY");
+  const phoneWebhookUrl = `${supabaseUrl}/functions/v1/apollo-phone-webhook`;
 
   if (!fcKey || !lovableKey) {
     return new Response(JSON.stringify({ error: "FIRECRAWL_API_KEY and LOVABLE_API_KEY are required" }), {
@@ -524,12 +566,12 @@ Deno.serve(async (req) => {
       }
       if (d.name) break;
     }
-  } else if (ownerName) {
+  } else if (isKnownOwnerName(ownerName)) {
     setField(d, "name", ownerName, 50, "deed");
     setField(d, "role", "Owner", 50, "deed");
   }
 
-  const targetName = d.name ?? ownerName;
+  const targetName = isKnownOwnerName(d.name) ? d.name : (isKnownOwnerName(ownerName) ? ownerName : null);
 
   // ============ PASS 2 — Person identity (LinkedIn + people-search) ============
   if (targetName) {
@@ -568,11 +610,11 @@ Deno.serve(async (req) => {
     const blob = res.map((r: any) => `${r.url}\n${r.title ?? ""}\n${r.description ?? ""}`).join("\n");
     domain = pickDomainFromText(blob, ownerName);
     if (domain) {
-      setField(d, "company_website", domain, 55, "search");
+      setField(d, "company_website", normalizeWebsite(domain), 55, "search");
       d.sources.push(domain);
     }
   } else if (domain) {
-    setField(d, "company_website", domain, body.company_website ? 90 : 60, body.company_website ? "user" : "cached");
+    setField(d, "company_website", normalizeWebsite(domain), body.company_website ? 90 : 60, body.company_website ? "user" : "cached");
   }
 
   // Confirm/scrape homepage + contact page
@@ -583,13 +625,41 @@ Deno.serve(async (req) => {
     if (contactMd) evidence.push(`CONTACT ${domain}\n${contactMd.slice(0, 4000)}`);
   }
 
+  // Source records and broker/listing pages often carry the only reachable
+  // path (broker phone, listing contact, press release contact). Scrape them
+  // before paid/AI fallbacks so website-less owners are still actionable.
+  if (lead.source_record_url) {
+    d.passes.source_record_contact = true;
+    const sourceMd = await fcScrape(lead.source_record_url, fcKey, budget);
+    if (sourceMd) {
+      evidence.push(`SOURCE RECORD ${lead.source_record_url}\n${sourceMd.slice(0, 6000)}`);
+      const host = pickHostFromUrl(lead.source_record_url);
+      if (!d.company_website && host && !SOCIAL_RE.test(host)) setField(d, "company_website", normalizeWebsite(host), 45, "source_record");
+      const emails = pullEmails(sourceMd);
+      let bestEmail: { e: string; s: number } | null = null;
+      for (const e of emails) {
+        const s = Math.max(scoreEmail(e, targetName), host && e.endsWith(`@${host}`) ? 55 : 0);
+        if (acceptScrapedEmail(e, s, targetName, host) && (!bestEmail || s > bestEmail.s)) bestEmail = { e, s };
+      }
+      if (bestEmail) setField(d, "email", bestEmail.e, bestEmail.s, "source_record");
+      const phones = pullPhones(sourceMd);
+      let bestPhone: { p: string; s: number } | null = null;
+      for (const p of phones) {
+        const s = scorePhone(sourceMd, p, targetName, ownerName, host);
+        if ((!bestPhone || s > bestPhone.s) && s >= 40) bestPhone = { p, s };
+      }
+      if (bestPhone) setField(d, "phone", bestPhone.p, bestPhone.s, "source_record");
+      d.sources.push("source_record");
+    }
+  }
+
   // ============ PASS 4 — Apollo.io ============
   if (apolloKey) {
     d.passes.apollo = true;
     // People match first if we have a name + domain.
     const split = splitName(targetName) ?? splitLinkedInName(d.linkedin);
     if (domain && split) {
-      const matched = await apolloMatch(domain, split.first, split.last, apolloKey, budget);
+      const matched = await apolloMatch(domain, split.first, split.last, apolloKey, budget, phoneWebhookUrl);
       const p = matched?.person ?? matched?.matched_person ?? null;
       if (p) {
         applyApolloPerson(d, p, "apollo.match");
@@ -608,7 +678,7 @@ Deno.serve(async (req) => {
         organizationName: entity ? ownerName : null,
         city,
         state,
-      }, apolloKey, budget);
+      }, apolloKey, budget, phoneWebhookUrl);
       if (revealed) {
         applyApolloPerson(d, revealed, "apollo.reveal");
         d.sources.push("apollo.io");
@@ -629,7 +699,7 @@ Deno.serve(async (req) => {
         // to actually unlock the address.
         let unlockedEmail: string | null = null;
         if (pick.first_name && pick.last_name) {
-          const matched = await apolloMatch(domain, pick.first_name, pick.last_name, apolloKey, budget);
+          const matched = await apolloMatch(domain, pick.first_name, pick.last_name, apolloKey, budget, phoneWebhookUrl);
           const mp = matched?.person ?? matched?.matched_person ?? null;
           applyApolloPerson(d, mp, "apollo.match");
           if (mp && isUnlockedEmail(mp.email)) unlockedEmail = mp.email;
@@ -655,14 +725,14 @@ Deno.serve(async (req) => {
     const publicHit = await geminiPublicContactHunt(lead, targetName, entity, lovableKey, budget);
     if (publicHit && typeof publicHit === "object") {
       const c = publicHit.confidence ?? {};
-      if (publicHit.name && looksLikePersonName(publicHit.name)) setField(d, "name", publicHit.name, c.name ?? 55, "gemini.public_search");
+      if (publicHit.name && isKnownOwnerName(publicHit.name) && looksLikePersonName(publicHit.name)) setField(d, "name", publicHit.name, c.name ?? 55, "gemini.public_search");
       if (publicHit.role) setField(d, "role", publicHit.role, c.role ?? 45, "gemini.public_search");
       if (isUnlockedEmail(publicHit.email)) setField(d, "email", publicHit.email, c.email ?? 65, "gemini.public_search");
       if (publicHit.phone && String(publicHit.phone).replace(/\D/g, "").length >= 10) setField(d, "phone", publicHit.phone, c.phone ?? 55, "gemini.public_search");
       if (publicHit.linkedin && /linkedin\.com\/in\//i.test(publicHit.linkedin)) setField(d, "linkedin", publicHit.linkedin, c.linkedin ?? 55, "gemini.public_search");
       if (publicHit.company_website) {
         const h = pickHostFromUrl(publicHit.company_website.startsWith("http") ? publicHit.company_website : `https://${publicHit.company_website}`);
-        if (h) setField(d, "company_website", h, c.company_website ?? 50, "gemini.public_search");
+        if (h) setField(d, "company_website", normalizeWebsite(h), c.company_website ?? 50, "gemini.public_search");
       }
       if (Array.isArray(publicHit.source_urls)) {
         d.sources.push("gemini:public_search", ...publicHit.source_urls.filter((u: unknown) => typeof u === "string").slice(0, 5));
@@ -710,14 +780,14 @@ Deno.serve(async (req) => {
     const ai = await aiConsolidate(blob, lovableKey, budget);
     if (ai && typeof ai === "object") {
       const c = ai.confidence ?? {};
-      if (ai.name) setField(d, "name", ai.name, c.name ?? 50, "ai");
+      if (ai.name && isKnownOwnerName(ai.name)) setField(d, "name", ai.name, c.name ?? 50, "ai");
       if (ai.role) setField(d, "role", ai.role, c.role ?? 50, "ai");
-      if (ai.email) setField(d, "email", ai.email, c.email ?? 45, "ai");
-      if (ai.phone) setField(d, "phone", ai.phone, c.phone ?? 35, "ai");
-      if (ai.linkedin) setField(d, "linkedin", ai.linkedin, c.linkedin ?? 50, "ai");
+      if (isUnlockedEmail(ai.email)) setField(d, "email", ai.email, c.email ?? 45, "ai");
+      if (ai.phone && String(ai.phone).replace(/\D/g, "").length >= 10) setField(d, "phone", ai.phone, c.phone ?? 35, "ai");
+      if (ai.linkedin && /linkedin\.com\/in\//i.test(ai.linkedin)) setField(d, "linkedin", ai.linkedin, c.linkedin ?? 50, "ai");
       if (ai.company_website) {
         const h = pickHostFromUrl(ai.company_website.startsWith("http") ? ai.company_website : `https://${ai.company_website}`);
-        if (h) setField(d, "company_website", h, c.company_website ?? 50, "ai");
+        if (h) setField(d, "company_website", normalizeWebsite(h), c.company_website ?? 50, "ai");
       }
       if (ai.reasoning) d.notes.push(ai.reasoning);
       d.sources.push("gemini:consolidate");
@@ -726,17 +796,25 @@ Deno.serve(async (req) => {
 
   // ============ Determine status ============
   let status: "none" | "partial" | "reachable" | "failed" = "none";
-  if (d.email || d.phone) status = "reachable";
-  else if (d.linkedin) status = "partial";
+  if (d.email || d.phone || d.company_website) status = "reachable";
+  else if (d.linkedin || d.entity_registry_url) status = "partial";
   else status = "failed";
 
   // Compute completeness (0-100)
   let completeness = 0;
-  if (lead.mailing_address) completeness += 30;
+  if (d.company_website) completeness += 20;
   if (d.name) completeness += 15;
   if (d.email) completeness += 30;
   if (d.phone) completeness += 15;
   if (d.linkedin) completeness += 10;
+  if (d.entity_registry_url) completeness += 10;
+
+  const willBeUseful = isUsefulLead({
+    decision_maker_email: d.email,
+    decision_maker_phone: d.phone,
+    contact_phone: d.phone ?? lead.contact_phone,
+    company_website: d.company_website,
+  });
 
   // Persist
   const updates: Record<string, unknown> = {
@@ -753,6 +831,9 @@ Deno.serve(async (req) => {
     related_entities: d.related_entities,
     discovery_confidence_by_field: d.confidence_by_field,
     discovery_status: status,
+    has_contact: willBeUseful,
+    has_outreach_contact: willBeUseful,
+    pipeline_stage: willBeUseful ? "enriched" : "needs_review",
     enrichment_confidence: Math.max(
       lead.enrichment_confidence ?? 0,
       Math.round(Object.values(d.confidence_by_field).reduce((a: number, v: any) => a + v.score, 0) / Math.max(1, Object.keys(d.confidence_by_field).length)),
@@ -790,8 +871,8 @@ Deno.serve(async (req) => {
     kind: "lead_brief", lead_id: leadId, priority: 80,
   });
 
-  // If reachable and no draft exists yet, queue an outreach draft.
-  if (status === "reachable") {
+  // Only draft outreach when there is an actual path to reach the seller.
+  if (willBeUseful && (d.email || d.phone || d.company_website)) {
     await supabase.from("pipeline_jobs").insert({
       kind: "draft_outreach", lead_id: leadId, priority: 70,
     });
@@ -800,7 +881,7 @@ Deno.serve(async (req) => {
   if (jobId) {
     await supabase.from("pipeline_jobs").update({
       status: "done", finished_at: new Date().toISOString(),
-      result: { status, has_email: !!d.email, has_phone: !!d.phone },
+      result: { status, useful: willBeUseful, has_email: !!d.email, has_phone: !!d.phone, has_website: !!d.company_website },
     }).eq("id", jobId);
   }
 
