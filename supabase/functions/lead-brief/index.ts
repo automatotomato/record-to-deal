@@ -120,7 +120,7 @@ Return concise, specific, agent-ready prose. No fluff, no marketing language. If
 
     const data = await r.json();
     const raw = data?.choices?.[0]?.message?.content ?? "{}";
-    let brief: { summary?: unknown; why_good?: unknown; approach?: unknown } = {};
+    let brief: { summary?: unknown; why_good?: unknown; approach?: unknown; best_next_action?: unknown } = {};
     try { brief = JSON.parse(raw); } catch { return jsonErr("AI returned non-JSON", 500); }
 
     const toText = (v: unknown): string => {
@@ -135,6 +135,7 @@ Return concise, specific, agent-ready prose. No fluff, no marketing language. If
       summary: toText(brief.summary),
       why_good: toText(brief.why_good),
       approach: toText(brief.approach),
+      best_next_action: toText(brief.best_next_action),
     };
 
     await supabase.from("leads").update({
@@ -142,6 +143,13 @@ Return concise, specific, agent-ready prose. No fluff, no marketing language. If
       ai_brief_generated_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }).eq("id", leadId);
+
+    if (jobId) {
+      await supabase.from("pipeline_jobs").update({
+        status: "done", finished_at: new Date().toISOString(),
+        result: { ok: true },
+      }).eq("id", jobId);
+    }
 
     return new Response(JSON.stringify({ ok: true, brief: cleaned }), {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
