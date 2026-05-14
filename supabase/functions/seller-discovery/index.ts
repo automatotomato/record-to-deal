@@ -349,7 +349,7 @@ async function geminiPublicContactHunt(lead: any, targetName: string | null, ent
   try {
     const r = await fetch(AI_URL, {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      headers: GATEWAY_HEADERS(apiKey),
       body: JSON.stringify({
         model: AI_MODEL,
         messages: [
@@ -394,7 +394,7 @@ async function aiConsolidate(blob: string, apiKey: string, budget: Budget): Prom
   try {
     const r = await fetch(AI_URL, {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      headers: GATEWAY_HEADERS(apiKey),
       body: JSON.stringify({
         model: AI_MODEL,
         messages: [
