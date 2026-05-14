@@ -23,13 +23,17 @@ const corsHeaders = {
 };
 
 const AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
-const AI_MODEL = "google/gemini-2.5-flash";
+const AI_MODEL = "google/gemini-3-flash-preview";
 const HARD_BUDGET_MS = 50_000;
 
 type SourceKind = "commercial" | "residential" | "court" | "sec";
 
 type Candidate = {
   owner_name?: string;
+  owner_contact_name?: string;
+  owner_contact_email?: string;
+  owner_contact_phone?: string;
+  owner_website?: string;
   property_address?: string;
   property_city?: string;
   property_zip?: string;
@@ -42,6 +46,12 @@ type Candidate = {
 };
 
 const SOURCES: SourceKind[] = ["commercial", "residential", "court", "sec"];
+
+const GATEWAY_HEADERS = (key: string) => ({
+  "Lovable-API-Key": key,
+  "X-Lovable-AIG-SDK": "vercel-ai-sdk",
+  "Content-Type": "application/json",
+});
 
 function promptFor(source: SourceKind, state: string, counties: string[]): string {
   const countyList = counties.slice(0, 12).join(", ");
