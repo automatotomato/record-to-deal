@@ -668,7 +668,7 @@ Deno.serve(async (req) => {
   await supabase.from("lead_activities").insert({
     lead_id: leadId,
     kind: "seller_discovery",
-    summary: `Discovery: ${status}${d.email ? ` · email ✓` : ""}${d.phone ? " · phone ✓" : ""}${d.linkedin ? " · LinkedIn ✓" : ""} · used ${budget.fc} FC + ${budget.apollo} Apollo + ${budget.ai} AI`,
+    summary: `Discovery: ${status}${d.email ? ` · email ✓` : ""}${d.phone ? " · phone ✓" : ""}${d.linkedin ? " · LinkedIn ✓" : ""} · used ${budget.fc} FC + ${budget.ai} AI`,
     payload: { discovery: d, budget_used: budget },
   });
 
