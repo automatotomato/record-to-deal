@@ -109,12 +109,11 @@ export const OutreachDashboard = () => {
   const { data: leads, isLoading } = useQuery({
     queryKey: ["leads"],
     queryFn: async () => {
-      // Main dashboard ONLY shows ready-for-outreach leads in actionable tiers.
+      // Show every lead in the intelligence desk — grouped by readiness.
       const { data, error } = await supabase
         .from("leads")
         .select("*")
-        .eq("pipeline_stage", "ready")
-        .in("tier", ["CRITICAL", "URGENT", "ACTIVE"])
+        .neq("tier", "DISQUALIFIED")
         .order("is_urgent", { ascending: false })
         .order("score", { ascending: false })
         .limit(500);
