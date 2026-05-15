@@ -16,9 +16,15 @@ const corsHeaders = {
 };
 
 const FC_V2 = "https://api.firecrawl.dev/v2";
-const AI_URL = "https://api.openai.com/v1/chat/completions";
-const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-5.1";
-if (!(globalThis as any).__sdLogged) { console.log(`[seller-discovery] OpenAI model: ${AI_MODEL}`); (globalThis as any).__sdLogged = true; }
+// Route AI calls through the Lovable AI Gateway (OpenAI-compatible) so we
+// don't burn the user's personal OpenAI quota. Falls back to direct OpenAI
+// only if no LOVABLE_API_KEY is configured.
+const USE_GATEWAY = !!Deno.env.get("LOVABLE_API_KEY");
+const AI_URL = USE_GATEWAY
+  ? "https://ai.gateway.lovable.dev/v1/chat/completions"
+  : "https://api.openai.com/v1/chat/completions";
+const AI_MODEL = Deno.env.get("OPENAI_MODEL") || (USE_GATEWAY ? "openai/gpt-5-mini" : "gpt-4o-mini");
+if (!(globalThis as any).__sdLogged) { console.log(`[seller-discovery] AI: ${USE_GATEWAY ? "lovable-gateway" : "openai-direct"} model=${AI_MODEL}`); (globalThis as any).__sdLogged = true; }
 
 // Per-call budget so a single lead can't burn the day's quota
 const BUDGET = { firecrawl: 15, ai: 3 };
