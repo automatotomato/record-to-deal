@@ -11,7 +11,7 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-5.1";
+const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-4o-mini";
 
 function fmtMoney(n: number | null | undefined): string {
   if (!n) return "—";

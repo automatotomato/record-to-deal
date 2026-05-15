@@ -17,7 +17,7 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
   const aiKey = Deno.env.get("OPENAI_API_KEY");
-  const aiModel = Deno.env.get("OPENAI_MODEL") || "gpt-5.1";
+  const aiModel = Deno.env.get("OPENAI_MODEL") || "gpt-4o-mini";
 
   try {
     const body = await req.json().catch(() => ({}));
