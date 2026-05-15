@@ -26,7 +26,7 @@ Deno.serve(async (req) => {
     );
     const aiKey = Deno.env.get("OPENAI_API_KEY");
     if (!aiKey) return jsonErr("OPENAI_API_KEY missing", 500);
-    const aiModel = Deno.env.get("OPENAI_MODEL") || "gpt-5.1";
+    const aiModel = Deno.env.get("OPENAI_MODEL") || "gpt-4o-mini";
     if (!(globalThis as any).__modelLogged) { console.log(`[lead-brief] OpenAI model: ${aiModel}`); (globalThis as any).__modelLogged = true; }
 
     const body = await req.json().catch(() => ({}));

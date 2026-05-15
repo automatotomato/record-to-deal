@@ -23,7 +23,7 @@ const corsHeaders = {
 };
 
 const AI_URL = "https://api.openai.com/v1/chat/completions";
-const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-5.1";
+const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-4o-mini";
 const FC_V2 = "https://api.firecrawl.dev/v2";
 const HARD_BUDGET_MS = 90_000;
 
