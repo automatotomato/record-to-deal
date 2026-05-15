@@ -358,7 +358,7 @@ ${blob.slice(0, 14000)}` },
         response_format: { type: "json_object" },
       }),
     });
-    if (!r.ok) return null;
+    if (!r.ok) { console.warn(`ai consolidate ${r.status}: ${(await r.text()).slice(0, 200)}`); return null; }
     const d = await r.json();
     return parseJsonObject(d?.choices?.[0]?.message?.content);
   } catch (_) { return null; }
