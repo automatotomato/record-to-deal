@@ -365,10 +365,10 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const fcKey = Deno.env.get("FIRECRAWL_API_KEY");
-  const lovableKey = Deno.env.get("LOVABLE_API_KEY") || Deno.env.get("OPENAI_API_KEY");
+  const lovableKey = Deno.env.get("OPENAI_API_KEY");
 
   if (!fcKey || !lovableKey) {
-    return new Response(JSON.stringify({ error: "FIRECRAWL_API_KEY and LOVABLE_API_KEY (or OPENAI_API_KEY) are required" }), {
+    return new Response(JSON.stringify({ error: "FIRECRAWL_API_KEY and OPENAI_API_KEY are required" }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
