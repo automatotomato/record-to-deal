@@ -16,9 +16,15 @@ const corsHeaders = {
 };
 
 const FC_V2 = "https://api.firecrawl.dev/v2";
-const AI_URL = "https://api.openai.com/v1/chat/completions";
-const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-5.1";
-if (!(globalThis as any).__sdLogged) { console.log(`[seller-discovery] OpenAI model: ${AI_MODEL}`); (globalThis as any).__sdLogged = true; }
+// Route AI calls through the Lovable AI Gateway (OpenAI-compatible) so we
+// don't burn the user's personal OpenAI quota. Falls back to direct OpenAI
+// only if no LOVABLE_API_KEY is configured.
+const USE_GATEWAY = !!Deno.env.get("LOVABLE_API_KEY");
+const AI_URL = USE_GATEWAY
+  ? "https://ai.gateway.lovable.dev/v1/chat/completions"
+  : "https://api.openai.com/v1/chat/completions";
+const AI_MODEL = Deno.env.get("OPENAI_MODEL") || (USE_GATEWAY ? "openai/gpt-5-mini" : "gpt-4o-mini");
+if (!(globalThis as any).__sdLogged) { console.log(`[seller-discovery] AI: ${USE_GATEWAY ? "lovable-gateway" : "openai-direct"} model=${AI_MODEL}`); (globalThis as any).__sdLogged = true; }
 
 // Per-call budget so a single lead can't burn the day's quota
 const BUDGET = { firecrawl: 15, ai: 3 };
@@ -352,7 +358,7 @@ ${blob.slice(0, 14000)}` },
         response_format: { type: "json_object" },
       }),
     });
-    if (!r.ok) return null;
+    if (!r.ok) { console.warn(`ai consolidate ${r.status}: ${(await r.text()).slice(0, 200)}`); return null; }
     const d = await r.json();
     return parseJsonObject(d?.choices?.[0]?.message?.content);
   } catch (_) { return null; }
@@ -365,10 +371,10 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const fcKey = Deno.env.get("FIRECRAWL_API_KEY");
-  const lovableKey = Deno.env.get("OPENAI_API_KEY");
+  const lovableKey = Deno.env.get("LOVABLE_API_KEY") || Deno.env.get("OPENAI_API_KEY");
 
   if (!fcKey || !lovableKey) {
-    return new Response(JSON.stringify({ error: "FIRECRAWL_API_KEY and OPENAI_API_KEY are required" }), {
+    return new Response(JSON.stringify({ error: "FIRECRAWL_API_KEY and LOVABLE_API_KEY (or OPENAI_API_KEY) are required" }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
