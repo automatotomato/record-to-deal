@@ -213,11 +213,32 @@ export const OutreachDashboard = () => {
   }, [leads]);
 
   const stats = useMemo(() => {
-    if (!leads) return { total: 0, urgent: 0, hot: 0, tax: 0 };
+    if (!leads) return { total: 0, urgent: 0, hot: 0, tax: 0, ready: 0 };
     const urgent = leads.filter((l) => l.is_urgent).length;
     const hot = leads.filter((l) => l.tier === "HOT").length;
+    const ready = leads.filter((l) => l.readiness === "ready_for_outreach" || l.readiness === "contact_found").length;
     const tax = leads.reduce((s, l) => s + (l.total_tax_exposure ?? 0), 0);
-    return { total: leads.length, urgent, hot, tax };
+    return { total: leads.length, urgent, hot, tax, ready };
+  }, [leads]);
+
+  // Top "ready to go" leads — verified contact + strong fit, sorted by urgency then tax exposure.
+  const readyLeads = useMemo(() => {
+    if (!leads) return [];
+    const ready = leads.filter(
+      (l) =>
+        isCandidate(l) &&
+        (l.readiness === "ready_for_outreach" || l.readiness === "contact_found") &&
+        (l.contact_email || l.contact_phone),
+    );
+    return ready
+      .sort((a, b) => {
+        if (a.is_urgent !== b.is_urgent) return a.is_urgent ? -1 : 1;
+        const tierRank = { URGENT: 0, HOT: 1, WARM: 2, COLD: 3 } as Record<string, number>;
+        const tr = (tierRank[a.tier] ?? 9) - (tierRank[b.tier] ?? 9);
+        if (tr !== 0) return tr;
+        return (b.total_tax_exposure ?? 0) - (a.total_tax_exposure ?? 0);
+      })
+      .slice(0, 3);
   }, [leads]);
 
   const activeFilterCount =
