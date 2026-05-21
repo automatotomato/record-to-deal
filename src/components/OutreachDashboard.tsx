@@ -680,21 +680,29 @@ const KpiCard = ({
   value,
   accent,
   hint,
+  icon,
 }: {
   label: string;
   value: string;
   accent?: boolean;
   hint?: string;
+  icon?: React.ReactNode;
 }) => {
   const inner = (
-    <Card className="h-full">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+    <Card className={cn("h-full transition-all hover:shadow-md hover:-translate-y-0.5 relative overflow-hidden group", accent && "border-accent/40")}>
+      {accent && <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-transparent via-accent to-transparent" />}
+      <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
+        <CardTitle className="text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-[0.15em]">
           {label}
         </CardTitle>
+        {icon && (
+          <span className={cn("h-7 w-7 inline-flex items-center justify-center rounded-md bg-muted text-muted-foreground transition-colors group-hover:bg-accent/10 group-hover:text-accent", accent && "bg-accent/10 text-accent")}>
+            {icon}
+          </span>
+        )}
       </CardHeader>
       <CardContent>
-        <div className={cn("font-display text-3xl tabular leading-none", accent && "text-accent")}>
+        <div className={cn("font-display text-4xl tabular leading-none", accent && "text-accent")}>
           {value}
         </div>
       </CardContent>
