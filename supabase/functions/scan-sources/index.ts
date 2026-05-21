@@ -131,6 +131,14 @@ function mapTrigger(raw: string | undefined): string {
 const norm = (s: string | null | undefined) =>
   (s ?? "").toString().trim().toUpperCase().replace(/\s+/g, " ").replace(/[.,]/g, "");
 
+function cleanDate(v: unknown): string | null {
+  if (!v) return null;
+  const s = String(v).trim();
+  if (!s || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : s;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -233,8 +241,8 @@ Deno.serve(async (req) => {
         parcel_number: c.parcel_number ?? null,
         property_type: propertyType,
         sale_price: c.sale_price ?? null,
-        sale_date: c.sale_date ?? null,
-        deed_date: c.deed_date ?? c.sale_date ?? null,
+        sale_date: cleanDate(c.sale_date),
+        deed_date: cleanDate(c.deed_date) ?? cleanDate(c.sale_date),
         trigger_event: triggerEvent,
         source_record_url: c.source_record_url ?? null,
         data_sources: ["firecrawl"],
