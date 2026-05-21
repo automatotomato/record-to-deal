@@ -49,6 +49,14 @@ import {
   SlidersHorizontal,
   X,
   Clock,
+  Flame,
+  TrendingUp,
+  Target,
+  Briefcase,
+  MapPin,
+  ArrowUpRight,
+  Activity,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { LeadDrawer } from "./LeadDrawer";
@@ -205,11 +213,32 @@ export const OutreachDashboard = () => {
   }, [leads]);
 
   const stats = useMemo(() => {
-    if (!leads) return { total: 0, urgent: 0, hot: 0, tax: 0 };
+    if (!leads) return { total: 0, urgent: 0, hot: 0, tax: 0, ready: 0 };
     const urgent = leads.filter((l) => l.is_urgent).length;
     const hot = leads.filter((l) => l.tier === "HOT").length;
+    const ready = leads.filter((l) => l.readiness === "ready_for_outreach" || l.readiness === "contact_found").length;
     const tax = leads.reduce((s, l) => s + (l.total_tax_exposure ?? 0), 0);
-    return { total: leads.length, urgent, hot, tax };
+    return { total: leads.length, urgent, hot, tax, ready };
+  }, [leads]);
+
+  // Top "ready to go" leads — verified contact + strong fit, sorted by urgency then tax exposure.
+  const readyLeads = useMemo(() => {
+    if (!leads) return [];
+    const ready = leads.filter(
+      (l) =>
+        isCandidate(l) &&
+        (l.readiness === "ready_for_outreach" || l.readiness === "contact_found") &&
+        (l.contact_email || l.contact_phone),
+    );
+    return ready
+      .sort((a, b) => {
+        if (a.is_urgent !== b.is_urgent) return a.is_urgent ? -1 : 1;
+        const tierRank = { URGENT: 0, HOT: 1, WARM: 2, COLD: 3 } as Record<string, number>;
+        const tr = (tierRank[a.tier] ?? 9) - (tierRank[b.tier] ?? 9);
+        if (tr !== 0) return tr;
+        return (b.total_tax_exposure ?? 0) - (a.total_tax_exposure ?? 0);
+      })
+      .slice(0, 3);
   }, [leads]);
 
   const activeFilterCount =
@@ -294,106 +323,161 @@ export const OutreachDashboard = () => {
 
   return (
     <TooltipProvider delayDuration={150}>
-      <div className="p-6 md:p-8 space-y-6 max-w-[1600px] mx-auto">
+      <div className="p-6 md:p-8 space-y-8 max-w-[1600px] mx-auto">
         {/* Header */}
-        <div className="flex items-start justify-between gap-6 flex-wrap">
-          <div className="space-y-1">
-            <h1 className="font-display text-4xl md:text-5xl leading-none tracking-tight">
-              The Desk
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              <span className="tabular font-medium text-foreground">{stats.total}</span> active leads
-              {stats.urgent > 0 && (
-                <> · <span className="text-urgent font-medium">{stats.urgent} urgent</span></>
-              )}
-              {lastRefreshed && <> · last scan {fmtRelative(lastRefreshed)}</>}
-            </p>
-          </div>
+        <div className="relative overflow-hidden rounded-lg border bg-gradient-to-br from-primary via-primary to-primary/90 text-primary-foreground">
+          <div className="absolute inset-0 opacity-[0.07] grid-lines pointer-events-none" />
+          <div className="absolute -right-24 -top-24 h-72 w-72 rounded-full bg-accent/20 blur-3xl pointer-events-none" />
+          <div className="relative p-6 md:p-8 flex items-start justify-between gap-6 flex-wrap">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-accent/15 text-accent border border-accent/30 text-[10px] font-mono uppercase tracking-[0.15em]">
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="absolute inset-0 rounded-full bg-accent animate-ping opacity-60" />
+                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent" />
+                  </span>
+                  Live
+                </span>
+                {lastRefreshed && (
+                  <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-primary-foreground/60">
+                    Last scan {fmtRelative(lastRefreshed)}
+                  </span>
+                )}
+              </div>
+              <div>
+                <h1 className="font-display text-5xl md:text-6xl leading-[0.95] tracking-tight">
+                  The Desk
+                </h1>
+                <p className="text-sm text-primary-foreground/70 mt-2 max-w-xl">
+                  Intelligence on every fresh investment-property sale — surfaced, scored, and routed for the 180-day 1031 window.
+                </p>
+              </div>
+            </div>
 
-          <div className="flex items-center gap-2">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={exportCsv}
-                  disabled={!filtered.length}
-                >
-                  <Download className="h-4 w-4" /> Export
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Download visible leads as CSV</TooltipContent>
-            </Tooltip>
-
-            {isAdmin && (
-              <Button asChild variant="outline" size="sm">
-                <Link to="/admin">
-                  <Settings2 className="h-4 w-4" /> Sources
-                </Link>
-              </Button>
-            )}
-
-            {isAdmin && (
+            <div className="flex items-center gap-2">
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button onClick={runScout} disabled={running} size="sm">
-                    {running ? (
-                      <><Loader2 className="h-4 w-4 animate-spin" /> Scanning…</>
-                    ) : (
-                      <><Plus className="h-4 w-4" /> Find new leads</>
-                    )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={exportCsv}
+                    disabled={!filtered.length}
+                    className="bg-transparent border-primary-foreground/20 text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground"
+                  >
+                    <Download className="h-4 w-4" /> Export
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>
-                  Scans high-priority county records (CA, NY, NJ, FL, TX, OR, MA, IL, HI, NV…) for fresh investment property sales (1–2 min)
-                </TooltipContent>
+                <TooltipContent>Download visible leads as CSV</TooltipContent>
               </Tooltip>
-            )}
+
+              {isAdmin && (
+                <Button asChild variant="outline" size="sm" className="bg-transparent border-primary-foreground/20 text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground">
+                  <Link to="/admin">
+                    <Settings2 className="h-4 w-4" /> Sources
+                  </Link>
+                </Button>
+              )}
+
+              {isAdmin && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button onClick={runScout} disabled={running} size="sm" className="bg-accent text-accent-foreground hover:bg-accent/90">
+                      {running ? (
+                        <><Loader2 className="h-4 w-4 animate-spin" /> Scanning…</>
+                      ) : (
+                        <><Sparkles className="h-4 w-4" /> Find new leads</>
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    Scans high-priority county records (CA, NY, NJ, FL, TX, OR, MA, IL, HI, NV…) for fresh investment property sales (1–2 min)
+                  </TooltipContent>
+                </Tooltip>
+              )}
+            </div>
           </div>
         </div>
 
         {/* KPI cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <KpiCard
+            icon={<Briefcase className="h-4 w-4" />}
             label="Active leads"
             value={stats.total.toString()}
             hint="Worth-pursuing leads in your pipeline (cold and filtered-out leads excluded)."
           />
           <KpiCard
+            icon={<AlertCircle className="h-4 w-4" />}
             label="Urgent"
             value={stats.urgent.toString()}
             accent={stats.urgent > 0}
             hint="Sold in the last 30 days — the 1031 clock is ticking."
           />
           <KpiCard
+            icon={<Flame className="h-4 w-4" />}
             label="Hot leads"
             value={stats.hot.toString()}
             hint="Strongest 1031 candidates. Reach out first."
           />
           <KpiCard
+            icon={<TrendingUp className="h-4 w-4" />}
             label="Pipeline tax exposure"
             value={fmtMoney(stats.tax, { compact: true })}
             hint="Combined estimated tax bill across all leads — how much a 1031 could defer."
           />
         </div>
 
-        
+        {/* Priority Briefing — top ready-to-go leads */}
+        {readyLeads.length > 0 && (
+          <section className="space-y-3">
+            <div className="flex items-end justify-between gap-4 flex-wrap">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Target className="h-4 w-4 text-accent" />
+                  <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground">
+                    Priority Briefing
+                  </span>
+                </div>
+                <h2 className="font-display text-2xl md:text-3xl mt-1 leading-tight">Ready to call today</h2>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Verified contacts, strong 1031 fit, sorted by urgency and tax exposure.
+                </p>
+              </div>
+              <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                {stats.ready} ready · {readyLeads.length} surfaced
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {readyLeads.map((l, i) => (
+                <ReadyLeadCard key={l.id} lead={l} rank={i + 1} onOpen={() => setSelectedId(l.id)} />
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* Tabs + toolbar */}
-        <Card>
-          <CardHeader className="space-y-4 pb-4">
-            <Tabs value={tab} onValueChange={(v) => { setTab(v as TabKey); setTierFilter("all"); }}>
-              <TabsList>
-                <TabsTrigger value="candidates" className="gap-2">
-                  1031 Candidates
-                  <Badge variant="secondary" className="tabular">{tabCounts.candidates}</Badge>
-                </TabsTrigger>
-                <TabsTrigger value="active" className="gap-2">
-                  All active
-                  <Badge variant="secondary" className="tabular">{tabCounts.active}</Badge>
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
+        <Card className="overflow-hidden">
+          <CardHeader className="space-y-4 pb-4 border-b bg-muted/20">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <div>
+                <div className="text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground mb-1">
+                  Lead Roster
+                </div>
+                <h2 className="font-display text-2xl leading-none">Full pipeline</h2>
+              </div>
+              <Tabs value={tab} onValueChange={(v) => { setTab(v as TabKey); setTierFilter("all"); }}>
+                <TabsList>
+                  <TabsTrigger value="candidates" className="gap-2">
+                    1031 Candidates
+                    <Badge variant="secondary" className="tabular">{tabCounts.candidates}</Badge>
+                  </TabsTrigger>
+                  <TabsTrigger value="active" className="gap-2">
+                    All active
+                    <Badge variant="secondary" className="tabular">{tabCounts.active}</Badge>
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
 
             <div className="flex flex-wrap items-center gap-3">
               <div className="relative flex-1 min-w-[240px] max-w-md">
@@ -596,21 +680,29 @@ const KpiCard = ({
   value,
   accent,
   hint,
+  icon,
 }: {
   label: string;
   value: string;
   accent?: boolean;
   hint?: string;
+  icon?: React.ReactNode;
 }) => {
   const inner = (
-    <Card className="h-full">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+    <Card className={cn("h-full transition-all hover:shadow-md hover:-translate-y-0.5 relative overflow-hidden group", accent && "border-accent/40")}>
+      {accent && <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-transparent via-accent to-transparent" />}
+      <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
+        <CardTitle className="text-[10px] font-mono font-medium text-muted-foreground uppercase tracking-[0.15em]">
           {label}
         </CardTitle>
+        {icon && (
+          <span className={cn("h-7 w-7 inline-flex items-center justify-center rounded-md bg-muted text-muted-foreground transition-colors group-hover:bg-accent/10 group-hover:text-accent", accent && "bg-accent/10 text-accent")}>
+            {icon}
+          </span>
+        )}
       </CardHeader>
       <CardContent>
-        <div className={cn("font-display text-3xl tabular leading-none", accent && "text-accent")}>
+        <div className={cn("font-display text-4xl tabular leading-none", accent && "text-accent")}>
           {value}
         </div>
       </CardContent>
@@ -762,5 +854,122 @@ const EmptyState = ({
       <div className="font-display text-2xl mb-2">No matches.</div>
       <div className="text-sm text-muted-foreground max-w-md mx-auto">{tabCopy[tab]}</div>
     </div>
+  );
+};
+
+const ReadyLeadCard = ({
+  lead,
+  rank,
+  onOpen,
+}: {
+  lead: any;
+  rank: number;
+  onOpen: () => void;
+}) => {
+  const w = windowStatus(lead.sale_date);
+  const urgency =
+    w?.tone === "closing" || lead.is_urgent
+      ? "border-urgent/50 hover:border-urgent"
+      : w?.tone === "fresh"
+      ? "border-emerald-500/40 hover:border-emerald-500"
+      : "border-border hover:border-accent/50";
+  return (
+    <button
+      onClick={onOpen}
+      className={cn(
+        "group relative text-left bg-card rounded-lg border-2 transition-all hover:shadow-lg hover:-translate-y-0.5 overflow-hidden",
+        urgency,
+      )}
+    >
+      {/* Rank ribbon */}
+      <div className="absolute top-0 left-0 z-10 bg-primary text-primary-foreground font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded-br-md">
+        #{rank}
+      </div>
+
+      {/* Tier accent strip */}
+      <div className={cn("h-1 w-full", tierBadgeClasses(lead.tier).split(" ")[0])} />
+
+      <div className="p-5 space-y-4">
+        {/* Top row: tier + urgent flag */}
+        <div className="flex items-start justify-between gap-2 pl-10">
+          <div className="flex items-center gap-1.5">
+            {lead.is_urgent && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm bg-urgent text-urgent-foreground text-[9px] font-mono uppercase tracking-wider">
+                <AlertCircle className="h-2.5 w-2.5" /> Urgent
+              </span>
+            )}
+            <Badge className={cn("uppercase tracking-wider text-[10px]", tierBadgeClasses(lead.tier))}>
+              {lead.tier}
+            </Badge>
+          </div>
+          <ArrowUpRight className="h-4 w-4 text-muted-foreground group-hover:text-accent transition-colors" />
+        </div>
+
+        {/* Owner + property */}
+        <div className="space-y-1">
+          <div className="text-base font-semibold leading-tight">
+            {lead.owner_name ?? "Unknown owner"}
+          </div>
+          <div className="text-xs text-muted-foreground uppercase tracking-wide">
+            {lead.owner_type ?? "—"}
+          </div>
+          <div className="text-sm text-foreground/80 pt-1 flex items-start gap-1.5">
+            <MapPin className="h-3.5 w-3.5 mt-0.5 text-muted-foreground shrink-0" />
+            <span className="leading-snug">
+              {lead.property_address ?? "Unknown address"}
+              <span className="text-muted-foreground">
+                {" · "}
+                {lead.property_city}, {lead.state}
+              </span>
+            </span>
+          </div>
+        </div>
+
+        {/* Money row */}
+        <div className="grid grid-cols-2 gap-3 py-3 border-y border-border/60">
+          <div>
+            <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Sale price</div>
+            <div className="font-display text-xl tabular leading-none mt-1">
+              {fmtMoney(lead.sale_price, { compact: true })}
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Tax exposure</div>
+            <div className="font-display text-xl tabular leading-none mt-1 text-accent">
+              {fmtMoney(lead.total_tax_exposure, { compact: true })}
+            </div>
+          </div>
+        </div>
+
+        {/* Footer: contact + window */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5">
+            {lead.contact_email && (
+              <span className="inline-flex items-center justify-center h-6 w-6 rounded-sm bg-accent/10 text-accent" title={lead.contact_email}>
+                <Mail className="h-3 w-3" />
+              </span>
+            )}
+            {lead.contact_phone && (
+              <span className="inline-flex items-center justify-center h-6 w-6 rounded-sm bg-accent/10 text-accent" title={lead.contact_phone}>
+                <Phone className="h-3 w-3" />
+              </span>
+            )}
+            {lead.contact_linkedin && (
+              <span className="inline-flex items-center justify-center h-6 w-6 rounded-sm bg-accent/10 text-accent">
+                <Linkedin className="h-3 w-3" />
+              </span>
+            )}
+            <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground ml-1">
+              Verified
+            </span>
+          </div>
+          {w && (
+            <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+              <Clock className="h-2.5 w-2.5" /> {w.label}
+            </div>
+          )}
+        </div>
+      </div>
+    </button>
   );
 };
