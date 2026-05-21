@@ -117,6 +117,7 @@ export const OutreachDashboard = () => {
         .select("*")
         .neq("tier", "DISQUALIFIED")
         .order("is_urgent", { ascending: false })
+        .order("created_at", { ascending: false })
         .order("score", { ascending: false })
         .limit(500);
       if (error) throw error;
@@ -155,6 +156,7 @@ export const OutreachDashboard = () => {
 
   const isCandidate = (l: Lead) => {
     if (l.tier === "COLD" || l.tier === "DISQUALIFIED") return false;
+    if (l.pipeline_stage === "pre_sale_prospect") return true;
     const trig = (l.trigger_event ?? "").toLowerCase();
     if (!trig.includes("sale") && trig !== "probate") return false;
     const otype = (l.owner_type ?? "").toLowerCase();
