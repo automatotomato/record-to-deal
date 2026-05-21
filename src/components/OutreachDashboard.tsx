@@ -52,7 +52,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { LeadDrawer } from "./LeadDrawer";
-import { PipelineHealthCard } from "./PipelineHealthCard";
+
 import { ReadinessPill } from "./ReadinessPill";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
@@ -360,7 +360,7 @@ export const OutreachDashboard = () => {
           />
         </div>
 
-        {isAdmin && <PipelineHealthCard />}
+        
 
         {/* Tabs + toolbar */}
         <Card>

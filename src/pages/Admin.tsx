@@ -10,7 +10,7 @@ import { fmtRelative } from "@/lib/format";
 import { toast } from "sonner";
 import { Loader2, Play } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
-import { PipelineHealthCard } from "@/components/PipelineHealthCard";
+
 
 const Admin = () => {
   const { isAdmin, loading } = useAuth();
@@ -102,7 +102,7 @@ const Admin = () => {
 
 
       <div className="p-8 space-y-10">
-        <PipelineHealthCard />
+        
 
         <section>
           <h2 className="kpi-label mb-3">Configured counties</h2>
