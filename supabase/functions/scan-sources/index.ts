@@ -131,6 +131,14 @@ function mapTrigger(raw: string | undefined): string {
 const norm = (s: string | null | undefined) =>
   (s ?? "").toString().trim().toUpperCase().replace(/\s+/g, " ").replace(/[.,]/g, "");
 
+function cleanDate(v: unknown): string | null {
+  if (!v) return null;
+  const s = String(v).trim();
+  if (!s || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : s;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
