@@ -125,12 +125,13 @@ export const OutreachDashboard = () => {
   });
 
   const { data: lastRun } = useQuery({
-    queryKey: ["last-scout-run"],
+    queryKey: ["last-scan-job"],
     queryFn: async () => {
       const { data } = await supabase
-        .from("scout_runs")
-        .select("finished_at, started_at, status")
-        .order("started_at", { ascending: false })
+        .from("pipeline_jobs")
+        .select("created_at, finished_at, status, result")
+        .eq("kind", "scan_sources")
+        .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
       return data;
@@ -143,8 +144,8 @@ export const OutreachDashboard = () => {
       .on("postgres_changes", { event: "*", schema: "public", table: "leads" }, () => {
         qc.invalidateQueries({ queryKey: ["leads"] });
       })
-      .on("postgres_changes", { event: "*", schema: "public", table: "scout_runs" }, () => {
-        qc.invalidateQueries({ queryKey: ["last-scout-run"] });
+      .on("postgres_changes", { event: "*", schema: "public", table: "pipeline_jobs" }, () => {
+        qc.invalidateQueries({ queryKey: ["last-scan-job"] });
       })
       .subscribe();
     return () => {
@@ -244,6 +245,7 @@ export const OutreachDashboard = () => {
       supabase.functions.invoke("job-dispatcher", { body: { trigger: "manual" } });
       toast.success(`Queued ${rows.length} county scans — processing now.`);
       qc.invalidateQueries({ queryKey: ["leads"] });
+      qc.invalidateQueries({ queryKey: ["last-scan-job"] });
     } catch (e: any) {
       toast.error(`Couldn't queue scan: ${e.message}`);
     } finally {
@@ -280,7 +282,7 @@ export const OutreachDashboard = () => {
     [leads],
   );
 
-  const lastRefreshed = lastRun?.finished_at ?? lastRun?.started_at;
+  const lastRefreshed = lastRun?.finished_at ?? lastRun?.created_at;
 
   return (
     <TooltipProvider delayDuration={150}>
