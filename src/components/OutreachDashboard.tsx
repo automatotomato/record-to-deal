@@ -160,7 +160,8 @@ export const OutreachDashboard = () => {
   }, [qc]);
 
   const isCandidate = (l: Lead) => {
-    if (l.tier === "COLD" || l.tier === "DISQUALIFIED") return false;
+    if (l.tier === "COLD" || l.tier === "DISQUALIFIED" || l.tier === "UNSCORED") return false;
+    if (l.readiness === "low_confidence" || l.readiness === "researching") return false;
     if (l.pipeline_stage === "pre_sale_prospect") return true;
     const trig = (l.trigger_event ?? "").toLowerCase();
     if (!trig.includes("sale") && trig !== "probate") return false;
