@@ -111,11 +111,16 @@ export const OutreachDashboard = () => {
   const { data: leads, isLoading } = useQuery({
     queryKey: ["leads"],
     queryFn: async () => {
-      // Show every lead in the intelligence desk — grouped by readiness.
+      // Only surface fresh leads — sales older than 60 days are past the 1031
+      // identification window and not actionable. Pre-sale prospects (no sale_date)
+      // are kept if they were discovered in the same window.
+      const cutoffIso = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
+      const cutoffDate = cutoffIso.slice(0, 10);
       const { data, error } = await supabase
         .from("leads")
         .select("*")
         .neq("tier", "DISQUALIFIED")
+        .or(`sale_date.gte.${cutoffDate},and(sale_date.is.null,created_at.gte.${cutoffIso})`)
         .order("is_urgent", { ascending: false })
         .order("created_at", { ascending: false })
         .order("score", { ascending: false })
