@@ -323,106 +323,161 @@ export const OutreachDashboard = () => {
 
   return (
     <TooltipProvider delayDuration={150}>
-      <div className="p-6 md:p-8 space-y-6 max-w-[1600px] mx-auto">
+      <div className="p-6 md:p-8 space-y-8 max-w-[1600px] mx-auto">
         {/* Header */}
-        <div className="flex items-start justify-between gap-6 flex-wrap">
-          <div className="space-y-1">
-            <h1 className="font-display text-4xl md:text-5xl leading-none tracking-tight">
-              The Desk
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              <span className="tabular font-medium text-foreground">{stats.total}</span> active leads
-              {stats.urgent > 0 && (
-                <> · <span className="text-urgent font-medium">{stats.urgent} urgent</span></>
-              )}
-              {lastRefreshed && <> · last scan {fmtRelative(lastRefreshed)}</>}
-            </p>
-          </div>
+        <div className="relative overflow-hidden rounded-lg border bg-gradient-to-br from-primary via-primary to-primary/90 text-primary-foreground">
+          <div className="absolute inset-0 opacity-[0.07] grid-lines pointer-events-none" />
+          <div className="absolute -right-24 -top-24 h-72 w-72 rounded-full bg-accent/20 blur-3xl pointer-events-none" />
+          <div className="relative p-6 md:p-8 flex items-start justify-between gap-6 flex-wrap">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-accent/15 text-accent border border-accent/30 text-[10px] font-mono uppercase tracking-[0.15em]">
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="absolute inset-0 rounded-full bg-accent animate-ping opacity-60" />
+                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent" />
+                  </span>
+                  Live
+                </span>
+                {lastRefreshed && (
+                  <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-primary-foreground/60">
+                    Last scan {fmtRelative(lastRefreshed)}
+                  </span>
+                )}
+              </div>
+              <div>
+                <h1 className="font-display text-5xl md:text-6xl leading-[0.95] tracking-tight">
+                  The Desk
+                </h1>
+                <p className="text-sm text-primary-foreground/70 mt-2 max-w-xl">
+                  Intelligence on every fresh investment-property sale — surfaced, scored, and routed for the 180-day 1031 window.
+                </p>
+              </div>
+            </div>
 
-          <div className="flex items-center gap-2">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={exportCsv}
-                  disabled={!filtered.length}
-                >
-                  <Download className="h-4 w-4" /> Export
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Download visible leads as CSV</TooltipContent>
-            </Tooltip>
-
-            {isAdmin && (
-              <Button asChild variant="outline" size="sm">
-                <Link to="/admin">
-                  <Settings2 className="h-4 w-4" /> Sources
-                </Link>
-              </Button>
-            )}
-
-            {isAdmin && (
+            <div className="flex items-center gap-2">
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button onClick={runScout} disabled={running} size="sm">
-                    {running ? (
-                      <><Loader2 className="h-4 w-4 animate-spin" /> Scanning…</>
-                    ) : (
-                      <><Plus className="h-4 w-4" /> Find new leads</>
-                    )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={exportCsv}
+                    disabled={!filtered.length}
+                    className="bg-transparent border-primary-foreground/20 text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground"
+                  >
+                    <Download className="h-4 w-4" /> Export
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>
-                  Scans high-priority county records (CA, NY, NJ, FL, TX, OR, MA, IL, HI, NV…) for fresh investment property sales (1–2 min)
-                </TooltipContent>
+                <TooltipContent>Download visible leads as CSV</TooltipContent>
               </Tooltip>
-            )}
+
+              {isAdmin && (
+                <Button asChild variant="outline" size="sm" className="bg-transparent border-primary-foreground/20 text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground">
+                  <Link to="/admin">
+                    <Settings2 className="h-4 w-4" /> Sources
+                  </Link>
+                </Button>
+              )}
+
+              {isAdmin && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button onClick={runScout} disabled={running} size="sm" className="bg-accent text-accent-foreground hover:bg-accent/90">
+                      {running ? (
+                        <><Loader2 className="h-4 w-4 animate-spin" /> Scanning…</>
+                      ) : (
+                        <><Sparkles className="h-4 w-4" /> Find new leads</>
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    Scans high-priority county records (CA, NY, NJ, FL, TX, OR, MA, IL, HI, NV…) for fresh investment property sales (1–2 min)
+                  </TooltipContent>
+                </Tooltip>
+              )}
+            </div>
           </div>
         </div>
 
         {/* KPI cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <KpiCard
+            icon={<Briefcase className="h-4 w-4" />}
             label="Active leads"
             value={stats.total.toString()}
             hint="Worth-pursuing leads in your pipeline (cold and filtered-out leads excluded)."
           />
           <KpiCard
+            icon={<AlertCircle className="h-4 w-4" />}
             label="Urgent"
             value={stats.urgent.toString()}
             accent={stats.urgent > 0}
             hint="Sold in the last 30 days — the 1031 clock is ticking."
           />
           <KpiCard
+            icon={<Flame className="h-4 w-4" />}
             label="Hot leads"
             value={stats.hot.toString()}
             hint="Strongest 1031 candidates. Reach out first."
           />
           <KpiCard
+            icon={<TrendingUp className="h-4 w-4" />}
             label="Pipeline tax exposure"
             value={fmtMoney(stats.tax, { compact: true })}
             hint="Combined estimated tax bill across all leads — how much a 1031 could defer."
           />
         </div>
 
-        
+        {/* Priority Briefing — top ready-to-go leads */}
+        {readyLeads.length > 0 && (
+          <section className="space-y-3">
+            <div className="flex items-end justify-between gap-4 flex-wrap">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Target className="h-4 w-4 text-accent" />
+                  <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground">
+                    Priority Briefing
+                  </span>
+                </div>
+                <h2 className="font-display text-2xl md:text-3xl mt-1 leading-tight">Ready to call today</h2>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Verified contacts, strong 1031 fit, sorted by urgency and tax exposure.
+                </p>
+              </div>
+              <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                {stats.ready} ready · {readyLeads.length} surfaced
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {readyLeads.map((l, i) => (
+                <ReadyLeadCard key={l.id} lead={l} rank={i + 1} onOpen={() => setSelectedId(l.id)} />
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* Tabs + toolbar */}
-        <Card>
-          <CardHeader className="space-y-4 pb-4">
-            <Tabs value={tab} onValueChange={(v) => { setTab(v as TabKey); setTierFilter("all"); }}>
-              <TabsList>
-                <TabsTrigger value="candidates" className="gap-2">
-                  1031 Candidates
-                  <Badge variant="secondary" className="tabular">{tabCounts.candidates}</Badge>
-                </TabsTrigger>
-                <TabsTrigger value="active" className="gap-2">
-                  All active
-                  <Badge variant="secondary" className="tabular">{tabCounts.active}</Badge>
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
+        <Card className="overflow-hidden">
+          <CardHeader className="space-y-4 pb-4 border-b bg-muted/20">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <div>
+                <div className="text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground mb-1">
+                  Lead Roster
+                </div>
+                <h2 className="font-display text-2xl leading-none">Full pipeline</h2>
+              </div>
+              <Tabs value={tab} onValueChange={(v) => { setTab(v as TabKey); setTierFilter("all"); }}>
+                <TabsList>
+                  <TabsTrigger value="candidates" className="gap-2">
+                    1031 Candidates
+                    <Badge variant="secondary" className="tabular">{tabCounts.candidates}</Badge>
+                  </TabsTrigger>
+                  <TabsTrigger value="active" className="gap-2">
+                    All active
+                    <Badge variant="secondary" className="tabular">{tabCounts.active}</Badge>
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
 
             <div className="flex flex-wrap items-center gap-3">
               <div className="relative flex-1 min-w-[240px] max-w-md">
