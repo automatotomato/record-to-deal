@@ -49,6 +49,14 @@ import {
   SlidersHorizontal,
   X,
   Clock,
+  Flame,
+  TrendingUp,
+  Target,
+  Briefcase,
+  MapPin,
+  ArrowUpRight,
+  Activity,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { LeadDrawer } from "./LeadDrawer";
