@@ -64,22 +64,27 @@ const Admin = () => {
     },
   });
 
-  // Latest scout run, polled live so the user sees a progress bar while a scan is in flight.
-  const { data: latestRun } = useQuery({
-    queryKey: ["latest-scout-run"],
+  // Latest scan status, based on the real pipeline jobs that run the scanners.
+  const { data: scanStatus } = useQuery({
+    queryKey: ["latest-scan-status"],
     queryFn: async () => {
-      const { data } = await supabase
-        .from("scout_runs")
-        .select("*")
-        .order("started_at", { ascending: false })
+      const { data: latest } = await supabase
+        .from("pipeline_jobs")
+        .select("created_at, finished_at, status, result")
+        .eq("kind", "scan_sources")
+        .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
-      return data;
+
+      const { data: active } = await supabase
+        .from("pipeline_jobs")
+        .select("status", { count: "exact" })
+        .eq("kind", "scan_sources")
+        .in("status", ["queued", "retry", "running"]);
+
+      return { latest, activeCount: active?.length ?? 0 };
     },
-    refetchInterval: (q) => {
-      const r = (q.state.data as any) ?? null;
-      return r?.status === "running" ? 3000 : false;
-    },
+    refetchInterval: (q) => ((q.state.data as any)?.activeCount > 0 ? 3000 : false),
   });
 
   const enabledCount = (counties ?? []).filter((c: any) => c.enabled).length;
@@ -146,14 +151,15 @@ const Admin = () => {
 
         <section>
           <h2 className="kpi-label mb-3">Scout status</h2>
-          <ScoutRunStatus run={latestRun} totalCounties={enabledCount} />
+          <ScoutRunStatus status={scanStatus} totalCounties={enabledCount} />
         </section>
       </div>
     </AppShell>
   );
 };
 
-const ScoutRunStatus = ({ run, totalCounties }: { run: any; totalCounties: number }) => {
+const ScoutRunStatus = ({ status, totalCounties }: { status: any; totalCounties: number }) => {
+  const run = status?.latest;
   if (!run) {
     return (
       <div className="border border-border bg-card p-6 text-sm text-muted-foreground italic">
@@ -161,14 +167,15 @@ const ScoutRunStatus = ({ run, totalCounties }: { run: any; totalCounties: numbe
       </div>
     );
   }
-  const isRunning = run.status === "running";
+  const activeCount = status?.activeCount ?? 0;
+  const isRunning = activeCount > 0;
   const isFailed = run.status === "failed";
-  const scanned = run.counties_scanned ?? 0;
+  const scanned = Math.max(0, totalCounties - activeCount);
   const denom = Math.max(totalCounties, scanned, 1);
   const pct = isRunning ? Math.min(95, Math.round((scanned / denom) * 100)) : 100;
-  const found = run.leads_found ?? 0;
-  const updated = run.leads_updated ?? 0;
-  const elapsed = fmtRelative(run.started_at);
+  const found = run.result?.inserted ?? run.result?.found ?? 0;
+  const updated = run.result?.enqueued ?? 0;
+  const elapsed = fmtRelative(run.created_at);
   const finishedLabel = run.finished_at ? fmtRelative(run.finished_at) : null;
 
   return (
@@ -196,8 +203,8 @@ const ScoutRunStatus = ({ run, totalCounties }: { run: any; totalCounties: numbe
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-1">
         <Stat label="Counties scanned" value={`${scanned}${isRunning ? ` / ${totalCounties}` : ""}`} />
         <Stat label="New leads" value={found.toString()} accent={found > 0} />
-        <Stat label="Refreshed leads" value={updated.toString()} />
-        <Stat label="Errors" value={(run.errors?.length ?? 0).toString()} muted={!run.errors?.length} />
+        <Stat label="Queued follow-up" value={updated.toString()} />
+        <Stat label="Errors" value={(run.result?.errors?.length ?? 0).toString()} muted={!run.result?.errors?.length} />
       </div>
 
       {isFailed && (
