@@ -159,7 +159,7 @@ export const OutreachDashboard = () => {
     queryKey: ["owner-rollup"],
     queryFn: async () => {
       const { data } = await supabase.from("lead_owner_rollup" as any).select("*");
-      return (data ?? []) as OwnerRollup[];
+      return ((data ?? []) as unknown) as OwnerRollup[];
     },
   });
   const ownerRollupMap = useMemo(() => {
