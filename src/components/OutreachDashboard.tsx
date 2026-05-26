@@ -58,7 +58,7 @@ import {
 import { toast } from "sonner";
 import { LeadDrawer } from "./LeadDrawer";
 
-import { ReadinessPill } from "./ReadinessPill";
+
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
@@ -66,25 +66,6 @@ type Lead = any;
 type TabKey = "candidates" | "presale" | "active";
 type OwnerRollup = { owner_key: string; property_count: number; total_sale_value: number; total_tax_exposure: number };
 
-const STATUS_DOT: Record<string, string> = {
-  new: "bg-accent",
-  reviewing: "bg-warm",
-  contacted: "bg-cold",
-  replied: "bg-hot",
-  meeting: "bg-hot",
-  won: "bg-emerald-600",
-  dead: "bg-muted-foreground/40",
-};
-
-const STATUS_LABEL: Record<string, string> = {
-  new: "New",
-  reviewing: "Reviewing",
-  contacted: "Contacted",
-  replied: "Replied",
-  meeting: "Meeting",
-  won: "Won",
-  dead: "Dead",
-};
 
 // Collapsed 3-tier priority system. The DB has CRITICAL/URGENT/ACTIVE/HOT/
 // WARM/FOLLOW_UP/COLD/etc. — too many overlapping labels. We bucket them:
@@ -121,6 +102,46 @@ const PriorityBadge = ({ tier, isUrgent }: { tier: string | null | undefined; is
       {meta.label}
     </Badge>
   );
+};
+
+// Single source of truth for the row's "what's happening" tag.
+// Collapses readiness + outreach status into ONE plain-English label so the
+// pipeline reads at a glance instead of forcing users to decode multiple chips.
+const StateChip = ({ label, tone, title, pulse }: { label: string; tone: string; title: string; pulse?: boolean }) => (
+  <span
+    title={title}
+    className={cn(
+      "inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-medium border rounded-sm",
+      tone,
+    )}
+  >
+    {pulse && <span className="inline-block h-1.5 w-1.5 rounded-full bg-current opacity-60 animate-pulse" />}
+    {label}
+  </span>
+);
+
+const LeadStatePill = ({ lead }: { lead: any }) => {
+  const status = lead.status as string | null | undefined;
+  const readiness = lead.readiness as string | null | undefined;
+  const hasContact = Boolean(lead.contact_email || lead.contact_phone);
+
+  const OUTREACH: Record<string, { label: string; tone: string; title: string }> = {
+    contacted: { label: "Contacted",   tone: "bg-cold/15 text-cold border-cold/30", title: "Outreach sent — awaiting reply." },
+    replied:   { label: "Replied",     tone: "bg-hot/15 text-hot border-hot/40",    title: "Seller replied — follow up." },
+    meeting:   { label: "Meeting set", tone: "bg-hot/15 text-hot border-hot/40",    title: "Meeting on the calendar." },
+    won:       { label: "Won",         tone: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30", title: "Closed / converted." },
+  };
+  if (status && OUTREACH[status]) {
+    const m = OUTREACH[status];
+    return <StateChip label={m.label} tone={m.tone} title={m.title} />;
+  }
+  if (readiness === "ready_for_outreach" || readiness === "contact_found" || hasContact) {
+    return <StateChip label="Ready to call" tone="bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30" title="Contact verified — reach out now." />;
+  }
+  if (readiness === "needs_manual_review" || readiness === "low_confidence") {
+    return <StateChip label="Needs review" tone="bg-urgent/15 text-urgent border-urgent/40" title="Automated search exhausted — needs a human." />;
+  }
+  return <StateChip label="Finding contact…" tone="bg-muted text-muted-foreground border-border" title="Pipeline is still searching for the seller's contact info." pulse />;
 };
 
 export const OutreachDashboard = () => {
@@ -748,21 +769,9 @@ export const OutreachDashboard = () => {
                           <WindowPill saleDate={l.sale_date} />
                         </TableCell>
                         <TableCell>
-                          <div className="flex flex-col gap-1">
-                            <ReadinessPill readiness={l.readiness} />
-                            <div className="flex items-center gap-1.5">
-                              <span
-                                className={cn(
-                                  "inline-block h-1.5 w-1.5 rounded-full",
-                                  STATUS_DOT[l.status] ?? "bg-muted-foreground/40",
-                                )}
-                              />
-                              <span className="text-[11px] text-muted-foreground">
-                                {STATUS_LABEL[l.status] ?? l.status}
-                              </span>
-                            </div>
-                          </div>
+                          <LeadStatePill lead={l} />
                         </TableCell>
+
                         <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                           <RemoveLeadButton leadId={l.id} ownerName={l.owner_name} />
                         </TableCell>
