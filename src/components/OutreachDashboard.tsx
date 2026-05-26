@@ -66,7 +66,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
 type Lead = any;
-type TabKey = "candidates" | "active";
+type TabKey = "candidates" | "presale" | "active";
+type OwnerRollup = { owner_key: string; property_count: number; total_sale_value: number; total_tax_exposure: number };
 
 const STATUS_DOT: Record<string, string> = {
   new: "bg-accent",
