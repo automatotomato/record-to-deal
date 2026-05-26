@@ -28,10 +28,11 @@ export const daysSince = (d?: string | null): number | null => {
   return Math.floor((Date.now() - new Date(d).getTime()) / 86_400_000);
 };
 
-// 1031 exchange clock: 180 days from sale to close on replacement.
+// 1031 exchange clock: 45 days to IDENTIFY replacement, 180 to close.
 export type WindowStatus = {
   daysIn: number;
-  daysLeft: number;
+  daysLeft: number;       // days left to identify (45-day clock; negative once past)
+  closeDaysLeft: number;  // days left to close (180-day clock)
   label: string;
   tone: "fresh" | "active" | "closing" | "expired" | "unknown";
 };
@@ -39,12 +40,14 @@ export type WindowStatus = {
 export const windowStatus = (saleDate?: string | null): WindowStatus | null => {
   const d = daysSince(saleDate);
   if (d == null) return null;
-  const daysLeft = 180 - d;
-  if (d < 0) return { daysIn: 0, daysLeft: 180, label: "future sale", tone: "unknown" };
-  if (d <= 45) return { daysIn: d, daysLeft, label: `${d}d in · fresh`, tone: "fresh" };
-  if (d <= 135) return { daysIn: d, daysLeft, label: `${d}d in · ${daysLeft}d left`, tone: "active" };
-  if (d <= 180) return { daysIn: d, daysLeft, label: `${daysLeft}d left · closing`, tone: "closing" };
-  return { daysIn: d, daysLeft: 0, label: "window closed", tone: "expired" };
+  const idLeft = 45 - d;
+  const closeLeft = 180 - d;
+  if (d < 0) return { daysIn: 0, daysLeft: 45, closeDaysLeft: 180, label: "future sale", tone: "unknown" };
+  if (d <= 15) return { daysIn: d, daysLeft: idLeft, closeDaysLeft: closeLeft, label: `Day ${d}/45 · ${idLeft}d to identify`, tone: "fresh" };
+  if (d <= 35) return { daysIn: d, daysLeft: idLeft, closeDaysLeft: closeLeft, label: `Day ${d}/45 · ${idLeft}d to identify`, tone: "active" };
+  if (d <= 45) return { daysIn: d, daysLeft: idLeft, closeDaysLeft: closeLeft, label: `Day ${d}/45 · ${idLeft}d — last call`, tone: "closing" };
+  if (d <= 180) return { daysIn: d, daysLeft: 0, closeDaysLeft: closeLeft, label: `ID window closed · ${closeLeft}d to close`, tone: "closing" };
+  return { daysIn: d, daysLeft: 0, closeDaysLeft: 0, label: "window closed", tone: "expired" };
 };
 
 export const tierColor = (tier: string) => {
