@@ -185,10 +185,12 @@ export const OutreachDashboard = () => {
     };
   }, [qc]);
 
+  const isPresale = (l: Lead) => l.pipeline_stage === "pre_sale_prospect";
+
   const isCandidate = (l: Lead) => {
+    if (isPresale(l)) return false; // presale has its own tab
     if (l.tier === "COLD" || l.tier === "DISQUALIFIED" || l.tier === "UNSCORED") return false;
     if (l.readiness === "low_confidence" || l.readiness === "researching") return false;
-    if (l.pipeline_stage === "pre_sale_prospect") return true;
     const trig = (l.trigger_event ?? "").toLowerCase();
     if (!trig.includes("sale") && trig !== "probate") return false;
     const otype = (l.owner_type ?? "").toLowerCase();
@@ -199,6 +201,7 @@ export const OutreachDashboard = () => {
     if (!leads) return [];
     return leads.filter((l) => {
       if (tab === "candidates" && !isCandidate(l)) return false;
+      if (tab === "presale" && !isPresale(l)) return false;
       if (tierFilter !== "all" && l.tier !== tierFilter) return false;
       if (stateFilter !== "all" && l.state !== stateFilter) return false;
       if (statusFilter === "active" && (l.status === "dead" || l.status === "won")) return false;
@@ -221,19 +224,31 @@ export const OutreachDashboard = () => {
   }, [leads, tab, tierFilter, stateFilter, statusFilter, readinessFilter, search]);
 
   const ordered = useMemo(() => {
-    if (tab !== "candidates") return filtered;
-    return [...filtered].sort((a, b) => {
-      const da = a.sale_date ? new Date(a.sale_date).getTime() : 0;
-      const db = b.sale_date ? new Date(b.sale_date).getTime() : 0;
-      return db - da;
-    });
+    if (tab === "candidates") {
+      // Sort by 1031 deadline ASCENDING (most urgent first), then tax exposure.
+      return [...filtered].sort((a, b) => {
+        const wa = windowStatus(a.sale_date);
+        const wb = windowStatus(b.sale_date);
+        const la = wa ? wa.daysLeft : 9999; // no sale date sinks
+        const lb = wb ? wb.daysLeft : 9999;
+        if (la !== lb) return la - lb;
+        return (b.total_tax_exposure ?? 0) - (a.total_tax_exposure ?? 0);
+      });
+    }
+    if (tab === "presale") {
+      return [...filtered].sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      );
+    }
+    return filtered;
   }, [filtered, tab]);
 
   const tabCounts = useMemo(() => {
-    const c = { candidates: 0, active: 0 };
+    const c = { candidates: 0, presale: 0, active: 0 };
     for (const l of leads ?? []) {
       c.active += 1;
-      if (isCandidate(l)) c.candidates += 1;
+      if (isPresale(l)) c.presale += 1;
+      else if (isCandidate(l)) c.candidates += 1;
     }
     return c;
   }, [leads]);
