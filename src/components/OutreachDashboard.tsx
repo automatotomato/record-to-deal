@@ -254,13 +254,28 @@ export const OutreachDashboard = () => {
   }, [leads]);
 
   const stats = useMemo(() => {
-    if (!leads) return { total: 0, urgent: 0, hot: 0, tax: 0, ready: 0 };
+    if (!leads) return { total: 0, urgent: 0, hot: 0, tax: 0, ready: 0, in45: 0, in180: 0, presale: 0, portfolio: 0, avgDaysLeft: null as number | null };
     const urgent = leads.filter((l) => l.is_urgent).length;
     const hot = leads.filter((l) => l.tier === "HOT").length;
     const ready = leads.filter((l) => l.readiness === "ready_for_outreach" || l.readiness === "contact_found").length;
     const tax = leads.reduce((s, l) => s + (l.total_tax_exposure ?? 0), 0);
-    return { total: leads.length, urgent, hot, tax, ready };
-  }, [leads]);
+    let in45 = 0, in180 = 0, presale = 0, daysLeftSum = 0, daysLeftN = 0;
+    for (const l of leads) {
+      if (isPresale(l)) presale += 1;
+      const w = windowStatus(l.sale_date);
+      if (w) {
+        if (w.daysLeft >= 0 && w.daysLeft <= 45) { in45 += 1; daysLeftSum += w.daysLeft; daysLeftN += 1; }
+        else if (w.closeDaysLeft > 0) in180 += 1;
+      }
+    }
+    const portfolio = new Set(
+      (ownerRollup ?? []).filter((r) => r.property_count >= 2).map((r) => r.owner_key),
+    ).size;
+    return {
+      total: leads.length, urgent, hot, tax, ready, in45, in180, presale, portfolio,
+      avgDaysLeft: daysLeftN ? Math.round(daysLeftSum / daysLeftN) : null,
+    };
+  }, [leads, ownerRollup]);
 
   // Top "ready to go" leads — verified contact + strong fit, sorted by urgency then tax exposure.
   const readyLeads = useMemo(() => {
