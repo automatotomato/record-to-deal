@@ -42,12 +42,11 @@ export const windowStatus = (saleDate?: string | null): WindowStatus | null => {
   if (d == null) return null;
   const idLeft = 45 - d;
   const closeLeft = 180 - d;
-  if (d < 0) return { daysIn: 0, daysLeft: 45, closeDaysLeft: 180, label: "future sale", tone: "unknown" };
-  if (d <= 15) return { daysIn: d, daysLeft: idLeft, closeDaysLeft: closeLeft, label: `Day ${d}/45 · ${idLeft}d to identify`, tone: "fresh" };
-  if (d <= 35) return { daysIn: d, daysLeft: idLeft, closeDaysLeft: closeLeft, label: `Day ${d}/45 · ${idLeft}d to identify`, tone: "active" };
-  if (d <= 45) return { daysIn: d, daysLeft: idLeft, closeDaysLeft: closeLeft, label: `Day ${d}/45 · ${idLeft}d — last call`, tone: "closing" };
-  if (d <= 180) return { daysIn: d, daysLeft: 0, closeDaysLeft: closeLeft, label: `ID window closed · ${closeLeft}d to close`, tone: "closing" };
-  return { daysIn: d, daysLeft: 0, closeDaysLeft: 0, label: "window closed", tone: "expired" };
+  if (d < 0) return { daysIn: 0, daysLeft: 45, closeDaysLeft: 180, label: "Future sale", tone: "unknown" };
+  if (idLeft >= 30) return { daysIn: d, daysLeft: idLeft, closeDaysLeft: closeLeft, label: `${idLeft} days left`, tone: "fresh" };
+  if (idLeft >= 10) return { daysIn: d, daysLeft: idLeft, closeDaysLeft: closeLeft, label: `${idLeft} days left`, tone: "active" };
+  if (idLeft >= 1)  return { daysIn: d, daysLeft: idLeft, closeDaysLeft: closeLeft, label: `${idLeft} days left — last call`, tone: "closing" };
+  return { daysIn: d, daysLeft: 0, closeDaysLeft: closeLeft, label: "Window closed", tone: "expired" };
 };
 
 export const tierColor = (tier: string) => {
