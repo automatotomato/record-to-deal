@@ -58,7 +58,7 @@ import {
 import { toast } from "sonner";
 import { LeadDrawer } from "./LeadDrawer";
 
-import { ReadinessPill } from "./ReadinessPill";
+
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
