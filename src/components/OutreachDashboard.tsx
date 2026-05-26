@@ -618,10 +618,9 @@ export const OutreachDashboard = () => {
                     label="Priority"
                     options={[
                       { v: "all", l: "All priorities" },
-                      { v: "URGENT", l: "Urgent" },
-                      { v: "HOT", l: "Hot" },
-                      { v: "WARM", l: "Warm" },
-                      { v: "UNSCORED", l: "Unscored" },
+                      { v: "HOT", l: "Hot — act this week" },
+                      { v: "WARM", l: "Warm — qualified, in window" },
+                      { v: "COOL", l: "Cool — follow up later" },
                     ]}
                   />
                   <FilterSelect
@@ -639,12 +638,9 @@ export const OutreachDashboard = () => {
                     label="Readiness"
                     options={[
                       { v: "all", l: "All readiness" },
-                      { v: "ready_or_contact", l: "Ready for outreach + Contact found" },
-                      { v: "ready_for_outreach", l: "Ready for outreach only" },
-                      { v: "contact_found", l: "Contact found only" },
-                      { v: "in_research", l: "In research" },
-                      { v: "needs_contact_info", l: "Needs contact info" },
-                      { v: "needs_manual_review", l: "Needs manual review" },
+                      { v: "ready", l: "Ready — contact verified" },
+                      { v: "researching", l: "Researching — finding contact" },
+                      { v: "review", l: "Needs review" },
                     ]}
                   />
                   <FilterSelect
