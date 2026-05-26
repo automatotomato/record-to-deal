@@ -900,7 +900,8 @@ const EmptyState = ({
     );
   }
   const tabCopy: Record<TabKey, string> = {
-    candidates: "No active 1031 candidates yet. Click 'Find new leads' or check the All active tab.",
+    candidates: "No active 1031 candidates yet. Click 'Find new leads' or check the Pre-sale tab.",
+    presale: "No pre-sale prospects yet — these are listed-but-not-yet-sold investment properties.",
     active: "No leads match your current filters. Try clearing them or switching tabs.",
   };
   return (
