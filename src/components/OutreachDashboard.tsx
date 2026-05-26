@@ -89,21 +89,41 @@ const STATUS_LABEL: Record<string, string> = {
   dead: "Dead",
 };
 
-const tierBadgeClasses = (tier: string) => {
-  switch (tier) {
+// Collapsed 3-tier priority system. The DB has CRITICAL/URGENT/ACTIVE/HOT/
+// WARM/FOLLOW_UP/COLD/etc. — too many overlapping labels. We bucket them:
+//   HOT  = act this week (urgent flag, or CRITICAL/URGENT/HOT)
+//   WARM = qualified, still in window (ACTIVE/WARM)
+//   COOL = lower priority / follow-up
+type Priority = "HOT" | "WARM" | "COOL";
+
+const priorityOf = (tier: string | null | undefined, isUrgent?: boolean | null): Priority => {
+  if (isUrgent) return "HOT";
+  switch ((tier ?? "").toUpperCase()) {
     case "URGENT":
-      return "bg-urgent text-urgent-foreground hover:bg-urgent/90 border-transparent";
+    case "CRITICAL":
     case "HOT":
-      return "bg-hot text-hot-foreground hover:bg-hot/90 border-transparent";
+      return "HOT";
+    case "ACTIVE":
     case "WARM":
-      return "bg-warm text-warm-foreground hover:bg-warm/90 border-transparent";
-    case "COLD":
-      return "bg-cold text-cold-foreground hover:bg-cold/90 border-transparent";
-    case "DISQUALIFIED":
-      return "bg-disqualified text-disqualified-foreground border-transparent";
+      return "WARM";
     default:
-      return "bg-muted text-muted-foreground border-transparent";
+      return "COOL";
   }
+};
+
+const PRIORITY_META: Record<Priority, { label: string; classes: string; stripe: string }> = {
+  HOT:  { label: "Hot",  classes: "bg-urgent text-urgent-foreground border-transparent", stripe: "bg-urgent" },
+  WARM: { label: "Warm", classes: "bg-warm text-warm-foreground border-transparent",     stripe: "bg-warm" },
+  COOL: { label: "Cool", classes: "bg-muted text-foreground/70 border-border",           stripe: "bg-muted" },
+};
+
+const PriorityBadge = ({ tier, isUrgent }: { tier: string | null | undefined; isUrgent?: boolean | null }) => {
+  const meta = PRIORITY_META[priorityOf(tier, isUrgent)];
+  return (
+    <Badge className={cn("uppercase tracking-wider text-[10px]", meta.classes)}>
+      {meta.label}
+    </Badge>
+  );
 };
 
 export const OutreachDashboard = () => {
@@ -202,17 +222,18 @@ export const OutreachDashboard = () => {
     return leads.filter((l) => {
       if (tab === "candidates" && !isCandidate(l)) return false;
       if (tab === "presale" && !isPresale(l)) return false;
-      if (tierFilter !== "all" && l.tier !== tierFilter) return false;
+      if (tierFilter !== "all" && priorityOf(l.tier, l.is_urgent) !== tierFilter) return false;
       if (stateFilter !== "all" && l.state !== stateFilter) return false;
       if (statusFilter === "active" && (l.status === "dead" || l.status === "won")) return false;
       if (statusFilter !== "active" && statusFilter !== "all" && l.status !== statusFilter) return false;
       if (readinessFilter !== "all") {
         const r = l.readiness ?? "researching";
-        if (readinessFilter === "ready_or_contact") {
-          if (r !== "ready_for_outreach" && r !== "contact_found") return false;
-        } else if (readinessFilter === "in_research") {
-          if (r !== "researching" && r !== "needs_contact_info" && r !== "needs_manual_review") return false;
-        } else if (r !== readinessFilter) return false;
+        const ready = r === "ready_for_outreach" || r === "contact_found";
+        const review = r === "needs_manual_review" || r === "low_confidence";
+        const researching = !ready && !review;
+        if (readinessFilter === "ready" && !ready) return false;
+        if (readinessFilter === "researching" && !researching) return false;
+        if (readinessFilter === "review" && !review) return false;
       }
       if (search) {
         const s = search.toLowerCase();
@@ -597,10 +618,9 @@ export const OutreachDashboard = () => {
                     label="Priority"
                     options={[
                       { v: "all", l: "All priorities" },
-                      { v: "URGENT", l: "Urgent" },
-                      { v: "HOT", l: "Hot" },
-                      { v: "WARM", l: "Warm" },
-                      { v: "UNSCORED", l: "Unscored" },
+                      { v: "HOT", l: "Hot — act this week" },
+                      { v: "WARM", l: "Warm — qualified, in window" },
+                      { v: "COOL", l: "Cool — follow up later" },
                     ]}
                   />
                   <FilterSelect
@@ -618,12 +638,9 @@ export const OutreachDashboard = () => {
                     label="Readiness"
                     options={[
                       { v: "all", l: "All readiness" },
-                      { v: "ready_or_contact", l: "Ready for outreach + Contact found" },
-                      { v: "ready_for_outreach", l: "Ready for outreach only" },
-                      { v: "contact_found", l: "Contact found only" },
-                      { v: "in_research", l: "In research" },
-                      { v: "needs_contact_info", l: "Needs contact info" },
-                      { v: "needs_manual_review", l: "Needs manual review" },
+                      { v: "ready", l: "Ready — contact verified" },
+                      { v: "researching", l: "Researching — finding contact" },
+                      { v: "review", l: "Needs review" },
                     ]}
                   />
                   <FilterSelect
@@ -659,9 +676,9 @@ export const OutreachDashboard = () => {
               </span>
               {[
                 { v: "all", l: "All" },
-                { v: "ready_or_contact", l: "Ready for outreach" },
-                { v: "contact_found", l: "Contact found" },
-                { v: "in_research", l: "In research" },
+                { v: "ready", l: "Ready" },
+                { v: "researching", l: "Researching" },
+                { v: "review", l: "Needs review" },
               ].map((opt) => (
                 <button
                   key={opt.v}
@@ -734,11 +751,9 @@ export const OutreachDashboard = () => {
                       >
                         <TableCell>
                           <div className="flex items-center gap-1.5">
-                            {l.is_urgent && <AlertCircle className="h-3.5 w-3.5 text-urgent shrink-0" />}
-                            <Badge className={cn("uppercase tracking-wider text-[10px]", tierBadgeClasses(l.tier))}>
-                              {l.tier}
-                            </Badge>
+                            <PriorityBadge tier={l.tier} isUrgent={l.is_urgent} />
                           </div>
+
                         </TableCell>
                         <TableCell>
                           <div className="text-sm font-medium">
@@ -1033,22 +1048,13 @@ const ReadyLeadCard = ({
         #{rank}
       </div>
 
-      {/* Tier accent strip */}
-      <div className={cn("h-1 w-full", tierBadgeClasses(lead.tier).split(" ")[0])} />
+      {/* Priority accent strip */}
+      <div className={cn("h-1 w-full", PRIORITY_META[priorityOf(lead.tier, lead.is_urgent)].stripe)} />
 
       <div className="p-5 space-y-4">
-        {/* Top row: tier + urgent flag */}
+        {/* Top row: priority */}
         <div className="flex items-start justify-between gap-2 pl-10">
-          <div className="flex items-center gap-1.5">
-            {lead.is_urgent && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm bg-urgent text-urgent-foreground text-[9px] font-mono uppercase tracking-wider">
-                <AlertCircle className="h-2.5 w-2.5" /> Urgent
-              </span>
-            )}
-            <Badge className={cn("uppercase tracking-wider text-[10px]", tierBadgeClasses(lead.tier))}>
-              {lead.tier}
-            </Badge>
-          </div>
+          <PriorityBadge tier={lead.tier} isUrgent={lead.is_urgent} />
           <ArrowUpRight className="h-4 w-4 text-muted-foreground group-hover:text-accent transition-colors" />
         </div>
 
