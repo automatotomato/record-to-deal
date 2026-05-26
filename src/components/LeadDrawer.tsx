@@ -34,7 +34,7 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
   const [discovering, setDiscovering] = useState(false);
   const [briefing, setBriefing] = useState(false);
   const [recipientOverride, setRecipientOverride] = useState("");
-  const [websiteHint, setWebsiteHint] = useState("");
+  
 
   const { data: lead, isLoading } = useQuery({
     queryKey: ["lead", leadId],
