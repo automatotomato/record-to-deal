@@ -112,6 +112,7 @@ export const OutreachDashboard = () => {
   const [tierFilter, setTierFilter] = useState<string>("all");
   const [stateFilter, setStateFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("active");
+  const [readinessFilter, setReadinessFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
@@ -185,6 +186,14 @@ export const OutreachDashboard = () => {
       if (stateFilter !== "all" && l.state !== stateFilter) return false;
       if (statusFilter === "active" && (l.status === "dead" || l.status === "won")) return false;
       if (statusFilter !== "active" && statusFilter !== "all" && l.status !== statusFilter) return false;
+      if (readinessFilter !== "all") {
+        const r = l.readiness ?? "researching";
+        if (readinessFilter === "ready_or_contact") {
+          if (r !== "ready_for_outreach" && r !== "contact_found") return false;
+        } else if (readinessFilter === "in_research") {
+          if (r !== "researching" && r !== "needs_contact_info" && r !== "needs_manual_review") return false;
+        } else if (r !== readinessFilter) return false;
+      }
       if (search) {
         const s = search.toLowerCase();
         const blob = `${l.owner_name ?? ""} ${l.property_address ?? ""} ${l.property_city ?? ""}`.toLowerCase();
@@ -192,7 +201,7 @@ export const OutreachDashboard = () => {
       }
       return true;
     });
-  }, [leads, tab, tierFilter, stateFilter, statusFilter, search]);
+  }, [leads, tab, tierFilter, stateFilter, statusFilter, readinessFilter, search]);
 
   const ordered = useMemo(() => {
     if (tab !== "candidates") return filtered;
@@ -244,12 +253,14 @@ export const OutreachDashboard = () => {
   const activeFilterCount =
     (tierFilter !== "all" ? 1 : 0) +
     (stateFilter !== "all" ? 1 : 0) +
-    (statusFilter !== "active" ? 1 : 0);
+    (statusFilter !== "active" ? 1 : 0) +
+    (readinessFilter !== "all" ? 1 : 0);
 
   const clearFilters = () => {
     setTierFilter("all");
     setStateFilter("all");
     setStatusFilter("active");
+    setReadinessFilter("all");
   };
 
   const runScout = async () => {
@@ -534,6 +545,20 @@ export const OutreachDashboard = () => {
                     ]}
                   />
                   <FilterSelect
+                    value={readinessFilter}
+                    onChange={setReadinessFilter}
+                    label="Readiness"
+                    options={[
+                      { v: "all", l: "All readiness" },
+                      { v: "ready_or_contact", l: "Ready for outreach + Contact found" },
+                      { v: "ready_for_outreach", l: "Ready for outreach only" },
+                      { v: "contact_found", l: "Contact found only" },
+                      { v: "in_research", l: "In research" },
+                      { v: "needs_contact_info", l: "Needs contact info" },
+                      { v: "needs_manual_review", l: "Needs manual review" },
+                    ]}
+                  />
+                  <FilterSelect
                     value={statusFilter}
                     onChange={setStatusFilter}
                     label="Workflow"
@@ -560,6 +585,31 @@ export const OutreachDashboard = () => {
               </div>
             </div>
 
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-muted-foreground mr-1">
+                Quick view
+              </span>
+              {[
+                { v: "all", l: "All" },
+                { v: "ready_or_contact", l: "Ready for outreach" },
+                { v: "contact_found", l: "Contact found" },
+                { v: "in_research", l: "In research" },
+              ].map((opt) => (
+                <button
+                  key={opt.v}
+                  onClick={() => setReadinessFilter(opt.v)}
+                  className={cn(
+                    "px-2.5 py-1 rounded-full border text-[11px] font-medium transition-colors",
+                    readinessFilter === opt.v
+                      ? "bg-foreground text-background border-foreground"
+                      : "bg-background text-muted-foreground border-border hover:border-foreground/40 hover:text-foreground",
+                  )}
+                >
+                  {opt.l}
+                </button>
+              ))}
+            </div>
+
             {activeFilterCount > 0 && (
               <div className="flex flex-wrap gap-1.5">
                 {tierFilter !== "all" && (
@@ -570,6 +620,9 @@ export const OutreachDashboard = () => {
                 )}
                 {statusFilter !== "active" && (
                   <FilterChip label={`Status: ${statusFilter}`} onClear={() => setStatusFilter("active")} />
+                )}
+                {readinessFilter !== "all" && (
+                  <FilterChip label={`Readiness: ${readinessFilter.replace(/_/g, " ")}`} onClear={() => setReadinessFilter("all")} />
                 )}
               </div>
             )}
