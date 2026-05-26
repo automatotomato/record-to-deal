@@ -9,6 +9,7 @@ import NotFound from "./pages/NotFound.tsx";
 import Auth from "./pages/Auth.tsx";
 import Outreach from "./pages/Outreach.tsx";
 import Admin from "./pages/Admin.tsx";
+import ProjectGuide from "./pages/ProjectGuide.tsx";
 
 const queryClient = new QueryClient();
 
