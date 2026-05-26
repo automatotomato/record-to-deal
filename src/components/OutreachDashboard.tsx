@@ -747,6 +747,7 @@ export const OutreachDashboard = () => {
                       <TableHead className="text-right">Tax exposure</TableHead>
                       <TableHead>Last sale</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead className="w-10"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
