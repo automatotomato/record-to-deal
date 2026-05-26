@@ -697,9 +697,9 @@ export const OutreachDashboard = () => {
                       <TableHead>Property</TableHead>
                       <TableHead>Owner</TableHead>
                       
-                      <TableHead className="text-right">Sale price</TableHead>
+                       <TableHead className="text-right">Sale price</TableHead>
                       <TableHead className="text-right">Tax exposure</TableHead>
-                      <TableHead>Last sale</TableHead>
+                      <TableHead>Sale date</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead className="w-10"></TableHead>
                     </TableRow>
@@ -747,8 +747,8 @@ export const OutreachDashboard = () => {
                           {fmtMoney(l.total_tax_exposure, { compact: true })}
                         </TableCell>
                         <TableCell>
-                          <div className="text-xs text-muted-foreground">{fmtRelative(l.sale_date)}</div>
-                          <WindowPill saleDate={l.sale_date} />
+                          <div className="text-sm tabular">{fmtDate(l.sale_date)}</div>
+                          <div className="text-[11px] text-muted-foreground">{fmtRelative(l.sale_date)}</div>
                         </TableCell>
                         <TableCell>
                           <LeadStatePill lead={l} />
