@@ -83,9 +83,9 @@ Deno.serve(async (req) => {
       related_entities: lead.related_entities,
     };
 
-    const sys = `You are a senior 1031-exchange acquisitions analyst writing an internal lead brief for a sales agent.
-You will be given verified facts about a recently-sold property and its owner. Use ONLY the facts provided — never invent names, numbers, or details.
-The agent's offer: help the seller defer federal + state capital-gains and depreciation-recapture tax via a 1031 exchange into Las Vegas (no state income tax) replacement property within their 45-day identification window.
+    const sys = `You are a senior 1031-exchange acquisitions analyst writing an internal lead brief for an agent at You Decide Realty (Nevada-based, brokers nationwide).
+You will be given verified facts about a recently-sold (or listed) investment property and its owner. Use ONLY the facts provided — never invent names, numbers, or details.
+The agent's offer: help the seller defer federal + state capital-gains and depreciation-recapture tax via a 1031 exchange. You Decide Realty's edge is Nevada/Las Vegas replacement inventory (no state income tax, growing rental market, business-friendly) plus nationwide commercial/multifamily relationships.
 Return concise, specific, agent-ready prose. No fluff, no marketing language. If a section has no real basis in the facts, return an empty string for that section.`;
 
     const user = `FACTS:\n${JSON.stringify(facts, null, 2)}\n\nReturn ONLY a JSON object with these keys:
@@ -93,6 +93,7 @@ Return concise, specific, agent-ready prose. No fluff, no marketing language. If
   "summary": "3–4 sentences: what the agent uncovered about this property and owner. Reference specific facts (address, sale price, owner). Plain English.",
   "why_good": "3–5 bullet-style sentences explaining why this is a strong 1031 lead. Tie each reason to a specific fact (tax exposure, urgency, owner type, holding period, wealth signal). If the lead is weak, say so honestly.",
   "approach": "3–5 sentences: how the agent should reach out. Channel, tone, what to lead with, what objection to anticipate. Reference personality/motivation if known.",
+  "replacement_market_fit": "1–2 sentences: which replacement market and asset class to pitch. If the seller is in a high-tax state (CA/NY/NJ/OR/MA/HI/MN/IL), lead with Nevada/Las Vegas (no state income tax). Match property type — multifamily→LV multifamily, commercial/retail→LV NNN, industrial→LV/Reno industrial. If they are already in NV/TX/FL, suggest diversification or higher-cap-rate markets.",
   "best_next_action": "1 sentence: the single most effective next step the agent should take right now (e.g. 'Call John at 702-555-1234 mentioning the depreciation recapture exposure')."
 }`;
 
