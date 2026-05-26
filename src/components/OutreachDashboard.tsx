@@ -34,7 +34,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { fmtMoney, fmtRelative, windowStatus } from "@/lib/format";
+import { fmtMoney, fmtRelative, fmtDate, windowStatus } from "@/lib/format";
 import {
   Loader2,
   Plus,
