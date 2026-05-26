@@ -753,6 +753,14 @@ export const OutreachDashboard = () => {
                           <div className="text-[11px] text-muted-foreground uppercase tracking-wide">
                             {l.owner_type ?? "Unknown"}
                           </div>
+                          {(() => {
+                            const r = ownerRollupMap.get(ownerKey(l.owner_name));
+                            return r && r.property_count >= 2 ? (
+                              <Badge variant="outline" className="mt-1 gap-1 text-[10px] font-normal border-accent/40 text-accent">
+                                <Briefcase className="h-2.5 w-2.5" /> Portfolio · {r.property_count} props
+                              </Badge>
+                            ) : null;
+                          })()}
                           <SellerIcons lead={l} />
                         </TableCell>
                         <TableCell className="text-right tabular font-mono text-sm">
