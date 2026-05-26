@@ -10,9 +10,10 @@ import { fmtMoney, fmtDate, fmtRelative, daysSince } from "@/lib/format";
 import {
   Loader2, Sparkles, AlertCircle, ExternalLink, Mail, Phone,
   Link2 as Linkedin, Send, RefreshCw, Building2, MoreHorizontal,
-  ChevronDown, Target, Compass, MessageSquare, ArrowRight,
+  ChevronDown, Target, Compass, MessageSquare, ArrowRight, Copy,
 } from "lucide-react";
 import { toast } from "sonner";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { TouchpointTimeline } from "./TouchpointTimeline";
 import { NextActionEditor } from "./NextActionEditor";
 import { ReadinessPill } from "./ReadinessPill";
