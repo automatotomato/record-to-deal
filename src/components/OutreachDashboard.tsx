@@ -546,6 +546,10 @@ export const OutreachDashboard = () => {
                     1031 Candidates
                     <Badge variant="secondary" className="tabular">{tabCounts.candidates}</Badge>
                   </TabsTrigger>
+                  <TabsTrigger value="presale" className="gap-2">
+                    Pre-sale
+                    <Badge variant="secondary" className="tabular">{tabCounts.presale}</Badge>
+                  </TabsTrigger>
                   <TabsTrigger value="active" className="gap-2">
                     All active
                     <Badge variant="secondary" className="tabular">{tabCounts.active}</Badge>
