@@ -1051,22 +1051,13 @@ const ReadyLeadCard = ({
         #{rank}
       </div>
 
-      {/* Tier accent strip */}
-      <div className={cn("h-1 w-full", tierBadgeClasses(lead.tier).split(" ")[0])} />
+      {/* Priority accent strip */}
+      <div className={cn("h-1 w-full", PRIORITY_META[priorityOf(lead.tier, lead.is_urgent)].stripe)} />
 
       <div className="p-5 space-y-4">
-        {/* Top row: tier + urgent flag */}
+        {/* Top row: priority */}
         <div className="flex items-start justify-between gap-2 pl-10">
-          <div className="flex items-center gap-1.5">
-            {lead.is_urgent && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm bg-urgent text-urgent-foreground text-[9px] font-mono uppercase tracking-wider">
-                <AlertCircle className="h-2.5 w-2.5" /> Urgent
-              </span>
-            )}
-            <Badge className={cn("uppercase tracking-wider text-[10px]", tierBadgeClasses(lead.tier))}>
-              {lead.tier}
-            </Badge>
-          </div>
+          <PriorityBadge tier={lead.tier} isUrgent={lead.is_urgent} />
           <ArrowUpRight className="h-4 w-4 text-muted-foreground group-hover:text-accent transition-colors" />
         </div>
 
