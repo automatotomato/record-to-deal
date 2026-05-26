@@ -123,17 +123,18 @@ function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
     return disq("Disqualified: land sale under the $250k investment threshold.", days, stateRate);
   }
 
-  // Sale recency window
-  if (days != null && days > 180) {
+  // Sale recency window — only leads inside the 90-day actionable window
+  if (days != null && days > 90) {
     return {
       score: 0, tier: "EXPIRED", is_urgent: false,
-      reason: `Expired: sale ${days} days ago is outside the 180-day 1031 window.`,
+      reason: `Expired: sale ${days} days ago is outside the 90-day actionable window.`,
       breakdown: {}, days_since_sale: days,
       state_tax_rate: stateRate ? stateRate.ltcg_rate + stateRate.surcharge : null,
       fed_capital_gains_estimate: null, state_capital_gains_estimate: null,
-      total_tax_exposure: null, disqualified: false, needs_review: false,
+      total_tax_exposure: null, disqualified: true, needs_review: false,
     };
   }
+
 
   // --- Scoring (0-100) ---
   // Sale recency (max 25)
