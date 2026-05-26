@@ -365,6 +365,9 @@ const AIBriefSection = ({
           {brief?.approach && (
             <BriefBlock icon={<MessageSquare className="h-3.5 w-3.5" />} title="How to approach" body={brief.approach} />
           )}
+          {brief?.replacement_market_fit && (
+            <BriefBlock icon={<Building2 className="h-3.5 w-3.5" />} title="Replacement market fit" body={brief.replacement_market_fit} />
+          )}
           {generatedAt && (
             <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground/70 pt-2 border-t border-border">
               Generated {fmtRelative(generatedAt)}
