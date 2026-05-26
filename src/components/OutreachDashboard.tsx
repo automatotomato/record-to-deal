@@ -66,7 +66,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
 type Lead = any;
-type TabKey = "candidates" | "active";
+type TabKey = "candidates" | "presale" | "active";
+type OwnerRollup = { owner_key: string; property_count: number; total_sale_value: number; total_tax_exposure: number };
 
 const STATUS_DOT: Record<string, string> = {
   new: "bg-accent",
@@ -153,6 +154,22 @@ export const OutreachDashboard = () => {
     },
   });
 
+  // Portfolio-owner rollup — owners with ≥2 active properties.
+  const { data: ownerRollup } = useQuery({
+    queryKey: ["owner-rollup"],
+    queryFn: async () => {
+      const { data } = await supabase.from("lead_owner_rollup" as any).select("*");
+      return ((data ?? []) as unknown) as OwnerRollup[];
+    },
+  });
+  const ownerRollupMap = useMemo(() => {
+    const m = new Map<string, OwnerRollup>();
+    for (const r of ownerRollup ?? []) m.set(r.owner_key, r);
+    return m;
+  }, [ownerRollup]);
+  const ownerKey = (name?: string | null) =>
+    (name ?? "").toString().toUpperCase().replace(/[\s.,]+/g, " ").trim();
+
   useEffect(() => {
     const ch = supabase
       .channel("leads-feed")
@@ -168,10 +185,12 @@ export const OutreachDashboard = () => {
     };
   }, [qc]);
 
+  const isPresale = (l: Lead) => l.pipeline_stage === "pre_sale_prospect";
+
   const isCandidate = (l: Lead) => {
+    if (isPresale(l)) return false; // presale has its own tab
     if (l.tier === "COLD" || l.tier === "DISQUALIFIED" || l.tier === "UNSCORED") return false;
     if (l.readiness === "low_confidence" || l.readiness === "researching") return false;
-    if (l.pipeline_stage === "pre_sale_prospect") return true;
     const trig = (l.trigger_event ?? "").toLowerCase();
     if (!trig.includes("sale") && trig !== "probate") return false;
     const otype = (l.owner_type ?? "").toLowerCase();
@@ -182,6 +201,7 @@ export const OutreachDashboard = () => {
     if (!leads) return [];
     return leads.filter((l) => {
       if (tab === "candidates" && !isCandidate(l)) return false;
+      if (tab === "presale" && !isPresale(l)) return false;
       if (tierFilter !== "all" && l.tier !== tierFilter) return false;
       if (stateFilter !== "all" && l.state !== stateFilter) return false;
       if (statusFilter === "active" && (l.status === "dead" || l.status === "won")) return false;
@@ -204,31 +224,58 @@ export const OutreachDashboard = () => {
   }, [leads, tab, tierFilter, stateFilter, statusFilter, readinessFilter, search]);
 
   const ordered = useMemo(() => {
-    if (tab !== "candidates") return filtered;
-    return [...filtered].sort((a, b) => {
-      const da = a.sale_date ? new Date(a.sale_date).getTime() : 0;
-      const db = b.sale_date ? new Date(b.sale_date).getTime() : 0;
-      return db - da;
-    });
+    if (tab === "candidates") {
+      // Sort by 1031 deadline ASCENDING (most urgent first), then tax exposure.
+      return [...filtered].sort((a, b) => {
+        const wa = windowStatus(a.sale_date);
+        const wb = windowStatus(b.sale_date);
+        const la = wa ? wa.daysLeft : 9999; // no sale date sinks
+        const lb = wb ? wb.daysLeft : 9999;
+        if (la !== lb) return la - lb;
+        return (b.total_tax_exposure ?? 0) - (a.total_tax_exposure ?? 0);
+      });
+    }
+    if (tab === "presale") {
+      return [...filtered].sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      );
+    }
+    return filtered;
   }, [filtered, tab]);
 
   const tabCounts = useMemo(() => {
-    const c = { candidates: 0, active: 0 };
+    const c = { candidates: 0, presale: 0, active: 0 };
     for (const l of leads ?? []) {
       c.active += 1;
-      if (isCandidate(l)) c.candidates += 1;
+      if (isPresale(l)) c.presale += 1;
+      else if (isCandidate(l)) c.candidates += 1;
     }
     return c;
   }, [leads]);
 
   const stats = useMemo(() => {
-    if (!leads) return { total: 0, urgent: 0, hot: 0, tax: 0, ready: 0 };
+    if (!leads) return { total: 0, urgent: 0, hot: 0, tax: 0, ready: 0, in45: 0, in180: 0, presale: 0, portfolio: 0, avgDaysLeft: null as number | null };
     const urgent = leads.filter((l) => l.is_urgent).length;
     const hot = leads.filter((l) => l.tier === "HOT").length;
     const ready = leads.filter((l) => l.readiness === "ready_for_outreach" || l.readiness === "contact_found").length;
     const tax = leads.reduce((s, l) => s + (l.total_tax_exposure ?? 0), 0);
-    return { total: leads.length, urgent, hot, tax, ready };
-  }, [leads]);
+    let in45 = 0, in180 = 0, presale = 0, daysLeftSum = 0, daysLeftN = 0;
+    for (const l of leads) {
+      if (isPresale(l)) presale += 1;
+      const w = windowStatus(l.sale_date);
+      if (w) {
+        if (w.daysLeft >= 0 && w.daysLeft <= 45) { in45 += 1; daysLeftSum += w.daysLeft; daysLeftN += 1; }
+        else if (w.closeDaysLeft > 0) in180 += 1;
+      }
+    }
+    const portfolio = new Set(
+      (ownerRollup ?? []).filter((r) => r.property_count >= 2).map((r) => r.owner_key),
+    ).size;
+    return {
+      total: leads.length, urgent, hot, tax, ready, in45, in180, presale, portfolio,
+      avgDaysLeft: daysLeftN ? Math.round(daysLeftSum / daysLeftN) : null,
+    };
+  }, [leads, ownerRollup]);
 
   // Top "ready to go" leads — verified contact + strong fit, sorted by urgency then tax exposure.
   const readyLeads = useMemo(() => {
@@ -409,6 +456,23 @@ export const OutreachDashboard = () => {
           </div>
         </div>
 
+        {/* 1031 Pipeline Health strip — client-facing one-liner */}
+        <div className="rounded-lg border bg-card p-4 md:p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <Clock className="h-3.5 w-3.5 text-accent" />
+            <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground">
+              1031 Pipeline Health
+            </span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <HealthStat label="In 45-day window" value={stats.in45} tone={stats.in45 ? "accent" : "muted"} hint="Sellers still inside the 45-day identification window — the most actionable cohort." />
+            <HealthStat label="In 46–180 day window" value={stats.in180} tone="muted" hint="Past identification but can still close a 1031 if a replacement is already identified." />
+            <HealthStat label="Pre-sale prospects" value={stats.presale} tone={stats.presale ? "accent" : "muted"} hint="Listed but not yet sold — engage BEFORE the clock starts." />
+            <HealthStat label="Portfolio owners" value={stats.portfolio} tone="muted" hint="Owners holding 2+ properties in your active pipeline — whale plays." />
+            <HealthStat label="Avg days to deadline" value={stats.avgDaysLeft ?? "—"} tone={stats.avgDaysLeft != null && stats.avgDaysLeft <= 15 ? "warm" : "muted"} hint="Average 45-day identification clock remaining across the active cohort." />
+          </div>
+        </div>
+
         {/* KPI cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <KpiCard
@@ -481,6 +545,10 @@ export const OutreachDashboard = () => {
                   <TabsTrigger value="candidates" className="gap-2">
                     1031 Candidates
                     <Badge variant="secondary" className="tabular">{tabCounts.candidates}</Badge>
+                  </TabsTrigger>
+                  <TabsTrigger value="presale" className="gap-2">
+                    Pre-sale
+                    <Badge variant="secondary" className="tabular">{tabCounts.presale}</Badge>
                   </TabsTrigger>
                   <TabsTrigger value="active" className="gap-2">
                     All active
@@ -685,6 +753,14 @@ export const OutreachDashboard = () => {
                           <div className="text-[11px] text-muted-foreground uppercase tracking-wide">
                             {l.owner_type ?? "Unknown"}
                           </div>
+                          {(() => {
+                            const r = ownerRollupMap.get(ownerKey(l.owner_name));
+                            return r && r.property_count >= 2 ? (
+                              <Badge variant="outline" className="mt-1 gap-1 text-[10px] font-normal border-accent/40 text-accent">
+                                <Briefcase className="h-2.5 w-2.5" /> Portfolio · {r.property_count} props
+                              </Badge>
+                            ) : null;
+                          })()}
                           <SellerIcons lead={l} />
                         </TableCell>
                         <TableCell className="text-right tabular font-mono text-sm">
@@ -770,6 +846,23 @@ const KpiCard = ({
       <TooltipContent side="bottom" className="max-w-xs">
         {hint}
       </TooltipContent>
+    </Tooltip>
+  );
+};
+
+const HealthStat = ({ label, value, tone, hint }: { label: string; value: number | string; tone: "accent" | "warm" | "muted"; hint?: string }) => {
+  const valClass = tone === "accent" ? "text-accent" : tone === "warm" ? "text-warm" : "text-foreground";
+  const inner = (
+    <div>
+      <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-muted-foreground">{label}</div>
+      <div className={cn("font-display text-2xl tabular leading-none mt-1", valClass)}>{value}</div>
+    </div>
+  );
+  if (!hint) return inner;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild><div className="cursor-help">{inner}</div></TooltipTrigger>
+      <TooltipContent side="bottom" className="max-w-xs">{hint}</TooltipContent>
     </Tooltip>
   );
 };
@@ -899,7 +992,8 @@ const EmptyState = ({
     );
   }
   const tabCopy: Record<TabKey, string> = {
-    candidates: "No active 1031 candidates yet. Click 'Find new leads' or check the All active tab.",
+    candidates: "No active 1031 candidates yet. Click 'Find new leads' or check the Pre-sale tab.",
+    presale: "No pre-sale prospects yet — these are listed-but-not-yet-sold investment properties.",
     active: "No leads match your current filters. Try clearing them or switching tabs.",
   };
   return (

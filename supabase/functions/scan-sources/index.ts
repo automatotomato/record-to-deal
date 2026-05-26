@@ -36,13 +36,13 @@ const NV_EXCLUSIONS =
 
 function defaultQueries(state: string, county: string) {
   return [
-    `${county} County ${state} commercial OR multifamily OR industrial sold "$" LLC 2026 ${NV_EXCLUSIONS}`,
-    `site:loopnet.com ${county} ${state} sold`,
+    `${county} County ${state} ("investment property" OR "commercial real estate" OR "apartment building" OR multifamily OR NNN OR industrial) sold "$" (LLC OR Trust OR Inc OR Corp) -"single family" -"owner occupied" -"primary residence" ${NV_EXCLUSIONS}`,
+    `site:loopnet.com OR site:crexi.com ${county} ${state} sold`,
   ];
 }
 
 function defaultHint(state: string, county: string) {
-  return `${county} County, ${state} entity-owned multifamily ≥4-units, commercial, industrial, retail, NNN, office transfers. Skip SFR/condo and owner-occupied homes. Extract owner name, address, sale price (≥$500k), sale/deed date.`;
+  return `${county} County, ${state} INVESTMENT property transfers ONLY: entity-owned multifamily ≥4-units, commercial/retail/NNN/office/industrial, mixed-use, land ≥$250k. Strictly EXCLUDE single-family homes, condos, townhomes, owner-occupied residences, primary residences, and any sale under $500k. Prefer LLC/Trust/Corp owners over individuals. Extract owner name, address, sale price, sale/deed date.`;
 }
 
 async function firecrawlSearch(

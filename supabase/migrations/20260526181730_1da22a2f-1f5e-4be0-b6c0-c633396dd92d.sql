@@ -1,0 +1,1 @@
+ALTER VIEW public.lead_owner_rollup SET (security_invoker = on);

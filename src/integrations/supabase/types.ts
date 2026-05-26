@@ -764,7 +764,17 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      lead_owner_rollup: {
+        Row: {
+          latest_sale_date: string | null
+          owner_key: string | null
+          owner_name_display: string | null
+          property_count: number | null
+          total_sale_value: number | null
+          total_tax_exposure: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       claim_jobs: {
