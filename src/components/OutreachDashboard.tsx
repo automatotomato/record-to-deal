@@ -154,6 +154,22 @@ export const OutreachDashboard = () => {
     },
   });
 
+  // Portfolio-owner rollup — owners with ≥2 active properties.
+  const { data: ownerRollup } = useQuery({
+    queryKey: ["owner-rollup"],
+    queryFn: async () => {
+      const { data } = await supabase.from("lead_owner_rollup" as any).select("*");
+      return (data ?? []) as OwnerRollup[];
+    },
+  });
+  const ownerRollupMap = useMemo(() => {
+    const m = new Map<string, OwnerRollup>();
+    for (const r of ownerRollup ?? []) m.set(r.owner_key, r);
+    return m;
+  }, [ownerRollup]);
+  const ownerKey = (name?: string | null) =>
+    (name ?? "").toString().toUpperCase().replace(/[\s.,]+/g, " ").trim();
+
   useEffect(() => {
     const ch = supabase
       .channel("leads-feed")
