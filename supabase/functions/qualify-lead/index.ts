@@ -93,6 +93,12 @@ function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
   }
   if (sp === 0) return disq("Disqualified: $0 transfer (likely quitclaim or non-arms-length).", days, stateRate);
 
+  // Hard 1031 floor: individual owner of an unclear/SFR property under $750k will
+  // essentially never do a 1031. Drop those before they pollute the pipeline.
+  if (ownerType === "Individual" && (propType === "SFR" || propType === "Unknown") && sp > 0 && sp < 750_000) {
+    return disq("Disqualified: small individual-owned residential sale below 1031 viability threshold.", days, stateRate);
+  }
+
   // Address state must match county state
   const stateMatch = addr.match(/\b(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)\b/);
   if (stateMatch && stateMatch[1] !== lead.state) {
