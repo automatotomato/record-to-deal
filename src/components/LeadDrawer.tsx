@@ -208,32 +208,9 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
             {/* CONTACT CARD */}
             <ContactCard lead={lead} onFind={() => findContact({ force: true })} discovering={discovering} />
 
-            {/* No-contact fallback input */}
-            {(lead.readiness === "needs_contact_info" || lead.readiness === "needs_manual_review") && (
-              <Section title="Help us find this contact">
-                <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
-                  We couldn't find an email or phone. If you know the company website, we'll search it directly.
-                </p>
-                <div className="flex items-center gap-2">
-                  <Input
-                    type="text"
-                    placeholder="example.com"
-                    value={websiteHint}
-                    onChange={(e) => setWebsiteHint(e.target.value)}
-                    className="rounded-none h-8 font-mono text-xs"
-                  />
-                  <Button
-                    size="sm"
-                    onClick={() => findContact({ force: true, website: websiteHint.trim() })}
-                    disabled={discovering || !websiteHint.trim()}
-                    className="rounded-none bg-accent text-accent-foreground hover:bg-accent/90 font-mono text-[10px] uppercase tracking-wider"
-                  >
-                    {discovering ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
-                    Search this domain
-                  </Button>
-                </div>
-              </Section>
-            )}
+            {/* TOUCHPOINT MESSAGES — 3 personalized openers */}
+            <TouchpointMessages lead={lead} />
+
 
             {/* PROPERTY SNAPSHOT */}
             <PropertySnapshot lead={lead} />
