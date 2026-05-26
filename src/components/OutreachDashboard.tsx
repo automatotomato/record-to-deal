@@ -246,11 +246,18 @@ export const OutreachDashboard = () => {
 
   const ordered = useMemo(() => {
     if (tab === "candidates") {
-      // Sort by 1031 deadline ASCENDING (most urgent first), then tax exposure.
+      // Ready-to-contact leads (verified email/phone + ready readiness) float to the top.
+      // Within each group sort by 1031 deadline asc, then tax exposure desc.
+      const isReady = (l: Lead) =>
+        (l.readiness === "ready_for_outreach" || l.readiness === "contact_found") &&
+        (l.contact_email || l.contact_phone);
       return [...filtered].sort((a, b) => {
+        const ra = isReady(a) ? 0 : 1;
+        const rb = isReady(b) ? 0 : 1;
+        if (ra !== rb) return ra - rb;
         const wa = windowStatus(a.sale_date);
         const wb = windowStatus(b.sale_date);
-        const la = wa ? wa.daysLeft : 9999; // no sale date sinks
+        const la = wa ? wa.daysLeft : 9999;
         const lb = wb ? wb.daysLeft : 9999;
         if (la !== lb) return la - lb;
         return (b.total_tax_exposure ?? 0) - (a.total_tax_exposure ?? 0);
@@ -898,6 +905,7 @@ const FilterChip = ({ label, onClear }: { label: string; onClear: () => void }) 
 const WindowPill = ({ saleDate }: { saleDate?: string | null }) => {
   const w = windowStatus(saleDate);
   if (!w) return null;
+  if (w.tone === "expired") return null; // hide once 45-day ID window has closed — not actionable
   const tone =
     w.tone === "fresh"
       ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/20"
@@ -905,8 +913,6 @@ const WindowPill = ({ saleDate }: { saleDate?: string | null }) => {
       ? "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/20"
       : w.tone === "closing"
       ? "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/20"
-      : w.tone === "expired"
-      ? "bg-muted text-muted-foreground/70 border-transparent"
       : "bg-muted text-muted-foreground border-transparent";
   return (
     <Tooltip>
@@ -915,7 +921,7 @@ const WindowPill = ({ saleDate }: { saleDate?: string | null }) => {
           <Clock className="h-2.5 w-2.5" /> {w.label}
         </Badge>
       </TooltipTrigger>
-      <TooltipContent>1031 exchange clock: 180 days from sale to close on a replacement property.</TooltipContent>
+      <TooltipContent>Days left in the 45-day 1031 identification window.</TooltipContent>
     </Tooltip>
   );
 };
