@@ -674,3 +674,132 @@ const ResearchSources = ({ lead, activities }: { lead: any; activities: any[] | 
     </details>
   );
 };
+
+/* ===================== Touchpoint Messages ===================== */
+
+const firstName = (full?: string | null) => {
+  if (!full) return "there";
+  const n = full.trim().split(/\s+/)[0];
+  return n && n.length > 1 ? n[0].toUpperCase() + n.slice(1).toLowerCase() : "there";
+};
+
+const buildMessages = (lead: any) => {
+  const name = firstName(lead.decision_maker_name || lead.owner_name);
+  const city = lead.property_city || lead.county;
+  const state = lead.state;
+  const where = [city, state].filter(Boolean).join(", ");
+  const priceK = lead.sale_price ? `${Math.round(lead.sale_price / 1000).toLocaleString()}K` : null;
+  const taxK = lead.total_tax_exposure ? `$${Math.round(lead.total_tax_exposure / 1000).toLocaleString()}K` : null;
+  const days = lead.days_since_sale ?? (lead.sale_date ? daysSince(lead.sale_date) : null);
+  const angle = lead.pitch_angle || lead.ai_brief?.approach || "a 1031 replacement strategy that defers the entire gain";
+  const why = lead.ai_brief?.why_good || "your recent sale lines up well with a structured 1031 exchange window";
+  const market = lead.lv_property_recommendation || lead.ai_brief?.replacement_market_fit || "stabilized cash-flow assets in growth markets";
+
+  const email = {
+    subject: priceK
+      ? `Quick idea on your ${where} sale${priceK ? ` (~$${priceK})` : ""}`
+      : `Quick idea on your ${where} sale`,
+    body: `Hi ${name},
+
+Saw the recent close${where ? ` in ${where}` : ""}${priceK ? ` around $${priceK}` : ""}${days != null ? ` ${days} days ago` : ""}. Congrats on getting it across the line.
+
+Reason I'm reaching out: ${why}. ${taxK ? `On a sale that size, federal + state exposure can run ${taxK} if it's not structured. ` : ""}We help sellers like you redeploy into ${market} — ${angle}.
+
+Open to a 15-minute call this week to see if it's a fit?
+
+— [Your name]`,
+  };
+
+  const phone = {
+    subject: "Cold call — opener + objection handlers",
+    body: `OPENER
+"Hi ${name}, this is [Your name] with [Firm]. I'll be quick — I saw you closed${where ? ` in ${where}` : ""}${priceK ? ` for about $${priceK}` : ""}${days != null ? ` ${days} days ago` : ""}. Reason for the call: we help sellers in your spot defer the capital gains${taxK ? ` (could be ${taxK} on a deal that size)` : ""} through a 1031 into ${market}. Did your CPA already lock in a strategy, or is that still open?"
+
+IF "ALREADY HANDLED"
+"Got it — totally fair. Quick question: did they line up identified replacement property, or just the QI? Most of our clients come to us right at that 45-day mark when options thin out."
+
+IF "NOT INTERESTED"
+"No problem. Before I let you go — ${angle}. Worth 10 minutes if I send a one-pager?"
+
+CLOSE
+"Best email for that? I'll send the deck and a calendar link — no pressure."`,
+  };
+
+  const linkedin = {
+    subject: "LinkedIn DM / connection note",
+    body: `Hi ${name} — saw the recent close${where ? ` in ${where}` : ""}${priceK ? ` (~$${priceK})` : ""}. Congrats.
+
+I work with sellers on structured 1031 exchanges into ${market}${taxK ? ` — usually relevant when the tax bill is north of ${taxK}` : ""}. ${angle.charAt(0).toUpperCase() + angle.slice(1)}.
+
+Worth a quick chat? Happy to send a one-pager first if easier.`,
+  };
+
+  return { email, phone, linkedin };
+};
+
+const TouchpointMessages = ({ lead }: { lead: any }) => {
+  const msgs = buildMessages(lead);
+  const copy = async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`${label} copied`);
+    } catch {
+      toast.error("Copy failed");
+    }
+  };
+
+  const tabs: Array<{ key: string; label: string; icon: any; data: { subject: string; body: string } }> = [
+    { key: "email", label: "Email", icon: Mail, data: msgs.email },
+    { key: "phone", label: "Phone", icon: Phone, data: msgs.phone },
+    { key: "linkedin", label: "LinkedIn", icon: Linkedin, data: msgs.linkedin },
+  ];
+
+  return (
+    <Section title="Touchpoint messages">
+      <p className="text-xs text-muted-foreground mb-3 leading-relaxed">
+        Personalized openers built from this lead's profile. Edit before sending.
+      </p>
+      <Tabs defaultValue="email" className="w-full">
+        <TabsList className="rounded-none bg-secondary/40 h-9 p-0.5">
+          {tabs.map((t) => (
+            <TabsTrigger
+              key={t.key}
+              value={t.key}
+              className="rounded-none font-mono text-[10px] uppercase tracking-wider data-[state=active]:bg-background data-[state=active]:text-foreground gap-1.5"
+            >
+              <t.icon className="h-3 w-3" />
+              {t.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        {tabs.map((t) => (
+          <TabsContent key={t.key} value={t.key} className="mt-3 space-y-2">
+            <div className="kpi-label">{t.key === "email" ? "Subject" : "Context"}</div>
+            <div className="text-sm font-medium border border-border bg-background px-3 py-2">{t.data.subject}</div>
+            <div className="kpi-label mt-3">Message</div>
+            <textarea
+              defaultValue={t.data.body}
+              rows={t.key === "phone" ? 14 : 10}
+              className="w-full border border-border bg-background p-3 text-sm leading-relaxed font-sans resize-y focus:outline-none focus:ring-1 focus:ring-accent rounded-none"
+              key={lead.id + t.key}
+            />
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={(e) => {
+                  const ta = (e.currentTarget.closest("[role='tabpanel']") as HTMLElement)?.querySelector("textarea") as HTMLTextAreaElement | null;
+                  copy(ta?.value ?? t.data.body, t.label);
+                }}
+                className="rounded-none font-mono text-[10px] uppercase tracking-wider gap-1.5"
+              >
+                <Copy className="h-3 w-3" /> Copy
+              </Button>
+            </div>
+          </TabsContent>
+        ))}
+      </Tabs>
+    </Section>
+  );
+};
+
