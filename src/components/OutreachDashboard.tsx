@@ -838,6 +838,23 @@ const KpiCard = ({
   );
 };
 
+const HealthStat = ({ label, value, tone, hint }: { label: string; value: number | string; tone: "accent" | "warm" | "muted"; hint?: string }) => {
+  const valClass = tone === "accent" ? "text-accent" : tone === "warm" ? "text-warm" : "text-foreground";
+  const inner = (
+    <div>
+      <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-muted-foreground">{label}</div>
+      <div className={cn("font-display text-2xl tabular leading-none mt-1", valClass)}>{value}</div>
+    </div>
+  );
+  if (!hint) return inner;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild><div className="cursor-help">{inner}</div></TooltipTrigger>
+      <TooltipContent side="bottom" className="max-w-xs">{hint}</TooltipContent>
+    </Tooltip>
+  );
+};
+
 const FilterChip = ({ label, onClear }: { label: string; onClear: () => void }) => (
   <Badge variant="secondary" className="gap-1 pr-1">
     {label}
