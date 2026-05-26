@@ -51,11 +51,7 @@ import {
   Clock,
   Flame,
   TrendingUp,
-  Target,
   Briefcase,
-  MapPin,
-  ArrowUpRight,
-  Activity,
   Sparkles,
   Trash2,
 } from "lucide-react";
