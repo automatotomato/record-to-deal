@@ -545,6 +545,20 @@ export const OutreachDashboard = () => {
                     ]}
                   />
                   <FilterSelect
+                    value={readinessFilter}
+                    onChange={setReadinessFilter}
+                    label="Readiness"
+                    options={[
+                      { v: "all", l: "All readiness" },
+                      { v: "ready_or_contact", l: "Ready for outreach + Contact found" },
+                      { v: "ready_for_outreach", l: "Ready for outreach only" },
+                      { v: "contact_found", l: "Contact found only" },
+                      { v: "in_research", l: "In research" },
+                      { v: "needs_contact_info", l: "Needs contact info" },
+                      { v: "needs_manual_review", l: "Needs manual review" },
+                    ]}
+                  />
+                  <FilterSelect
                     value={statusFilter}
                     onChange={setStatusFilter}
                     label="Workflow"
