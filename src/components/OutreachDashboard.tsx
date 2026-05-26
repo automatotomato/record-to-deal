@@ -812,6 +812,9 @@ export const OutreachDashboard = () => {
                             </div>
                           </div>
                         </TableCell>
+                        <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                          <RemoveLeadButton leadId={l.id} ownerName={l.owner_name} />
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
