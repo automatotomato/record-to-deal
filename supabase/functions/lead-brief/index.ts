@@ -133,7 +133,7 @@ Return concise, specific, agent-ready prose. No fluff, no marketing language. If
 
     const data = await r.json();
     const raw = data?.choices?.[0]?.message?.content ?? "{}";
-    let brief: { summary?: unknown; why_good?: unknown; approach?: unknown; best_next_action?: unknown } = {};
+    let brief: { summary?: unknown; why_good?: unknown; approach?: unknown; replacement_market_fit?: unknown; best_next_action?: unknown } = {};
     try { brief = JSON.parse(raw); } catch { return jsonErr("AI returned non-JSON", 500); }
 
     const toText = (v: unknown): string => {
@@ -148,6 +148,7 @@ Return concise, specific, agent-ready prose. No fluff, no marketing language. If
       summary: toText(brief.summary),
       why_good: toText(brief.why_good),
       approach: toText(brief.approach),
+      replacement_market_fit: toText(brief.replacement_market_fit),
       best_next_action: toText(brief.best_next_action),
     };
 
