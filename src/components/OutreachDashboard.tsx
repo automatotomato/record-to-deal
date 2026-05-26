@@ -112,6 +112,7 @@ export const OutreachDashboard = () => {
   const [tierFilter, setTierFilter] = useState<string>("all");
   const [stateFilter, setStateFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("active");
+  const [readinessFilter, setReadinessFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
