@@ -128,15 +128,24 @@ Deno.serve(async (req) => {
     }
   }
 
-  // 3) Expire 180+ day sales
-  const expiredCutoff = new Date(Date.now() - 180 * 86_400_000).toISOString().slice(0, 10);
-  const { data: expiredRows } = await supabase
+  // 3) Purge leads outside the 90-day actionable window (and any already disqualified/expired).
+  //    Pre-sale prospects have no sale_date and are preserved.
+  const purgeCutoff = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10);
+  const { data: toPurge } = await supabase
     .from("leads")
-    .update({ tier: "EXPIRED", pipeline_stage: "expired", is_urgent: false })
-    .lt("sale_date", expiredCutoff)
-    .not("tier", "in", "(EXPIRED,DISQUALIFIED)")
-    .select("id");
-  summary.expired = expiredRows?.length ?? 0;
+    .select("id")
+    .or(`sale_date.lt.${purgeCutoff},pipeline_stage.eq.disqualified,pipeline_stage.eq.expired,tier.eq.EXPIRED,tier.eq.DISQUALIFIED`);
+  const purgeIds = (toPurge ?? []).map((r: any) => r.id);
+  if (purgeIds.length) {
+    await supabase.from("lead_activities").delete().in("lead_id", purgeIds);
+    await supabase.from("lead_touchpoints").delete().in("lead_id", purgeIds);
+    await supabase.from("outreach_touches").delete().in("lead_id", purgeIds);
+    await supabase.from("outreach_emails").delete().in("lead_id", purgeIds);
+    await supabase.from("pipeline_jobs").delete().in("lead_id", purgeIds);
+    await supabase.from("leads").delete().in("id", purgeIds);
+  }
+  summary.expired = purgeIds.length;
+
 
   // 4) Clean old done jobs
   const cleanCutoff = new Date(Date.now() - RETENTION_DAYS * 86_400_000).toISOString();
