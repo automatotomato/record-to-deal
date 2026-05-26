@@ -676,9 +676,9 @@ export const OutreachDashboard = () => {
               </span>
               {[
                 { v: "all", l: "All" },
-                { v: "ready_or_contact", l: "Ready for outreach" },
-                { v: "contact_found", l: "Contact found" },
-                { v: "in_research", l: "In research" },
+                { v: "ready", l: "Ready" },
+                { v: "researching", l: "Researching" },
+                { v: "review", l: "Needs review" },
               ].map((opt) => (
                 <button
                   key={opt.v}
