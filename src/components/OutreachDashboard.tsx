@@ -246,11 +246,18 @@ export const OutreachDashboard = () => {
 
   const ordered = useMemo(() => {
     if (tab === "candidates") {
-      // Sort by 1031 deadline ASCENDING (most urgent first), then tax exposure.
+      // Ready-to-contact leads (verified email/phone + ready readiness) float to the top.
+      // Within each group sort by 1031 deadline asc, then tax exposure desc.
+      const isReady = (l: Lead) =>
+        (l.readiness === "ready_for_outreach" || l.readiness === "contact_found") &&
+        (l.contact_email || l.contact_phone);
       return [...filtered].sort((a, b) => {
+        const ra = isReady(a) ? 0 : 1;
+        const rb = isReady(b) ? 0 : 1;
+        if (ra !== rb) return ra - rb;
         const wa = windowStatus(a.sale_date);
         const wb = windowStatus(b.sale_date);
-        const la = wa ? wa.daysLeft : 9999; // no sale date sinks
+        const la = wa ? wa.daysLeft : 9999;
         const lb = wb ? wb.daysLeft : 9999;
         if (la !== lb) return la - lb;
         return (b.total_tax_exposure ?? 0) - (a.total_tax_exposure ?? 0);
