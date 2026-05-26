@@ -8,10 +8,8 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { fmtRelative } from "@/lib/format";
 import { toast } from "sonner";
-import { Loader2, Play, Settings2, BookOpen } from "lucide-react";
+import { Loader2, Play } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ProjectGuide } from "@/components/ProjectGuide";
 
 
 const Admin = () => {
