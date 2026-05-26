@@ -29,15 +29,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setSession(s);
       setUser(s?.user ?? null);
       if (s?.user) {
-        setTimeout(() => loadRoles(s.user.id), 0);
+        setLoading(true);
+        setTimeout(() => {
+          loadRoles(s.user.id).finally(() => setLoading(false));
+        }, 0);
       } else {
         setRoles([]);
+        setLoading(false);
       }
     });
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(async ({ data }) => {
       setSession(data.session);
       setUser(data.session?.user ?? null);
-      if (data.session?.user) loadRoles(data.session.user.id);
+      if (data.session?.user) await loadRoles(data.session.user.id);
       setLoading(false);
     });
     return () => sub.subscription.unsubscribe();
@@ -47,6 +51,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const { data } = await supabase.from("user_roles").select("role").eq("user_id", uid);
     setRoles((data?.map((r) => r.role) as Role[]) ?? []);
   };
+
 
   const signOut = async () => { await supabase.auth.signOut(); };
 
