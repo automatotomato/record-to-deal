@@ -222,17 +222,18 @@ export const OutreachDashboard = () => {
     return leads.filter((l) => {
       if (tab === "candidates" && !isCandidate(l)) return false;
       if (tab === "presale" && !isPresale(l)) return false;
-      if (tierFilter !== "all" && l.tier !== tierFilter) return false;
+      if (tierFilter !== "all" && priorityOf(l.tier, l.is_urgent) !== tierFilter) return false;
       if (stateFilter !== "all" && l.state !== stateFilter) return false;
       if (statusFilter === "active" && (l.status === "dead" || l.status === "won")) return false;
       if (statusFilter !== "active" && statusFilter !== "all" && l.status !== statusFilter) return false;
       if (readinessFilter !== "all") {
         const r = l.readiness ?? "researching";
-        if (readinessFilter === "ready_or_contact") {
-          if (r !== "ready_for_outreach" && r !== "contact_found") return false;
-        } else if (readinessFilter === "in_research") {
-          if (r !== "researching" && r !== "needs_contact_info" && r !== "needs_manual_review") return false;
-        } else if (r !== readinessFilter) return false;
+        const ready = r === "ready_for_outreach" || r === "contact_found";
+        const review = r === "needs_manual_review" || r === "low_confidence";
+        const researching = !ready && !review;
+        if (readinessFilter === "ready" && !ready) return false;
+        if (readinessFilter === "researching" && !researching) return false;
+        if (readinessFilter === "review" && !review) return false;
       }
       if (search) {
         const s = search.toLowerCase();
