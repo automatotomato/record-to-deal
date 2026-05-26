@@ -1,7 +1,7 @@
 import { ReactNode } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useNavigate, NavLink, Navigate } from "react-router-dom";
-import { LogOut, Radar, Settings2, ChevronsUpDown } from "lucide-react";
+import { LogOut, Radar, Settings2, BookOpen, ChevronsUpDown } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -66,7 +66,10 @@ export const AppShell = ({ children }: { children: ReactNode }) => {
                 <SidebarMenu>
                   <NavMenuItem to="/outreach" icon={<Radar />} label="Outreach" />
                   {isAdmin && (
-                    <NavMenuItem to="/admin" icon={<Settings2 />} label="Sources" />
+                    <>
+                      <NavMenuItem to="/admin" icon={<Settings2 />} label="Sources" />
+                      <NavMenuItem to="/project-guide" icon={<BookOpen />} label="Project Guide" />
+                    </>
                   )}
                 </SidebarMenu>
               </SidebarGroupContent>
