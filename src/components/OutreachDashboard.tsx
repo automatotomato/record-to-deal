@@ -754,11 +754,9 @@ export const OutreachDashboard = () => {
                       >
                         <TableCell>
                           <div className="flex items-center gap-1.5">
-                            {l.is_urgent && <AlertCircle className="h-3.5 w-3.5 text-urgent shrink-0" />}
-                            <Badge className={cn("uppercase tracking-wider text-[10px]", tierBadgeClasses(l.tier))}>
-                              {l.tier}
-                            </Badge>
+                            <PriorityBadge tier={l.tier} isUrgent={l.is_urgent} />
                           </div>
+
                         </TableCell>
                         <TableCell>
                           <div className="text-sm font-medium">
