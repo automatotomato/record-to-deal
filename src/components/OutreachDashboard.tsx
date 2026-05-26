@@ -894,6 +894,50 @@ const HealthStat = ({ label, value, tone, hint }: { label: string; value: number
   );
 };
 
+const RemoveLeadButton = ({ leadId, ownerName }: { leadId: string; ownerName?: string | null }) => {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const onClick = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const label = ownerName ? ` "${ownerName}"` : "";
+    if (!window.confirm(`Remove this lead${label} from the pipeline? It won't show up again.`)) return;
+    setBusy(true);
+    try {
+      const { error } = await supabase
+        .from("leads")
+        .update({
+          tier: "DISQUALIFIED",
+          pipeline_stage: "disqualified",
+          status: "dead",
+          qualification_reason: "Manually removed by user",
+        })
+        .eq("id", leadId);
+      if (error) throw error;
+      toast.success("Lead removed from pipeline.");
+      qc.invalidateQueries({ queryKey: ["leads"] });
+    } catch (err: any) {
+      toast.error(`Couldn't remove lead: ${err.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          onClick={onClick}
+          disabled={busy}
+          className="inline-flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
+          aria-label="Remove lead from pipeline"
+        >
+          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>Remove from pipeline</TooltipContent>
+    </Tooltip>
+  );
+};
+
 const FilterChip = ({ label, onClear }: { label: string; onClear: () => void }) => (
   <Badge variant="secondary" className="gap-1 pr-1">
     {label}
