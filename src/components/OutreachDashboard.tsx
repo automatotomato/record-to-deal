@@ -66,25 +66,6 @@ type Lead = any;
 type TabKey = "candidates" | "presale" | "active";
 type OwnerRollup = { owner_key: string; property_count: number; total_sale_value: number; total_tax_exposure: number };
 
-const STATUS_DOT: Record<string, string> = {
-  new: "bg-accent",
-  reviewing: "bg-warm",
-  contacted: "bg-cold",
-  replied: "bg-hot",
-  meeting: "bg-hot",
-  won: "bg-emerald-600",
-  dead: "bg-muted-foreground/40",
-};
-
-const STATUS_LABEL: Record<string, string> = {
-  new: "New",
-  reviewing: "Reviewing",
-  contacted: "Contacted",
-  replied: "Replied",
-  meeting: "Meeting",
-  won: "Won",
-  dead: "Dead",
-};
 
 // Collapsed 3-tier priority system. The DB has CRITICAL/URGENT/ACTIVE/HOT/
 // WARM/FOLLOW_UP/COLD/etc. — too many overlapping labels. We bucket them:
