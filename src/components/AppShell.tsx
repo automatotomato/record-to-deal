@@ -1,7 +1,7 @@
 import { ReactNode } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useNavigate, NavLink, Navigate } from "react-router-dom";
-import { LogOut, Radar, Settings2, ChevronsUpDown } from "lucide-react";
+import { LogOut, Radar, Settings2, BookOpen, ChevronsUpDown } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
