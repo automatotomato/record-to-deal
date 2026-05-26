@@ -456,6 +456,23 @@ export const OutreachDashboard = () => {
           </div>
         </div>
 
+        {/* 1031 Pipeline Health strip — client-facing one-liner */}
+        <div className="rounded-lg border bg-card p-4 md:p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <Clock className="h-3.5 w-3.5 text-accent" />
+            <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground">
+              1031 Pipeline Health
+            </span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <HealthStat label="In 45-day window" value={stats.in45} tone={stats.in45 ? "accent" : "muted"} hint="Sellers still inside the 45-day identification window — the most actionable cohort." />
+            <HealthStat label="In 46–180 day window" value={stats.in180} tone="muted" hint="Past identification but can still close a 1031 if a replacement is already identified." />
+            <HealthStat label="Pre-sale prospects" value={stats.presale} tone={stats.presale ? "accent" : "muted"} hint="Listed but not yet sold — engage BEFORE the clock starts." />
+            <HealthStat label="Portfolio owners" value={stats.portfolio} tone="muted" hint="Owners holding 2+ properties in your active pipeline — whale plays." />
+            <HealthStat label="Avg days to deadline" value={stats.avgDaysLeft ?? "—"} tone={stats.avgDaysLeft != null && stats.avgDaysLeft <= 15 ? "warm" : "muted"} hint="Average 45-day identification clock remaining across the active cohort." />
+          </div>
+        </div>
+
         {/* KPI cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <KpiCard
