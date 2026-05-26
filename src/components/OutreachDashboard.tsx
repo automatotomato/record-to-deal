@@ -253,12 +253,14 @@ export const OutreachDashboard = () => {
   const activeFilterCount =
     (tierFilter !== "all" ? 1 : 0) +
     (stateFilter !== "all" ? 1 : 0) +
-    (statusFilter !== "active" ? 1 : 0);
+    (statusFilter !== "active" ? 1 : 0) +
+    (readinessFilter !== "all" ? 1 : 0);
 
   const clearFilters = () => {
     setTierFilter("all");
     setStateFilter("all");
     setStatusFilter("active");
+    setReadinessFilter("all");
   };
 
   const runScout = async () => {
