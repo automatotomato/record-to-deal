@@ -106,56 +106,74 @@ const Admin = () => {
           <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-1">Configuration</div>
           <h1 className="font-display text-5xl leading-none">Sources.</h1>
         </div>
-        <div className="flex items-center gap-3 flex-wrap">
-          <Button onClick={runScout} disabled={running} size="lg" className="font-mono uppercase tracking-wider text-xs">
-            {running ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
-            {running ? "Queuing…" : "Run scan now"}
-          </Button>
+      </div>
+
+      <Tabs defaultValue="sources" className="w-full">
+        <div className="px-8 pt-6">
+          <TabsList>
+            <TabsTrigger value="sources" className="font-mono text-xs uppercase tracking-wider flex items-center gap-2">
+              <Settings2 className="h-3.5 w-3.5" />
+              Sources
+            </TabsTrigger>
+            <TabsTrigger value="guide" className="font-mono text-xs uppercase tracking-wider flex items-center gap-2">
+              <BookOpen className="h-3.5 w-3.5" />
+              Project Guide
+            </TabsTrigger>
+          </TabsList>
         </div>
-      </div>
 
+        <TabsContent value="sources">
+          <div className="p-8 space-y-10">
+            <section>
+              <div className="flex items-end justify-between gap-4 flex-wrap mb-3">
+                <h2 className="kpi-label">Configured counties</h2>
+                <Button onClick={runScout} disabled={running} size="sm" className="font-mono uppercase tracking-wider text-xs">
+                  {running ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Play className="w-4 h-4 mr-2" />}
+                  {running ? "Queuing…" : "Run scan now"}
+                </Button>
+              </div>
+              <div className="border border-border bg-card">
+                <table className="w-full">
+                  <thead className="border-b border-border bg-secondary/50">
+                    <tr className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                      <th className="text-left px-4 py-2">State</th>
+                      <th className="text-left px-4 py-2">County</th>
+                      <th className="text-left px-4 py-2">Parser</th>
+                      <th className="text-left px-4 py-2">Last run</th>
+                      <th className="text-right px-4 py-2">Enabled</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {counties?.map((c) => (
+                      <tr key={c.id} className="border-b border-border">
+                        <td className="px-4 py-3 font-mono text-sm">{c.state}</td>
+                        <td className="px-4 py-3 text-sm">{c.county}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{c.parser_key}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{fmtRelative(c.last_run_at)}</td>
+                        <td className="px-4 py-3 text-right">
+                          <Switch checked={c.enabled} onCheckedChange={(v) => toggle(c.id, v)} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-3 text-xs text-muted-foreground italic">
+                Toggle counties on/off to control which markets the scout scans on each run.
+              </p>
+            </section>
 
-      <div className="p-8 space-y-10">
-        
-
-        <section>
-          <h2 className="kpi-label mb-3">Configured counties</h2>
-          <div className="border border-border bg-card">
-            <table className="w-full">
-              <thead className="border-b border-border bg-secondary/50">
-                <tr className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
-                  <th className="text-left px-4 py-2">State</th>
-                  <th className="text-left px-4 py-2">County</th>
-                  <th className="text-left px-4 py-2">Parser</th>
-                  <th className="text-left px-4 py-2">Last run</th>
-                  <th className="text-right px-4 py-2">Enabled</th>
-                </tr>
-              </thead>
-              <tbody>
-                {counties?.map((c) => (
-                  <tr key={c.id} className="border-b border-border">
-                    <td className="px-4 py-3 font-mono text-sm">{c.state}</td>
-                    <td className="px-4 py-3 text-sm">{c.county}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{c.parser_key}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{fmtRelative(c.last_run_at)}</td>
-                    <td className="px-4 py-3 text-right">
-                      <Switch checked={c.enabled} onCheckedChange={(v) => toggle(c.id, v)} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <section>
+              <h2 className="kpi-label mb-3">Scout status</h2>
+              <ScoutRunStatus status={scanStatus} totalCounties={enabledCount} />
+            </section>
           </div>
-          <p className="mt-3 text-xs text-muted-foreground italic">
-            Toggle counties on/off to control which markets the scout scans on each run.
-          </p>
-        </section>
+        </TabsContent>
 
-        <section>
-          <h2 className="kpi-label mb-3">Scout status</h2>
-          <ScoutRunStatus status={scanStatus} totalCounties={enabledCount} />
-        </section>
-      </div>
+        <TabsContent value="guide">
+          <ProjectGuide />
+        </TabsContent>
+      </Tabs>
     </AppShell>
   );
 };
