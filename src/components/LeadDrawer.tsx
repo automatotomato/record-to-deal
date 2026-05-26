@@ -308,13 +308,13 @@ const Field = ({ label, value }: { label: string; value: React.ReactNode }) => {
 const AIBriefSection = ({
   brief, generatedAt, loading, onGenerate, readiness,
 }: {
-  brief: { summary?: string; why_good?: string; approach?: string; best_next_action?: string } | null;
+  brief: { summary?: string; why_good?: string; approach?: string; replacement_market_fit?: string; best_next_action?: string } | null;
   generatedAt: string | null;
   loading: boolean;
   onGenerate: () => void;
   readiness: string;
 }) => {
-  const has = brief && (brief.summary || brief.why_good || brief.approach || brief.best_next_action);
+  const has = brief && (brief.summary || brief.why_good || brief.approach || brief.replacement_market_fit || brief.best_next_action);
 
   return (
     <Section title="AI Deal Brief">
