@@ -57,6 +57,7 @@ import {
   ArrowUpRight,
   Activity,
   Sparkles,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { LeadDrawer } from "./LeadDrawer";
@@ -747,6 +748,7 @@ export const OutreachDashboard = () => {
                       <TableHead className="text-right">Tax exposure</TableHead>
                       <TableHead>Last sale</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead className="w-10"></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -810,6 +812,9 @@ export const OutreachDashboard = () => {
                               </span>
                             </div>
                           </div>
+                        </TableCell>
+                        <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                          <RemoveLeadButton leadId={l.id} ownerName={l.owner_name} />
                         </TableCell>
                       </TableRow>
                     ))}
@@ -885,6 +890,50 @@ const HealthStat = ({ label, value, tone, hint }: { label: string; value: number
     <Tooltip>
       <TooltipTrigger asChild><div className="cursor-help">{inner}</div></TooltipTrigger>
       <TooltipContent side="bottom" className="max-w-xs">{hint}</TooltipContent>
+    </Tooltip>
+  );
+};
+
+const RemoveLeadButton = ({ leadId, ownerName }: { leadId: string; ownerName?: string | null }) => {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const onClick = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const label = ownerName ? ` "${ownerName}"` : "";
+    if (!window.confirm(`Remove this lead${label} from the pipeline? It won't show up again.`)) return;
+    setBusy(true);
+    try {
+      const { error } = await supabase
+        .from("leads")
+        .update({
+          tier: "DISQUALIFIED",
+          pipeline_stage: "disqualified",
+          status: "dead",
+          qualification_reason: "Manually removed by user",
+        })
+        .eq("id", leadId);
+      if (error) throw error;
+      toast.success("Lead removed from pipeline.");
+      qc.invalidateQueries({ queryKey: ["leads"] });
+    } catch (err: any) {
+      toast.error(`Couldn't remove lead: ${err.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          onClick={onClick}
+          disabled={busy}
+          className="inline-flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
+          aria-label="Remove lead from pipeline"
+        >
+          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>Remove from pipeline</TooltipContent>
     </Tooltip>
   );
 };
