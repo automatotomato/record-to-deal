@@ -21,14 +21,41 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
-  const summary = { assigned: 0, enqueued: 0, skipped: 0 };
+  const summary = { assigned: 0, presale_assigned: 0, enqueued: 0, skipped: 0 };
 
   // Load sequences once
   const { data: seqs } = await supabase.from("outreach_sequences").select("id, key").eq("is_active", true);
   const seqByKey: Record<string, string> = {};
   for (const s of seqs ?? []) seqByKey[s.key] = s.id;
 
-  // 1) Assign sequences to ready leads without one
+  // 1a) Assign PRE-SALE ADVISOR to pre_sale_prospect leads (listings, no sale yet).
+  // These are the highest-leverage outreach — engage BEFORE the 45-day clock starts.
+  const presaleSeqId = seqByKey["pre_sale_advisor"];
+  if (presaleSeqId) {
+    const { data: presale } = await supabase
+      .from("leads")
+      .select("id")
+      .is("outreach_sequence_id", null)
+      .eq("pipeline_stage", "pre_sale_prospect")
+      .not("tier", "in", "(DISQUALIFIED,EXPIRED)")
+      .limit(100);
+    for (const l of presale ?? []) {
+      await supabase.from("leads").update({
+        outreach_sequence_id: presaleSeqId,
+        outreach_step_index: 0,
+        outreach_next_step_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq("id", l.id);
+      await supabase.from("lead_activities").insert({
+        lead_id: l.id, kind: "sequence_assigned",
+        summary: "Assigned sequence: pre_sale_advisor",
+        payload: { sequence_key: "pre_sale_advisor" },
+      });
+      summary.presale_assigned += 1;
+    }
+  }
+
+  // 1b) Assign sequences to ready leads without one
   const { data: needsAssign } = await supabase
     .from("leads")
     .select("id, owner_type, state, wealth_tier, has_outreach_contact, readiness, tier")
@@ -68,6 +95,7 @@ Deno.serve(async (req) => {
     });
     summary.assigned += 1;
   }
+
 
   // 2) Enqueue due steps
   const { data: due } = await supabase
