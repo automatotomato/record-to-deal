@@ -301,6 +301,22 @@ Deno.serve(async (req) => {
     : r.tier === "EXPIRED" ? "expired"
     : "qualified";
 
+  // If lead is disqualified or expired (outside 90-day actionable window),
+  // purge it entirely — we don't keep a graveyard of unreachable opportunities.
+  if (r.disqualified || r.tier === "EXPIRED" || r.tier === "DISQUALIFIED") {
+    await supabase.from("lead_activities").delete().eq("lead_id", leadId);
+    await supabase.from("lead_touchpoints").delete().eq("lead_id", leadId);
+    await supabase.from("outreach_touches").delete().eq("lead_id", leadId);
+    await supabase.from("outreach_emails").delete().eq("lead_id", leadId);
+    await supabase.from("pipeline_jobs").delete().eq("lead_id", leadId).neq("id", body.job_id);
+    await supabase.from("leads").delete().eq("id", leadId);
+    await supabase.from("pipeline_jobs").update({
+      status: "done", finished_at: new Date().toISOString(),
+      result: { tier: r.tier, score: r.score, stage, purged: true, reason: r.reason },
+    }).eq("id", body.job_id);
+    return jsonOk({ ok: true, tier: r.tier, score: r.score, stage, purged: true });
+  }
+
   await supabase.from("leads").update({
     score: r.score,
     tier: r.tier,
@@ -311,8 +327,6 @@ Deno.serve(async (req) => {
     state_tax_rate: r.state_tax_rate,
     fed_capital_gains_estimate: r.fed_capital_gains_estimate,
     state_capital_gains_estimate: r.state_capital_gains_estimate,
-    // Realigned: capital_gains_estimate now stores the actual gain (sale - basis).
-    // total_tax_exposure stays as fed + state tax owed.
     capital_gains_estimate: r.actual_capital_gain,
     actual_capital_gain: r.actual_capital_gain,
     total_tax_exposure: r.total_tax_exposure,
@@ -344,6 +358,7 @@ Deno.serve(async (req) => {
 
   return jsonOk({ ok: true, tier: r.tier, score: r.score, stage });
 });
+
 
 function jsonOk(b: unknown) {
   return new Response(JSON.stringify(b), {
