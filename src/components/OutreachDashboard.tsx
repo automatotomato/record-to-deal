@@ -57,6 +57,7 @@ import {
   ArrowUpRight,
   Activity,
   Sparkles,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { LeadDrawer } from "./LeadDrawer";
