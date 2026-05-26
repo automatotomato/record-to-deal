@@ -89,21 +89,41 @@ const STATUS_LABEL: Record<string, string> = {
   dead: "Dead",
 };
 
-const tierBadgeClasses = (tier: string) => {
-  switch (tier) {
+// Collapsed 3-tier priority system. The DB has CRITICAL/URGENT/ACTIVE/HOT/
+// WARM/FOLLOW_UP/COLD/etc. — too many overlapping labels. We bucket them:
+//   HOT  = act this week (urgent flag, or CRITICAL/URGENT/HOT)
+//   WARM = qualified, still in window (ACTIVE/WARM)
+//   COOL = lower priority / follow-up
+type Priority = "HOT" | "WARM" | "COOL";
+
+const priorityOf = (tier: string | null | undefined, isUrgent?: boolean | null): Priority => {
+  if (isUrgent) return "HOT";
+  switch ((tier ?? "").toUpperCase()) {
     case "URGENT":
-      return "bg-urgent text-urgent-foreground hover:bg-urgent/90 border-transparent";
+    case "CRITICAL":
     case "HOT":
-      return "bg-hot text-hot-foreground hover:bg-hot/90 border-transparent";
+      return "HOT";
+    case "ACTIVE":
     case "WARM":
-      return "bg-warm text-warm-foreground hover:bg-warm/90 border-transparent";
-    case "COLD":
-      return "bg-cold text-cold-foreground hover:bg-cold/90 border-transparent";
-    case "DISQUALIFIED":
-      return "bg-disqualified text-disqualified-foreground border-transparent";
+      return "WARM";
     default:
-      return "bg-muted text-muted-foreground border-transparent";
+      return "COOL";
   }
+};
+
+const PRIORITY_META: Record<Priority, { label: string; classes: string; stripe: string }> = {
+  HOT:  { label: "Hot",  classes: "bg-urgent text-urgent-foreground border-transparent", stripe: "bg-urgent" },
+  WARM: { label: "Warm", classes: "bg-warm text-warm-foreground border-transparent",     stripe: "bg-warm" },
+  COOL: { label: "Cool", classes: "bg-muted text-foreground/70 border-border",           stripe: "bg-muted" },
+};
+
+const PriorityBadge = ({ tier, isUrgent }: { tier: string | null | undefined; isUrgent?: boolean | null }) => {
+  const meta = PRIORITY_META[priorityOf(tier, isUrgent)];
+  return (
+    <Badge className={cn("uppercase tracking-wider text-[10px]", meta.classes)}>
+      {meta.label}
+    </Badge>
+  );
 };
 
 export const OutreachDashboard = () => {
