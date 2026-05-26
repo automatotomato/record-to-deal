@@ -186,6 +186,14 @@ export const OutreachDashboard = () => {
       if (stateFilter !== "all" && l.state !== stateFilter) return false;
       if (statusFilter === "active" && (l.status === "dead" || l.status === "won")) return false;
       if (statusFilter !== "active" && statusFilter !== "all" && l.status !== statusFilter) return false;
+      if (readinessFilter !== "all") {
+        const r = l.readiness ?? "researching";
+        if (readinessFilter === "ready_or_contact") {
+          if (r !== "ready_for_outreach" && r !== "contact_found") return false;
+        } else if (readinessFilter === "in_research") {
+          if (r !== "researching" && r !== "needs_contact_info" && r !== "needs_manual_review") return false;
+        } else if (r !== readinessFilter) return false;
+      }
       if (search) {
         const s = search.toLowerCase();
         const blob = `${l.owner_name ?? ""} ${l.property_address ?? ""} ${l.property_city ?? ""}`.toLowerCase();
@@ -193,7 +201,7 @@ export const OutreachDashboard = () => {
       }
       return true;
     });
-  }, [leads, tab, tierFilter, stateFilter, statusFilter, search]);
+  }, [leads, tab, tierFilter, stateFilter, statusFilter, readinessFilter, search]);
 
   const ordered = useMemo(() => {
     if (tab !== "candidates") return filtered;
