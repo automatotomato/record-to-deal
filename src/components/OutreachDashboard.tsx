@@ -51,11 +51,7 @@ import {
   Clock,
   Flame,
   TrendingUp,
-  Target,
   Briefcase,
-  MapPin,
-  ArrowUpRight,
-  Activity,
   Sparkles,
   Trash2,
 } from "lucide-react";
@@ -306,25 +302,6 @@ export const OutreachDashboard = () => {
     };
   }, [leads, ownerRollup]);
 
-  // Top "ready to go" leads — verified contact + strong fit, sorted by urgency then tax exposure.
-  const readyLeads = useMemo(() => {
-    if (!leads) return [];
-    const ready = leads.filter(
-      (l) =>
-        isCandidate(l) &&
-        (l.readiness === "ready_for_outreach" || l.readiness === "contact_found") &&
-        (l.contact_email || l.contact_phone),
-    );
-    return ready
-      .sort((a, b) => {
-        if (a.is_urgent !== b.is_urgent) return a.is_urgent ? -1 : 1;
-        const tierRank = { URGENT: 0, HOT: 1, WARM: 2, COLD: 3 } as Record<string, number>;
-        const tr = (tierRank[a.tier] ?? 9) - (tierRank[b.tier] ?? 9);
-        if (tr !== 0) return tr;
-        return (b.total_tax_exposure ?? 0) - (a.total_tax_exposure ?? 0);
-      })
-      .slice(0, 3);
-  }, [leads]);
 
   const activeFilterCount =
     (tierFilter !== "all" ? 1 : 0) +
@@ -531,33 +508,6 @@ export const OutreachDashboard = () => {
           />
         </div>
 
-        {/* Priority Briefing — top ready-to-go leads */}
-        {readyLeads.length > 0 && (
-          <section className="space-y-3">
-            <div className="flex items-end justify-between gap-4 flex-wrap">
-              <div>
-                <div className="flex items-center gap-2">
-                  <Target className="h-4 w-4 text-accent" />
-                  <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground">
-                    Priority Briefing
-                  </span>
-                </div>
-                <h2 className="font-display text-2xl md:text-3xl mt-1 leading-tight">Ready to call today</h2>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Verified contacts, strong 1031 fit, sorted by urgency and tax exposure.
-                </p>
-              </div>
-              <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
-                {stats.ready} ready · {readyLeads.length} surfaced
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {readyLeads.map((l, i) => (
-                <ReadyLeadCard key={l.id} lead={l} rank={i + 1} onOpen={() => setSelectedId(l.id)} />
-              ))}
-            </div>
-          </section>
-        )}
 
         {/* Tabs + toolbar */}
         <Card className="overflow-hidden">
@@ -1074,110 +1024,3 @@ const EmptyState = ({
   );
 };
 
-const ReadyLeadCard = ({
-  lead,
-  rank,
-  onOpen,
-}: {
-  lead: any;
-  rank: number;
-  onOpen: () => void;
-}) => {
-  const w = windowStatus(lead.sale_date);
-  const urgency =
-    w?.tone === "closing" || lead.is_urgent
-      ? "border-urgent/50 hover:border-urgent"
-      : w?.tone === "fresh"
-      ? "border-emerald-500/40 hover:border-emerald-500"
-      : "border-border hover:border-accent/50";
-  return (
-    <button
-      onClick={onOpen}
-      className={cn(
-        "group relative text-left bg-card rounded-lg border-2 transition-all hover:shadow-lg hover:-translate-y-0.5 overflow-hidden",
-        urgency,
-      )}
-    >
-      {/* Rank ribbon */}
-      <div className="absolute top-0 left-0 z-10 bg-primary text-primary-foreground font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded-br-md">
-        #{rank}
-      </div>
-
-      {/* Priority accent strip */}
-      <div className={cn("h-1 w-full", PRIORITY_META[priorityOf(lead.tier, lead.is_urgent)].stripe)} />
-
-      <div className="p-5 space-y-4">
-        {/* Top row: priority */}
-        <div className="flex items-start justify-between gap-2 pl-10">
-          <PriorityBadge tier={lead.tier} isUrgent={lead.is_urgent} />
-          <ArrowUpRight className="h-4 w-4 text-muted-foreground group-hover:text-accent transition-colors" />
-        </div>
-
-        {/* Owner + property */}
-        <div className="space-y-1">
-          <div className="text-base font-semibold leading-tight">
-            {lead.owner_name ?? "Unknown owner"}
-          </div>
-          <div className="text-xs text-muted-foreground uppercase tracking-wide">
-            {lead.owner_type ?? "—"}
-          </div>
-          <div className="text-sm text-foreground/80 pt-1 flex items-start gap-1.5">
-            <MapPin className="h-3.5 w-3.5 mt-0.5 text-muted-foreground shrink-0" />
-            <span className="leading-snug">
-              {lead.property_address ?? "Unknown address"}
-              <span className="text-muted-foreground">
-                {" · "}
-                {lead.property_city}, {lead.state}
-              </span>
-            </span>
-          </div>
-        </div>
-
-        {/* Money row */}
-        <div className="grid grid-cols-2 gap-3 py-3 border-y border-border/60">
-          <div>
-            <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Sale price</div>
-            <div className="font-display text-xl tabular leading-none mt-1">
-              {fmtMoney(lead.sale_price, { compact: true })}
-            </div>
-          </div>
-          <div>
-            <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Tax exposure</div>
-            <div className="font-display text-xl tabular leading-none mt-1 text-accent">
-              {fmtMoney(lead.total_tax_exposure, { compact: true })}
-            </div>
-          </div>
-        </div>
-
-        {/* Footer: contact + window */}
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5">
-            {lead.contact_email && (
-              <span className="inline-flex items-center justify-center h-6 w-6 rounded-sm bg-accent/10 text-accent" title={lead.contact_email}>
-                <Mail className="h-3 w-3" />
-              </span>
-            )}
-            {lead.contact_phone && (
-              <span className="inline-flex items-center justify-center h-6 w-6 rounded-sm bg-accent/10 text-accent" title={lead.contact_phone}>
-                <Phone className="h-3 w-3" />
-              </span>
-            )}
-            {lead.contact_linkedin && (
-              <span className="inline-flex items-center justify-center h-6 w-6 rounded-sm bg-accent/10 text-accent">
-                <Linkedin className="h-3 w-3" />
-              </span>
-            )}
-            <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground ml-1">
-              Verified
-            </span>
-          </div>
-          {w && (
-            <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-              <Clock className="h-2.5 w-2.5" /> {w.label}
-            </div>
-          )}
-        </div>
-      </div>
-    </button>
-  );
-};
