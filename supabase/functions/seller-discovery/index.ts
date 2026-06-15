@@ -1,13 +1,16 @@
 // Seller Discovery agent — dedicated multi-pass contact hunt for one lead.
-// Passes (Apollo removed — Gemini grounded search + Firecrawl scraping only):
-//   1. Entity unmask (OpenCorporates + state SoS via Firecrawl)
+// Passes:
+//   1. Entity unmask (OpenCorporates scrape + per-state SoS scrape) — REQUIRED
+//      for any LLC/Inc/Corp/Trust grantee. Registered-agent-only matches are
+//      demoted (CT Corp, NRAI, Cogency are not the owner).
 //   2. Person identity (LinkedIn / RocketReach / ZoomInfo / Bizapedia)
 //   3. Company website discovery + homepage/contact scrape
-//   4. Source record scrape (broker/listing pages)
-//   5. Gemini grounded public-contact hunt (Google Search)
+//   4. Source record scrape (recorder doc — usually no email/phone there)
+//   5. Gemini grounded public-contact hunt
 //   6. Personal contact scrape (regex + scoring)
-//   7. AI consolidation (Gemini picks best per field with confidence)
+//   7. AI consolidation
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { getStateSource } from "../_shared/recorder-sources.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
