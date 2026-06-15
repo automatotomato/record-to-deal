@@ -233,7 +233,7 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
   const lovableKey = Deno.env.get("OPENAI_API_KEY");
-  const fcKey = Deno.env.get("FIRECRAWL_API_KEY");
+  const fcKey = (Deno.env.get("FIRECRAWL_API_KEY_OVERRIDE") ?? Deno.env.get("FIRECRAWL_API_KEY"));
 
   let body: { job_id?: string; enqueue?: boolean } = {};
   try { body = await req.json(); } catch (_) {}

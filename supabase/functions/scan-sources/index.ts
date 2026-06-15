@@ -170,7 +170,7 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
-  const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY");
+  const firecrawlKey = (Deno.env.get("FIRECRAWL_API_KEY_OVERRIDE") ?? Deno.env.get("FIRECRAWL_API_KEY"));
   const openaiKey = Deno.env.get("OPENAI_API_KEY");
   if (!firecrawlKey || !openaiKey) {
     return new Response(JSON.stringify({ error: "FIRECRAWL_API_KEY or OPENAI_API_KEY missing" }), {
