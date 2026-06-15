@@ -247,13 +247,14 @@ Deno.serve(async (req) => {
       if (Date.now() - start > HARD_BUDGET_MS) { errors.push("time budget hit"); break; }
       try {
         const results = await firecrawlSearch(`${q} ${FORBIDDEN_QUERY_EXCLUSIONS}`, firecrawlKey, tbs);
-        // Pre-filter to trusted recorder URLs only
         const trustedResults = results.filter((r) => urlIsTrusted(r.url, county.state, county.county));
+        console.log(`[scan] q="${q.slice(0,80)}" tbs=${tbs} raw=${results.length} trusted=${trustedResults.length} urls=${results.map(r=>r.url).slice(0,5).join(" | ")}`);
         if (trustedResults.length === 0) continue;
         const corpus = trustedResults
           .map((r) => `### ${r.title}\nURL: ${r.url}\n\n${r.markdown.slice(0, 3500)}`)
           .join("\n\n---\n\n");
         const leads = await aiExtractLeads(corpus, hint, openaiKey);
+        console.log(`[scan] AI returned ${leads.length} leads from ${trustedResults.length} trusted urls`);
         for (const l of leads) {
           if (!l.source_record_url && trustedResults[0]) l.source_record_url = trustedResults[0].url;
           allCandidates.push(l);
