@@ -201,9 +201,11 @@ export type Database = {
           decision_maker_phone: string | null
           decision_maker_role: string | null
           deed_date: string | null
+          deed_source_url: string | null
           depreciation_recapture_est: number | null
           discovery_confidence_by_field: Json
           discovery_status: string
+          document_type: string | null
           effective_tax_rate: number | null
           enrichment_confidence: number
           enrichment_payload: Json
@@ -234,6 +236,7 @@ export type Database = {
           pipeline_stage: string
           pitch_angle: string | null
           preferred_channel: string | null
+          prior_owner_name: string | null
           profiler_summary: string | null
           property_address: string | null
           property_city: string | null
@@ -242,6 +245,7 @@ export type Database = {
           qualification_reason: string | null
           qualifier_notes: string | null
           readiness: string
+          recording_number: string | null
           related_entities: Json
           sale_date: string | null
           sale_price: number | null
@@ -257,6 +261,8 @@ export type Database = {
           tier: Database["public"]["Enums"]["lead_tier"]
           total_tax_exposure: number | null
           trigger_event: Database["public"]["Enums"]["trigger_event"] | null
+          unmask_source: string | null
+          unmask_status: string | null
           updated_at: string
           wealth_signals: Json | null
           wealth_tier: string
@@ -284,9 +290,11 @@ export type Database = {
           decision_maker_phone?: string | null
           decision_maker_role?: string | null
           deed_date?: string | null
+          deed_source_url?: string | null
           depreciation_recapture_est?: number | null
           discovery_confidence_by_field?: Json
           discovery_status?: string
+          document_type?: string | null
           effective_tax_rate?: number | null
           enrichment_confidence?: number
           enrichment_payload?: Json
@@ -317,6 +325,7 @@ export type Database = {
           pipeline_stage?: string
           pitch_angle?: string | null
           preferred_channel?: string | null
+          prior_owner_name?: string | null
           profiler_summary?: string | null
           property_address?: string | null
           property_city?: string | null
@@ -325,6 +334,7 @@ export type Database = {
           qualification_reason?: string | null
           qualifier_notes?: string | null
           readiness?: string
+          recording_number?: string | null
           related_entities?: Json
           sale_date?: string | null
           sale_price?: number | null
@@ -340,6 +350,8 @@ export type Database = {
           tier?: Database["public"]["Enums"]["lead_tier"]
           total_tax_exposure?: number | null
           trigger_event?: Database["public"]["Enums"]["trigger_event"] | null
+          unmask_source?: string | null
+          unmask_status?: string | null
           updated_at?: string
           wealth_signals?: Json | null
           wealth_tier?: string
@@ -367,9 +379,11 @@ export type Database = {
           decision_maker_phone?: string | null
           decision_maker_role?: string | null
           deed_date?: string | null
+          deed_source_url?: string | null
           depreciation_recapture_est?: number | null
           discovery_confidence_by_field?: Json
           discovery_status?: string
+          document_type?: string | null
           effective_tax_rate?: number | null
           enrichment_confidence?: number
           enrichment_payload?: Json
@@ -400,6 +414,7 @@ export type Database = {
           pipeline_stage?: string
           pitch_angle?: string | null
           preferred_channel?: string | null
+          prior_owner_name?: string | null
           profiler_summary?: string | null
           property_address?: string | null
           property_city?: string | null
@@ -408,6 +423,7 @@ export type Database = {
           qualification_reason?: string | null
           qualifier_notes?: string | null
           readiness?: string
+          recording_number?: string | null
           related_entities?: Json
           sale_date?: string | null
           sale_price?: number | null
@@ -423,6 +439,8 @@ export type Database = {
           tier?: Database["public"]["Enums"]["lead_tier"]
           total_tax_exposure?: number | null
           trigger_event?: Database["public"]["Enums"]["trigger_event"] | null
+          unmask_source?: string | null
+          unmask_status?: string | null
           updated_at?: string
           wealth_signals?: Json | null
           wealth_tier?: string
