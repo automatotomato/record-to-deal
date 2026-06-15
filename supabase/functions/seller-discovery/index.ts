@@ -766,6 +766,10 @@ Deno.serve(async (req) => {
     contact_completeness: Math.max(lead.contact_completeness ?? 0, completeness),
     enrichment_payload: { ...(lead.enrichment_payload ?? {}), discovery_v2: { ...d, budget_used: budget } },
     data_sources: Array.from(new Set([...(lead.data_sources ?? []), ...d.sources])),
+    unmask_status: entity
+      ? (d.name && unmaskSource && unmaskSource !== "deed" ? "unmasked" : (d.entity_registry_url ? "sos_only" : "failed"))
+      : "unmasked",
+    unmask_source: unmaskSource ?? lead.unmask_source ?? null,
   };
 
   // If draft email exists with no recipient, update it
