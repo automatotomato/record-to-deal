@@ -213,8 +213,12 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
             <TouchpointMessages lead={lead} />
 
 
+            {/* DEED PROVENANCE — recorder source + LLC unmask trail */}
+            <DeedProvenance lead={lead} />
+
             {/* PROPERTY SNAPSHOT */}
             <PropertySnapshot lead={lead} />
+
 
             {/* 1031 FIT SCORE */}
             <FitScoreSection lead={lead} />
