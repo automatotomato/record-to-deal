@@ -1,120 +1,129 @@
-## Goal
-Replace today's broker/listing-flavored scan with a recorded-deed-first pipeline, then unmask LLC grantees to a real human before contact enrichment runs. Accuracy first — no newspaper-column fallbacks, no MLS sources.
+# Scout improvement plan — Phase 1 (revised)
 
-## Priority states (in order)
-WA, TX, OR, CA, NY, NJ, MA, MN, FL, CO. Counties for any other state are paused (their `counties` row stays but `scan-sources` skips them) until we hand-tune their recorder source.
+Scope: top 3 audit items only. No new per-county adapters yet, no paid providers. Free assessor enrichment via Firecrawl.
 
----
+## 1. Scout orchestrator + cron schedules
 
-## Phase 1 — Recorder source registry
+**New edge function: `run-scout`** (`verify_jwt = true`)
+- Single entry point invoked by UI (user JWT) and cron (service role).
+- Authorization:
+  - UI calls: require authenticated user AND `public.is_staff(auth.uid())`. Non-staff → 403.
+  - Cron calls: detect service-role JWT (via `Authorization` bearer matches `SUPABASE_SERVICE_ROLE_KEY`) and bypass staff check.
+  - No anon path. This is the "don't ship a public burn-credits button" guard.
+- Rate limit: reject if a `scout_runs` row for the same `{kinds, states}` was created in the last 10 minutes (configurable), unless `force: true` AND caller is staff. Prevents accidental double-clicks and cron overlap.
+- Input zod schema:
+  ```ts
+  { kinds?: ('scan_sources'|'scan_external'|'scan_county')[],
+    states?: string[],   // ISO 2-letter, validated against registry
+    dry_run?: boolean,
+    force?: boolean }
+  ```
+- Behavior:
+  - Resolves target counties from `_shared/recorder-sources.ts`.
+  - Enqueues `pipeline_jobs` rows (one per kind/county batch) with dedupe key `scout_run_id:kind:scope` so re-runs don't pile duplicate jobs.
+  - Writes one `scout_runs` row with `{kinds, states, planned_job_ids, triggered_by: 'ui'|'cron', user_id}`.
+  - `dry_run: true` returns the plan without inserting jobs or scout_runs.
 
-Create `supabase/functions/_shared/recorder-sources.ts` (importable by `scan-sources` and `seller-discovery`). One entry per priority state, with the official recorder/clerk portal and a search URL template:
+**Dispatcher changes (`job-dispatcher`)**
+- Replace ad-hoc per-county kinds with one generic `scan_county` kind. Payload `{ adapter_id, county_id }` routes to `scan-<adapter_id>` function via a small adapter registry map kept in `_shared/county-adapter.ts` (single source of truth, no dispatcher edit per new county).
+- Keep existing `scan_sources`, `scan_external`, `enrich_assessor` (new), `verify_property`. Remove the standalone `scan_travis_recordings` kind once migration is done; dispatcher keeps a back-compat shim for 1 release that maps it to `scan_county` with `adapter_id:'travis'`.
+- Concurrency caps unchanged; `scan_county` cap = 1 (Firecrawl-action-heavy).
 
-| State | Primary source(s) |
-|---|---|
-| WA | County auditor recording search (e.g. King County Recorder's eRecording / Recorded Documents Search) |
-| TX | County Clerk official public records (Harris, Dallas, Travis, Bexar, Tarrant) + Texas SOSDirect for entities |
-| OR | County Clerk recording portals (Multnomah, Washington, Clackamas) |
-| CA | County Recorder portals (LA County Registrar-Recorder, San Diego ARCC, San Francisco Assessor-Recorder, Santa Clara Clerk-Recorder, Orange County Clerk-Recorder) |
-| NY | ACRIS (NYC five boroughs) + county clerk portals upstate |
-| NJ | NJ County Clerk Open Public Records Search (per county) |
-| MA | Massachusetts Registry of Deeds (masslandrecords.com — statewide) |
-| MN | County Recorder portals (Hennepin, Ramsey, Dakota) |
-| FL | County Clerk Official Records (Miami-Dade Clerk, Broward, Orange, Hillsborough, Palm Beach) |
-| CO | County Clerk & Recorder portals (Denver, Arapahoe, Jefferson, Boulder) |
+**UI wiring**
+- `OutreachDashboard` + `Admin` "Run scan" → `supabase.functions.invoke('run-scout', { body: {...} })`.
+- Button disabled unless `is_staff` (already loaded by `useAuth`); hidden for non-staff.
+- Admin gets kinds/states multi-select; dashboard sends defaults.
 
-For each entry: `{ state, counties: { [countyName]: { recorderUrl, searchUrl, documentTypeFilter, requiresJs } } }`. `recorderUrl` is the human-facing portal; `searchUrl` is the deep-link template we feed to Firecrawl `scrape` with date-range params filled in. `requiresJs:true` triggers Firecrawl `waitFor` so single-page-app portals (ACRIS, masslandrecords) render before extraction.
+**Coverage fix (audit item 2, minimal)**
+- UI filters state list to states with ≥1 registry entry that has at least one source OR an adapter. IL/HI/NV/AZ/UT disappear until wired. No silent skipping.
 
-## Phase 2 — Rewrite `scan-sources/index.ts` to deed-only
+**Cron (pg_cron + pg_net)**
+Inserted via `supabase--insert` (uses project URL + anon key — must not be committed as a migration). Each schedule posts with the **service-role key** in `apikey` + `Authorization` headers so `run-scout` recognizes it as cron and bypasses staff check.
+- `job-dispatcher` — every 1 min
+- `pipeline-sweeper` — every 5 min
+- `outreach-cadence-tick` — every 15 min
+- `poll-email-replies` — every 10 min
+- `run-scout` — every 6 hours, payload `{ kinds: ['scan_sources','scan_county','scan_external'] }`
 
-1. Skip the run if the county's state is not in the priority list (log a clear "paused — awaiting recorder template" event in `scout_runs`).
-2. For each priority county, build the deed-search URL from the registry, filling a rolling date window (last 30 days, then 60, then 90 if zero results).
-3. Call Firecrawl `scrape` (not `search`) on the populated URL with `waitFor` where required and `formats: ["markdown", "html"]`. This gives us the actual recorder result list, not a Google snippet.
-4. Feed the scraped recorder page to the AI extractor with a new schema:
-   - `grantor_name`, `grantee_name`
-   - `document_type` (Warranty Deed, Grant Deed, Quitclaim, Trustee's Deed, Special Warranty Deed)
-   - `recording_number`, `recorded_date`, `consideration_amount`
-   - `legal_description` or `parcel_number`
-   - `property_address` (only if the recorder page exposes it — many do not; leave null otherwise and let `verify-property` resolve it from APN via Smarty)
-   - `source_record_url` must be on the recorder domain or the extraction is rejected
-5. System prompt: "Only extract rows from official county recorder / clerk / registry-of-deeds pages. If the page is a brokerage, MLS, Zillow, LoopNet, Crexi, CoStar, BizBuySell, Auction.com, or a newspaper transfers column, return an empty array."
-6. Reject candidates where `document_type` is missing or where `grantor` and `grantee` are identical (refinancing / name correction deeds).
-7. Map to `leads`:
-   - `owner_name` ← `grantee_name`
-   - `prior_owner_name` ← `grantor_name` (new column)
-   - `deed_date` / `sale_date` ← `recorded_date`
-   - `sale_price` ← `consideration_amount`
-   - `trigger_event` always `deed_recorded`
-   - `document_type`, `recording_number`, `deed_source_url` persisted for audit
-8. Delete the brokerage queries (`loopnet`, `crexi`) and the generic "investment property sold" prompt — they are the root cause of the bad data and stay out.
+Idempotency: every schedule uses `cron.schedule('<unique-name>', ...)`; rerun-safe via `cron.unschedule` first.
 
-## Phase 3 — Schema additions
+## 2. County adapter framework
 
-Single migration:
-- `prior_owner_name text`
-- `document_type text`
-- `recording_number text`
-- `deed_source_url text`
-- `unmask_status text` enum-style: `pending | unmasked | sos_only | failed`
-- `unmask_source text` (e.g. `opencorporates`, `sos:TX`)
-- Index on `(state, county, recorded_date desc)` for dedupe
+**`_shared/county-adapter.ts`**
+- Types:
+  ```ts
+  type Candidate = z.infer<typeof CandidateSchema>;
+  interface CountyAdapter {
+    id: string;             // 'travis'
+    state: string;          // 'TX'
+    counties: string[];     // ['Travis']
+    run(ctx: AdapterCtx): Promise<Candidate[]>;
+  }
+  ```
+- `ADAPTERS: Record<string, () => Promise<CountyAdapter>>` — lazy-imported so adding a county = 1 file + 1 registry line, no dispatcher edit.
+- `runAdapter(adapter, ctx)` handles:
+  - Firecrawl credit accounting (count calls, fail fast on 402 with structured error → scout_runs row records it).
+  - Candidate dedupe via `sameParty` + `(recording_number, county)`.
+  - Insert into `leads` with `pipeline_stage:'raw_candidate'`, `data_sources:['firecrawl:'+adapter.id]`.
+  - Enqueue `verify_property` per inserted lead.
+  - Writes `scout_runs` row with `{raw_url_count, trusted_url_count, extracted, inserted, rejected:{reason→count}}`.
+- Shared helpers lifted from `scan-travis-recordings`: `CandidateSchema`, `inferOwnerType`, `sameParty`, `urlIsTrusted`, `aiExtractLeads`.
 
-(GRANTs on `leads` already exist; RLS unchanged.)
+**Registry extension** (`_shared/recorder-sources.ts`)
+- Add optional `adapter?: string` per county. When set, generic `scan-sources` skips that county; `run-scout` enqueues `scan_county` for it.
 
-## Phase 4 — LLC unmask hardening in `seller-discovery`
+**Refactor `scan-travis-recordings`** to thin wrapper calling `runAdapter(travisAdapter, ctx)`. Behavior unchanged.
 
-Rewrite Pass 1 (lines 434–472 today) as a real two-step flow instead of regex-on-search-snippet:
+**`scout_runs` schema check**
+- Before build, verify columns. If missing, add via migration: `kind text, scope jsonb, raw_url_count int, trusted_url_count int, extracted_count int, inserted_count int, rejected jsonb, triggered_by text, user_id uuid`. All nullable.
 
-1. **Trigger**: run whenever `owner_name` matches `/LLC|L\.L\.C|INC|CORP|LP|LLP|TRUST|HOLDINGS/i`. Also re-run if `prior_owner_name` was an individual (strong signal the grantee LLC was just formed for this purchase).
-2. **OpenCorporates step**:
-   - Firecrawl `search` `"${ownerName}" site:opencorporates.com` → top hit → store `entity_registry_url`.
-   - Firecrawl `scrape` that URL with `onlyMainContent:true` → parse the *Officers*, *Agent*, *Filings* sections specifically (not the raw page). Pull every `Name — Role — StartDate` triple. Prefer Manager / Managing Member / President / Sole Member / Member over Registered Agent (CT Corp, Cogency, NRAI, etc. are agents-for-service, not the human owner — explicitly demote these).
-3. **State SoS step** (hardcoded per priority state, used either as primary or as confirmation):
-   - WA: `ccfs.sos.wa.gov/#/BusinessSearch`
-   - TX: `comptroller.texas.gov/taxes/franchise/account-status/` (taxable-entity search) + `direct.sos.state.tx.us` (paid — skip; use comptroller)
-   - OR: `sos.oregon.gov/business/Pages/find.aspx`
-   - CA: `bizfileonline.sos.ca.gov/search/business`
-   - NY: `apps.dos.ny.gov/publicInquiry/` (free)
-   - NJ: `www.njportal.com/DOR/BusinessNameSearch`
-   - MA: `corp.sec.state.ma.us/CorpWeb/CorpSearch/CorpSearch.aspx`
-   - MN: `mblsportal.sos.state.mn.us/Business/Search`
-   - FL: `search.sunbiz.org/Inquiry/CorporationSearch/ByName`
-   - CO: `www.coloradosos.gov/biz/BusinessEntityCriteriaExt.do`
+**No new counties built this phase.**
 
-   Build the deep-link with the entity name pre-filled, scrape it (Firecrawl `scrape` + `waitFor`), then scrape the entity detail page for officer / registered agent / manager info.
-4. **Related-entity expansion**: if no human surfaces, scrape OpenCorporates' "Similar companies" and the SoS's "filings by this agent" view to find sibling LLCs that share an officer — common pattern for sponsors who use a new LLC per asset. Merge into `related_entities`.
-5. **Scoring & persistence**:
-   - Names from SoS officer fields → score 70, `source: "sos:<state>"`.
-   - Names from OpenCorporates officer block → score 65, `source: "opencorporates"`.
-   - Registered-agent-only matches → never written to `decision_maker_name`; saved to `notes` so the operator knows what we found.
-   - On success set `unmask_status='unmasked'`, `unmask_source=<src>`, `decision_maker_name`, `decision_maker_role`, `entity_registry_url`.
-   - On failure (no officer in any source) set `unmask_status='sos_only'` if we at least have the registry URL, else `failed`. Pass 2+ (LinkedIn, Gemini grounded) only runs when we have a human name.
+## 3. Assessor / mailing-address enrichment (Firecrawl, free)
 
-## Phase 5 — UI verification surface in `LeadDrawer`
+**Migration: `leads` columns (all nullable, no backfill)**
+```
+mailing_address text, mailing_city text, mailing_state text, mailing_zip text,
+assessed_value numeric, market_value numeric,
+property_type text, year_built int, lot_size_sqft int, building_sqft int,
+assessor_last_sale_date date, assessor_last_sale_price numeric,
+owner_occupied boolean,
+assessor_url text, assessor_fetched_at timestamptz, assessor_status text
+```
+- Naming: `assessor_last_sale_*` (not `last_sale_*`) to avoid collision with deed-derived fields already on `leads`.
+- `assessor_status` enum-as-text: `pending | ok | not_found | unsupported_county | error`.
+- No RLS change needed (extends existing `leads` table).
+- Update `compute_lead_readiness` trigger? **No** — readiness rubric untouched this phase; that's audit item 9, deferred.
 
-Add a "Deed Provenance" panel above the existing Touchpoints section:
-- Document type, recording #, recorded date
-- Grantor → Grantee
-- Link out to `deed_source_url` (recorder portal)
-- "Unmasked via: OpenCorporates / Nevada SOS" badge with link to `entity_registry_url`, plus list of related entities
+**`_shared/assessor-sources.ts`**
+- Per-county assessor config: `{ state, county, baseUrl, searchTemplate, trustedHosts, extractionPrompt }`.
+- Travis (TCAD) implemented. All other counties → `unsupported_county` (no Firecrawl call made, function exits cheap).
+- `lookupAssessor()` uses Firecrawl `scrape` with `formats:[{type:'json', schema}]`, trusted-host allowlist enforced.
 
-Read-only; no data mutation from the UI. Helps the operator trust the contact and spot bad unmasks fast.
+**New edge function: `enrich-assessor`** (`verify_jwt = false`, internal-only)
+- Input zod: `{ lead_id: uuid }`.
+- Guard: caller must present service-role key in `Authorization` (dispatcher always does). Returns 403 otherwise. Prevents external misuse / credit burn.
+- Reads lead → resolves assessor adapter → if unsupported, sets `assessor_status='unsupported_county'` and returns. Otherwise scrapes, updates columns, computes `owner_occupied` (normalized `mailing_address` vs `property_address`).
+- Dispatcher kind: `enrich_assessor`, cap 2.
 
-## Phase 6 — Backfill & operator action
+**Pipeline wiring**
+- `verify-property`: after Smarty normalization, enqueue `enrich_assessor` (idempotent — skip if `assessor_status='ok'` and fetched <30 days ago).
+- `qualify-lead` (audit item 5, minimal): leads missing sale price/date go to `pipeline_stage:'needs_review'` and enqueue `enrich_assessor` instead of delete. Hard disqualification only when `assessor_status in ('ok','not_found')` AND still no usable signal. Disqualified leads are still **soft**-marked (`tier='DISQUALIFIED'`), not deleted — fixes the silent data loss noted in audit item 10.
 
-- Add a "Re-scout with deed source" button on each lead in `Admin → Sources` that re-queues `scan_sources` for that county with the new pipeline and a 90-day window.
-- One-time SQL: mark existing leads with `source_record_url` matching `loopnet|crexi|costar|zillow|realtor|bizbuysell` as `discovery_status='stale_source'` so they're hidden from the outreach queue until re-verified.
+## Out of scope (Phase 2)
 
----
+Audit items 2 (full coverage), 6 (owner history), 7 (source-confidence rescore), 8 (external scout year), 9 (contact-quality rubric), 10 (full `scout_candidates` table).
 
-## Technical notes
-- Files changed: `supabase/functions/scan-sources/index.ts`, `supabase/functions/seller-discovery/index.ts`, new `supabase/functions/_shared/recorder-sources.ts`, one migration, `src/components/LeadDrawer.tsx`, `src/pages/Admin.tsx` (re-scout button only).
-- No new secrets. OpenCorporates and every SoS portal listed above are free public records and scrape cleanly through the existing Firecrawl key.
-- Firecrawl call budget per lead unchanged (`fc=15`, `ai=3`); we're substituting query targets, not adding passes.
-- Job-kind chain unchanged: `scan_sources` → `verify_property` → `qualify_lead` → `seller_discovery` → `enrich_contact`.
-- Non-priority states keep their `counties` rows so we can flip them on later by adding a registry entry — no schema migration needed at that point.
+## Security summary
 
-## Out of scope
-- Newspaper "property transfers" columns (you ruled out — accuracy first).
-- Paid recorder APIs (DataTree, TitlePro247, ATTOM) — not needed for the priority states; revisit only if Firecrawl scraping is blocked by a specific portal.
-- Per-user OAuth into any recorder portal — all listed sources are anonymous public records.
+- `run-scout`: JWT required, staff-only for human callers, service-role for cron, rate-limited, zod-validated.
+- `enrich-assessor`: service-role-only (internal dispatcher use).
+- No new anon-callable endpoints. No new RLS tables.
+- Firecrawl key never touches client; all scrape calls server-side.
+- Soft-delete only for disqualified leads (auditability).
+
+## Deliverables
+
+Created: `run-scout/`, `enrich-assessor/`, `_shared/county-adapter.ts`, `_shared/assessor-sources.ts`.
+Edited: `scan-travis-recordings/` (refactor), `job-dispatcher/` (generic `scan_county` + `enrich_assessor` + back-compat shim), `verify-property/` (enqueue), `qualify-lead/` (needs_review routing, no delete), `_shared/recorder-sources.ts` (`adapter` field + state filter helper), `OutreachDashboard.tsx`, `Admin.tsx` (call `run-scout`, hide for non-staff).
+DB: 1 migration (assessor columns; `scout_runs` columns if missing). 1 `supabase--insert` SQL (pg_cron schedules using service-role key).
