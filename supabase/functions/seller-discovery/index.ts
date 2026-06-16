@@ -24,7 +24,7 @@ const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-4o-mini";
 if (!(globalThis as any).__sdLogged) { console.log(`[seller-discovery] OpenAI model: ${AI_MODEL}`); (globalThis as any).__sdLogged = true; }
 
 // Per-call budget so a single lead can't burn the day's quota
-const BUDGET = { firecrawl: 15, ai: 3 };
+const BUDGET = { firecrawl: 15, ai: 3, apollo: 2 };
 
 const STATE_NAMES: Record<string, string> = {
   AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
