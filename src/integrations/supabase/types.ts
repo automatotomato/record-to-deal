@@ -183,7 +183,13 @@ export type Database = {
           ai_brief: Json | null
           ai_brief_generated_at: string | null
           assessed_value: number | null
+          assessor_fetched_at: string | null
+          assessor_last_sale_date: string | null
+          assessor_last_sale_price: number | null
+          assessor_status: string | null
+          assessor_url: string | null
           assigned_to: string | null
+          building_sqft: number | null
           capital_gains_estimate: number | null
           company_website: string | null
           contact_completeness: number | null
@@ -220,7 +226,13 @@ export type Database = {
           last_touchpoint_kind: string | null
           list_date: string | null
           list_price: number | null
+          lot_size_sqft: number | null
           lv_property_recommendation: string | null
+          mailing_address: string | null
+          mailing_city: string | null
+          mailing_state: string | null
+          mailing_zip: string | null
+          market_value: number | null
           motivation_type: string | null
           next_action: string | null
           next_action_at: string | null
@@ -229,6 +241,7 @@ export type Database = {
           outreach_sequence_id: string | null
           outreach_step_index: number
           owner_name: string | null
+          owner_occupied: boolean | null
           owner_type: Database["public"]["Enums"]["owner_type"] | null
           ownership_years: number | null
           parcel_number: string | null
@@ -266,13 +279,20 @@ export type Database = {
           updated_at: string
           wealth_signals: Json | null
           wealth_tier: string
+          year_built: number | null
         }
         Insert: {
           actual_capital_gain?: number | null
           ai_brief?: Json | null
           ai_brief_generated_at?: string | null
           assessed_value?: number | null
+          assessor_fetched_at?: string | null
+          assessor_last_sale_date?: string | null
+          assessor_last_sale_price?: number | null
+          assessor_status?: string | null
+          assessor_url?: string | null
           assigned_to?: string | null
+          building_sqft?: number | null
           capital_gains_estimate?: number | null
           company_website?: string | null
           contact_completeness?: number | null
@@ -309,7 +329,13 @@ export type Database = {
           last_touchpoint_kind?: string | null
           list_date?: string | null
           list_price?: number | null
+          lot_size_sqft?: number | null
           lv_property_recommendation?: string | null
+          mailing_address?: string | null
+          mailing_city?: string | null
+          mailing_state?: string | null
+          mailing_zip?: string | null
+          market_value?: number | null
           motivation_type?: string | null
           next_action?: string | null
           next_action_at?: string | null
@@ -318,6 +344,7 @@ export type Database = {
           outreach_sequence_id?: string | null
           outreach_step_index?: number
           owner_name?: string | null
+          owner_occupied?: boolean | null
           owner_type?: Database["public"]["Enums"]["owner_type"] | null
           ownership_years?: number | null
           parcel_number?: string | null
@@ -355,13 +382,20 @@ export type Database = {
           updated_at?: string
           wealth_signals?: Json | null
           wealth_tier?: string
+          year_built?: number | null
         }
         Update: {
           actual_capital_gain?: number | null
           ai_brief?: Json | null
           ai_brief_generated_at?: string | null
           assessed_value?: number | null
+          assessor_fetched_at?: string | null
+          assessor_last_sale_date?: string | null
+          assessor_last_sale_price?: number | null
+          assessor_status?: string | null
+          assessor_url?: string | null
           assigned_to?: string | null
+          building_sqft?: number | null
           capital_gains_estimate?: number | null
           company_website?: string | null
           contact_completeness?: number | null
@@ -398,7 +432,13 @@ export type Database = {
           last_touchpoint_kind?: string | null
           list_date?: string | null
           list_price?: number | null
+          lot_size_sqft?: number | null
           lv_property_recommendation?: string | null
+          mailing_address?: string | null
+          mailing_city?: string | null
+          mailing_state?: string | null
+          mailing_zip?: string | null
+          market_value?: number | null
           motivation_type?: string | null
           next_action?: string | null
           next_action_at?: string | null
@@ -407,6 +447,7 @@ export type Database = {
           outreach_sequence_id?: string | null
           outreach_step_index?: number
           owner_name?: string | null
+          owner_occupied?: boolean | null
           owner_type?: Database["public"]["Enums"]["owner_type"] | null
           ownership_years?: number | null
           parcel_number?: string | null
@@ -444,6 +485,7 @@ export type Database = {
           updated_at?: string
           wealth_signals?: Json | null
           wealth_tier?: string
+          year_built?: number | null
         }
         Relationships: [
           {
