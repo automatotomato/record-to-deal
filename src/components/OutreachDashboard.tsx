@@ -325,7 +325,7 @@ export const OutreachDashboard = () => {
     setRunning(true);
     try {
       const { data, error } = await supabase.functions.invoke("run-scout", {
-        body: { kinds: ["scan_sources", "scan_county", "scan_external"] },
+        body: { kinds: ["scan_sources", "scan_county", "scan_external"], force: true },
       });
       if (error) throw error;
       const planned = (data as any)?.inserted ?? 0;
