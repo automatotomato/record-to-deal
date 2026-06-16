@@ -71,9 +71,61 @@ function setField(d: Discovery, field: keyof Discovery, value: any, score: numbe
 }
 
 class Budget {
-  constructor(public fc = 0, public ai = 0) {}
+  constructor(public fc = 0, public ai = 0, public apollo = 0) {}
   canFc() { return this.fc < BUDGET.firecrawl; }
   canAi() { return this.ai < BUDGET.ai; }
+  canApollo() { return this.apollo < BUDGET.apollo; }
+}
+
+// ---- Apollo people/match: returns enriched person + organization data.
+// Requires APOLLO_API_KEY. We do NOT pass reveal_phone_number=true (Apollo
+// requires a webhook_url for that and bills mobile reveals separately). We
+// DO request personal_emails which are returned synchronously when known.
+async function apolloMatch(
+  apiKey: string,
+  budget: Budget,
+  args: { name?: string | null; first_name?: string | null; last_name?: string | null; domain?: string | null; organization_name?: string | null },
+): Promise<any | null> {
+  if (!budget.canApollo()) return null;
+  if (!args.name && !(args.first_name && args.last_name) && !args.domain) return null;
+  budget.apollo++;
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), 15_000);
+  try {
+    const body: Record<string, unknown> = { reveal_personal_emails: true };
+    if (args.name) body.name = args.name;
+    if (args.first_name) body.first_name = args.first_name;
+    if (args.last_name) body.last_name = args.last_name;
+    if (args.domain) body.domain = args.domain;
+    if (args.organization_name) body.organization_name = args.organization_name;
+    const r = await fetch("https://api.apollo.io/api/v1/people/match", {
+      method: "POST",
+      signal: ctrl.signal,
+      headers: {
+        "Cache-Control": "no-cache",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "x-api-key": apiKey,
+      },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      console.warn(`apollo ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      return null;
+    }
+    const data = await r.json();
+    return data?.person ?? null;
+  } catch (e) {
+    console.warn("apollo threw", e);
+    return null;
+  } finally { clearTimeout(tid); }
+}
+
+function splitName(full: string | null | undefined): { first: string | null; last: string | null } {
+  if (!full) return { first: null, last: null };
+  const parts = full.trim().split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return { first: parts[0] ?? null, last: null };
+  return { first: parts[0], last: parts[parts.length - 1] };
 }
 
 async function fcSearch(query: string, key: string, limit: number, scrape: boolean, budget: Budget) {
