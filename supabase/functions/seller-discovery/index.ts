@@ -24,7 +24,7 @@ const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-4o-mini";
 if (!(globalThis as any).__sdLogged) { console.log(`[seller-discovery] OpenAI model: ${AI_MODEL}`); (globalThis as any).__sdLogged = true; }
 
 // Per-call budget so a single lead can't burn the day's quota
-const BUDGET = { firecrawl: 15, ai: 3 };
+const BUDGET = { firecrawl: 15, ai: 3, apollo: 2 };
 
 const STATE_NAMES: Record<string, string> = {
   AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
@@ -71,10 +71,56 @@ function setField(d: Discovery, field: keyof Discovery, value: any, score: numbe
 }
 
 class Budget {
-  constructor(public fc = 0, public ai = 0) {}
+  constructor(public fc = 0, public ai = 0, public apollo = 0) {}
   canFc() { return this.fc < BUDGET.firecrawl; }
   canAi() { return this.ai < BUDGET.ai; }
+  canApollo() { return this.apollo < BUDGET.apollo; }
 }
+
+// ---- Apollo people/match: returns enriched person + organization data.
+// Requires APOLLO_API_KEY. We do NOT pass reveal_phone_number=true (Apollo
+// requires a webhook_url for that and bills mobile reveals separately). We
+// DO request personal_emails which are returned synchronously when known.
+async function apolloMatch(
+  apiKey: string,
+  budget: Budget,
+  args: { name?: string | null; first_name?: string | null; last_name?: string | null; domain?: string | null; organization_name?: string | null },
+): Promise<any | null> {
+  if (!budget.canApollo()) return null;
+  if (!args.name && !(args.first_name && args.last_name) && !args.domain) return null;
+  budget.apollo++;
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), 15_000);
+  try {
+    const body: Record<string, unknown> = { reveal_personal_emails: true };
+    if (args.name) body.name = args.name;
+    if (args.first_name) body.first_name = args.first_name;
+    if (args.last_name) body.last_name = args.last_name;
+    if (args.domain) body.domain = args.domain;
+    if (args.organization_name) body.organization_name = args.organization_name;
+    const r = await fetch("https://api.apollo.io/api/v1/people/match", {
+      method: "POST",
+      signal: ctrl.signal,
+      headers: {
+        "Cache-Control": "no-cache",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "x-api-key": apiKey,
+      },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      console.warn(`apollo ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      return null;
+    }
+    const data = await r.json();
+    return data?.person ?? null;
+  } catch (e) {
+    console.warn("apollo threw", e);
+    return null;
+  } finally { clearTimeout(tid); }
+}
+
 
 async function fcSearch(query: string, key: string, limit: number, scrape: boolean, budget: Budget) {
   if (!budget.canFc()) return [];
@@ -369,6 +415,7 @@ Deno.serve(async (req) => {
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const fcKey = (Deno.env.get("FIRECRAWL_API_KEY_OVERRIDE") ?? Deno.env.get("FIRECRAWL_API_KEY"));
   const lovableKey = Deno.env.get("OPENAI_API_KEY");
+  const apolloKey = Deno.env.get("APOLLO_API_KEY");
 
   if (!fcKey || !lovableKey) {
     return new Response(JSON.stringify({ error: "FIRECRAWL_API_KEY and OPENAI_API_KEY are required" }), {
@@ -640,6 +687,47 @@ Deno.serve(async (req) => {
       }
       if (bestPhone) setField(d, "phone", bestPhone.p, bestPhone.s, "source_record");
       d.sources.push("source_record");
+    }
+  }
+
+  // ============ PASS 3.5 — Apollo people enrichment ============
+  // We hit Apollo only when we have a candidate person name (post-unmask) OR a
+  // known company domain. Apollo is by far the best source for B2B email; we
+  // also accept personal_emails when revealed. Capped by BUDGET.apollo per lead.
+  if (apolloKey && (!d.email || !d.phone)) {
+    const apolloName = targetName && looksLikePersonName(targetName) ? targetName : null;
+    const parts = splitName(apolloName);
+    const first = parts?.first ?? null;
+    const last = parts?.last ?? null;
+    const orgName = entity && ownerName ? ownerName : null;
+    if (apolloName || domain || orgName) {
+      d.passes.apollo = true;
+      const person = await apolloMatch(apolloKey, budget, {
+        name: apolloName,
+        first_name: first,
+        last_name: last,
+        domain: domain ?? null,
+        organization_name: orgName,
+      });
+      if (person && typeof person === "object") {
+        d.sources.push("apollo");
+        const workEmail: string | null = person.email && !/email_not_unlocked/i.test(person.email) ? person.email : null;
+        const personalEmails: string[] = Array.isArray(person.personal_emails) ? person.personal_emails.filter((e: any) => typeof e === "string" && isUnlockedEmail(e)) : [];
+        const bestEmail = workEmail ?? personalEmails[0] ?? null;
+        if (bestEmail) setField(d, "email", bestEmail, 80, "apollo");
+        const phones: any[] = Array.isArray(person.phone_numbers) ? person.phone_numbers : [];
+        const bestPhone = phones.map((p) => p?.sanitized_number ?? p?.raw_number).find((p) => p && String(p).replace(/\D/g, "").length >= 10);
+        if (bestPhone) setField(d, "phone", String(bestPhone), 70, "apollo");
+        if (person.linkedin_url && /linkedin\.com\/in\//i.test(person.linkedin_url)) setField(d, "linkedin", person.linkedin_url, 75, "apollo");
+        if (person.name && looksLikePersonName(person.name) && !d.name) setField(d, "name", person.name, 75, "apollo");
+        if (person.title) setField(d, "role", person.title, 70, "apollo");
+        const orgSite = person.organization?.website_url ?? person.organization?.primary_domain ?? null;
+        if (orgSite && !d.company_website) {
+          const h = pickHostFromUrl(String(orgSite).startsWith("http") ? orgSite : `https://${orgSite}`);
+          if (h) setField(d, "company_website", normalizeWebsite(h), 70, "apollo");
+        }
+        evidence.push(`APOLLO MATCH\n${JSON.stringify({ name: person.name, title: person.title, email: bestEmail, phone: bestPhone, linkedin: person.linkedin_url, org: person.organization?.name }).slice(0, 1200)}`);
+      }
     }
   }
 
