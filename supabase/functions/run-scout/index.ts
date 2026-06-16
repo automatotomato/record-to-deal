@@ -57,17 +57,14 @@ Deno.serve(async (req) => {
   const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
   const admin = createClient(supabaseUrl, serviceKey);
 
-  // ---- Auth gate
+  // ---- Auth gate (UI only — cron uses a plpgsql function, not this endpoint)
   const authHeader = req.headers.get("Authorization") ?? "";
   const token = authHeader.replace(/^Bearer\s+/i, "");
-  const cronSecret = Deno.env.get("RUN_SCOUT_CRON_SECRET");
-  const presentedCron = req.headers.get("x-cron-secret") ?? "";
+  if (!token) return jsonErr("unauthorized", 401);
 
   let triggeredBy: string | null = null;
-  let isCron = (token && token === serviceKey) || (!!cronSecret && presentedCron === cronSecret);
+  let isCron = token === serviceKey;
   if (!isCron) {
-    if (!token) return jsonErr("unauthorized", 401);
-    // Validate user JWT + staff role
     const userClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: `Bearer ${token}` } } });
     const { data: claims, error } = await userClient.auth.getClaims(token);
     if (error || !claims?.claims?.sub) return jsonErr("unauthorized", 401);

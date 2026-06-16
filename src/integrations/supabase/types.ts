@@ -902,6 +902,7 @@ export type Database = {
         Returns: boolean
       }
       is_staff: { Args: { _user_id: string }; Returns: boolean }
+      run_scout_cron: { Args: never; Returns: Json }
     }
     Enums: {
       app_role: "admin" | "agent"
