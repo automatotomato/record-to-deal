@@ -60,11 +60,13 @@ Deno.serve(async (req) => {
   // ---- Auth gate
   const authHeader = req.headers.get("Authorization") ?? "";
   const token = authHeader.replace(/^Bearer\s+/i, "");
-  if (!token) return jsonErr("unauthorized", 401);
+  const cronSecret = Deno.env.get("RUN_SCOUT_CRON_SECRET");
+  const presentedCron = req.headers.get("x-cron-secret") ?? "";
 
   let triggeredBy: string | null = null;
-  let isCron = token === serviceKey;
+  let isCron = (token && token === serviceKey) || (!!cronSecret && presentedCron === cronSecret);
   if (!isCron) {
+    if (!token) return jsonErr("unauthorized", 401);
     // Validate user JWT + staff role
     const userClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: `Bearer ${token}` } } });
     const { data: claims, error } = await userClient.auth.getClaims(token);
