@@ -696,7 +696,9 @@ Deno.serve(async (req) => {
   // also accept personal_emails when revealed. Capped by BUDGET.apollo per lead.
   if (apolloKey && (!d.email || !d.phone)) {
     const apolloName = targetName && looksLikePersonName(targetName) ? targetName : null;
-    const { first, last } = splitName(apolloName);
+    const parts = splitName(apolloName);
+    const first = parts?.first ?? null;
+    const last = parts?.last ?? null;
     const orgName = entity && ownerName ? ownerName : null;
     if (apolloName || domain || orgName) {
       d.passes.apollo = true;
