@@ -66,9 +66,9 @@ Deno.serve(async (req) => {
   let isCron = token === serviceKey;
   if (!isCron) {
     const userClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: `Bearer ${token}` } } });
-    const { data: claims, error } = await userClient.auth.getClaims(token);
-    if (error || !claims?.claims?.sub) return jsonErr("unauthorized", 401);
-    triggeredBy = claims.claims.sub as string;
+    const { data: userData, error } = await userClient.auth.getUser(token);
+    if (error || !userData?.user?.id) return jsonErr("unauthorized", 401);
+    triggeredBy = userData.user.id;
     const { data: staff } = await admin.rpc("is_staff", { _user_id: triggeredBy });
     if (!staff) return jsonErr("forbidden — staff only", 403);
   }
