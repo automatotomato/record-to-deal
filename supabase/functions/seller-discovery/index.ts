@@ -696,6 +696,45 @@ Deno.serve(async (req) => {
     }
   }
 
+  // ============ PASS 3.5 — Apollo people enrichment ============
+  // We hit Apollo only when we have a candidate person name (post-unmask) OR a
+  // known company domain. Apollo is by far the best source for B2B email; we
+  // also accept personal_emails when revealed. Capped by BUDGET.apollo per lead.
+  if (apolloKey && (!d.email || !d.phone)) {
+    const apolloName = targetName && looksLikePersonName(targetName) ? targetName : null;
+    const { first, last } = splitName(apolloName);
+    const orgName = entity && ownerName ? ownerName : null;
+    if (apolloName || domain || orgName) {
+      d.passes.apollo = true;
+      const person = await apolloMatch(apolloKey, budget, {
+        name: apolloName,
+        first_name: first,
+        last_name: last,
+        domain: domain ?? null,
+        organization_name: orgName,
+      });
+      if (person && typeof person === "object") {
+        d.sources.push("apollo");
+        const workEmail: string | null = person.email && !/email_not_unlocked/i.test(person.email) ? person.email : null;
+        const personalEmails: string[] = Array.isArray(person.personal_emails) ? person.personal_emails.filter((e: any) => typeof e === "string" && isUnlockedEmail(e)) : [];
+        const bestEmail = workEmail ?? personalEmails[0] ?? null;
+        if (bestEmail) setField(d, "email", bestEmail, 80, "apollo");
+        const phones: any[] = Array.isArray(person.phone_numbers) ? person.phone_numbers : [];
+        const bestPhone = phones.map((p) => p?.sanitized_number ?? p?.raw_number).find((p) => p && String(p).replace(/\D/g, "").length >= 10);
+        if (bestPhone) setField(d, "phone", String(bestPhone), 70, "apollo");
+        if (person.linkedin_url && /linkedin\.com\/in\//i.test(person.linkedin_url)) setField(d, "linkedin", person.linkedin_url, 75, "apollo");
+        if (person.name && looksLikePersonName(person.name) && !d.name) setField(d, "name", person.name, 75, "apollo");
+        if (person.title) setField(d, "role", person.title, 70, "apollo");
+        const orgSite = person.organization?.website_url ?? person.organization?.primary_domain ?? null;
+        if (orgSite && !d.company_website) {
+          const h = pickHostFromUrl(String(orgSite).startsWith("http") ? orgSite : `https://${orgSite}`);
+          if (h) setField(d, "company_website", normalizeWebsite(h), 70, "apollo");
+        }
+        evidence.push(`APOLLO MATCH\n${JSON.stringify({ name: person.name, title: person.title, email: bestEmail, phone: bestPhone, linkedin: person.linkedin_url, org: person.organization?.name }).slice(0, 1200)}`);
+      }
+    }
+  }
+
 
   // ============ PASS 4 — Gemini grounded public-contact hunt ============
   if ((!d.email || !d.phone) && lovableKey) {
