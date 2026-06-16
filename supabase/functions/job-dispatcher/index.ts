@@ -9,13 +9,22 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+// adapter_id → edge function slug. Kept in sync with _shared/county-adapter.ts
+// ADAPTER_DISPATCH (duplicated here to avoid a shared import at dispatch time).
+const COUNTY_ADAPTERS: Record<string, string> = {
+  travis: "scan-travis-recordings",
+};
+
 const KINDS: { kind: string; fn: string; cap: number }[] = [
   { kind: "scan_sources",     fn: "scan-sources",     cap: 2 },
   { kind: "scan_external",    fn: "scan-external-sources", cap: 2 },
+  { kind: "scan_county",      fn: "__county_adapter__", cap: 1 },
+  // back-compat shim: old payloads with kind=scan_travis_recordings still work
   { kind: "scan_travis_recordings", fn: "scan-travis-recordings", cap: 1 },
   { kind: "verify_property",  fn: "verify-property",  cap: 10 },
   { kind: "qualify_lead",     fn: "qualify-lead",     cap: 20 },
   { kind: "enrich_contact",   fn: "enrich-contact",   cap: 5 },
+  { kind: "enrich_assessor",  fn: "enrich-assessor",  cap: 2 },
   { kind: "seller_discovery", fn: "seller-discovery", cap: 3 },
   { kind: "wealth_scan",      fn: "wealth-scan",      cap: 4 },
   { kind: "profile_seller",   fn: "profile-seller",   cap: 6 },
@@ -41,9 +50,22 @@ Deno.serve(async (req) => {
     const list = (jobs ?? []) as any[];
     summary[kind] = list.length;
     for (const job of list) {
+      // scan_county routes by adapter_id from the job payload.
+      let target = fn;
+      if (kind === "scan_county") {
+        const adapterId = (job.payload?.adapter_id ?? "") as string;
+        target = COUNTY_ADAPTERS[adapterId];
+        if (!target) {
+          await supabase.from("pipeline_jobs").update({
+            status: "failed", finished_at: new Date().toISOString(),
+            last_error: `unknown adapter_id: ${adapterId}`,
+          }).eq("id", job.id);
+          continue;
+        }
+      }
       // Fire and forget; do NOT await — workers run independently.
-      supabase.functions.invoke(fn, { body: { job_id: job.id } }).catch((e) => {
-        console.warn(`invoke ${fn} for ${job.id} threw:`, e);
+      supabase.functions.invoke(target, { body: { job_id: job.id } }).catch((e) => {
+        console.warn(`invoke ${target} for ${job.id} threw:`, e);
       });
     }
   }

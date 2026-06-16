@@ -20,6 +20,8 @@ export interface CountySource {
   searchUrl?: string;
   /** Heavy SPA — Firecrawl should waitFor JS to render. */
   requiresJs?: boolean;
+  /** If set, this county is scraped via a dedicated adapter (scan_county) instead of generic scan_sources. */
+  adapter?: string;
 }
 
 export interface StateSource {
@@ -51,7 +53,7 @@ export const RECORDER_REGISTRY: Record<PriorityState, StateSource> = {
     counties: {
       "Harris": { portalName: "Harris County Clerk Real Property", domains: ["cclerk.hctx.net", "hcad.org"] },
       "Dallas": { portalName: "Dallas County Clerk Official Public Records", domains: ["dallascounty.org"] },
-      "Travis": { portalName: "Travis County Clerk Official Public Records", domains: ["traviscountytx.gov", "countyclerk.traviscountytx.gov"] },
+      "Travis": { portalName: "Travis County Clerk Official Public Records", domains: ["traviscountytx.gov", "countyclerk.traviscountytx.gov", "tccsearch.org"], adapter: "travis" },
       "Bexar": { portalName: "Bexar County Clerk Official Public Records", domains: ["bexar.org"] },
       "Tarrant": { portalName: "Tarrant County Clerk Real Property", domains: ["tarrantcounty.com", "access.tarrantcounty.com"] },
       "Collin": { portalName: "Collin County Clerk", domains: ["collincountytx.gov"] },
