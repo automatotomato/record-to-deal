@@ -121,12 +121,6 @@ async function apolloMatch(
   } finally { clearTimeout(tid); }
 }
 
-function splitName(full: string | null | undefined): { first: string | null; last: string | null } {
-  if (!full) return { first: null, last: null };
-  const parts = full.trim().split(/\s+/).filter(Boolean);
-  if (parts.length < 2) return { first: parts[0] ?? null, last: null };
-  return { first: parts[0], last: parts[parts.length - 1] };
-}
 
 async function fcSearch(query: string, key: string, limit: number, scrape: boolean, budget: Budget) {
   if (!budget.canFc()) return [];
