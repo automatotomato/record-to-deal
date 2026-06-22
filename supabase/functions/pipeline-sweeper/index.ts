@@ -128,9 +128,9 @@ Deno.serve(async (req) => {
     }
   }
 
-  // 3) Purge leads outside the 90-day actionable window (and any already disqualified/expired).
+  // 3) Purge leads outside the 30-day actionable window (and any already disqualified/expired).
   //    Pre-sale prospects have no sale_date and are preserved.
-  const purgeCutoff = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10);
+  const purgeCutoff = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
   const { data: toPurge } = await supabase
     .from("leads")
     .select("id")
