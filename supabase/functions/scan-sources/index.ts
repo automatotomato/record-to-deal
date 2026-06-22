@@ -17,8 +17,14 @@ const corsHeaders = {
 const FIRECRAWL_V2 = "https://api.firecrawl.dev/v2";
 const AI_URL = "https://api.openai.com/v1/chat/completions";
 const AI_MODEL = "gpt-4o-mini";
-const MAX_RESULTS_PER_QUERY = 5;
+const MAX_RESULTS_PER_QUERY = 3;
 const HARD_BUDGET_MS = 45_000;
+const MIN_SALE_PRICE = 500_000;
+const MIN_CONFIDENCE = 70;
+// Tokens that signal we're looking at an actual recorded-deed index/page,
+// not a listing, news article, or press release.
+const DEED_LANGUAGE_RE = /\b(grantor|grantee|warranty deed|grant deed|quitclaim|special warranty|trustee'?s deed|deed of trust|book\s*\/?\s*page|instrument\s*(no|number|#)|recording date|recorded date|doc(ument)?\s*(no|number|#))\b/i;
+const ALLOWED_PROPERTY_TYPES = new Set(["Multifamily", "Commercial", "Industrial", "Mixed", "Land"]);
 
 type Candidate = {
   grantor_name?: string;     // seller — what we actually want
@@ -28,12 +34,14 @@ type Candidate = {
   property_city?: string;
   property_zip?: string;
   parcel_number?: string;
+  instrument_number?: string;
   sale_price?: number;
   sale_date?: string;
   deed_date?: string;
   property_type?: string;
   source_record_url?: string;
   trigger_event?: string;
+  confidence?: number;       // self-reported 0-100; we reject < MIN_CONFIDENCE
 };
 
 // Hosts we never want as a source — these are listing/broker/MLS portals
@@ -64,29 +72,15 @@ function isBrokerUrl(url?: string | null): boolean {
   return BROKER_DENY_RE.test(h);
 }
 
-function buildQueries(state: string, county: string, recorderUrl: string | null) {
-  const countyClean = county.replace(/\s+county$/i, "").trim();
+function buildQueries(_state: string, _county: string, recorderUrl: string | null) {
+  // Recorder-only sourcing. If we don't have a recorder index URL for this
+  // county, we produce ZERO queries — county stays parked rather than
+  // pulling noise from listings/news/aggregators.
   const recorderHost = hostOf(recorderUrl);
-  const queries: string[] = [];
-
-  // Pass 1: recorder-first. If we have a recorder URL, restrict to it.
-  if (recorderHost) {
-    queries.push(
-      `site:${recorderHost} (deed OR "warranty deed" OR "grant deed" OR "special warranty") grantor grantee`,
-    );
-  }
-
-  // Pass 2: government / official records search across .gov / .us domains.
-  queries.push(
-    `("${countyClean} County" ${state}) ("official records" OR "recorded deed" OR "deed of trust" OR "grantor" OR "grantee") (LLC OR Trust OR Inc OR Corp) site:.gov OR site:.us ${NEG_SITE_FILTER}`,
-  );
-
-  // Pass 3: open web fallback — investment/commercial transfers, broker hosts excluded.
-  queries.push(
-    `"${countyClean} County" ${state} ("recorded" OR "deed") (multifamily OR commercial OR NNN OR industrial OR "apartment building") (LLC OR Trust OR Inc OR Corp) ${NEG_SITE_FILTER}`,
-  );
-
-  return queries;
+  if (!recorderHost) return [];
+  return [
+    `site:${recorderHost} (deed OR "warranty deed" OR "grant deed" OR "special warranty" OR "deed of trust") grantor grantee`,
+  ];
 }
 
 function defaultHint(state: string, county: string) {
@@ -94,11 +88,13 @@ function defaultHint(state: string, county: string) {
 
 PRIMARY GOAL: extract the GRANTOR (the seller on the recorded deed). The grantor is the actual property seller — the person or entity we want to contact. The grantee is the buyer.
 
-Only extract records that look like actual recorded deeds (warranty deed, grant deed, special warranty deed, deed of trust, quitclaim, trustee's deed). Skip anything that is a listing, MLS posting, broker page, or auction promo — those are not deeds.
+STRICT RULES — if the source page is not a recorded-deed index entry, a deed image, or an official records search result, return { "leads": [] }. Do NOT infer grantors from listings, MLS pages, news articles, broker pages, or press releases.
 
-INVESTMENT property only: entity-owned multifamily ≥4-units, commercial/retail/NNN/office/industrial, mixed-use, land ≥$250k. EXCLUDE single-family homes, condos, townhomes, owner-occupied residences, primary residences, and any sale under $500k. Prefer LLC/Trust/Corp grantors over individuals.
+Every record MUST have ALL of: grantor_name, property_address, parcel_number (APN), instrument_number (or recording number/document number), recording or deed date, and sale_price ≥ $${MIN_SALE_PRICE.toLocaleString()}.
 
-For each deed, extract: grantor_name (seller), grantee_name (buyer), property address, sale price, sale/deed date, parcel/APN if present.`;
+Property type MUST be one of: Multifamily, Commercial, Industrial, Mixed, Land. EXCLUDE single-family homes, condos, townhomes, owner-occupied residences. Prefer LLC/Trust/Corp grantors.
+
+For each record also self-report a confidence score 0-100 reflecting how clearly this is a real recorded deed with verifiable fields. Anything below ${MIN_CONFIDENCE} will be discarded.`;
 }
 
 async function firecrawlSearch(
@@ -125,8 +121,10 @@ async function firecrawlSearch(
       title: String(x.title ?? ""),
       markdown: String(x.markdown ?? x.description ?? ""),
     }))
-    // Hard-drop broker/MLS hosts before the AI sees them.
-    .filter((r) => !isBrokerUrl(r.url));
+    // Hard-drop broker/MLS hosts.
+    .filter((r) => !isBrokerUrl(r.url))
+    // Deed-language gate: page must look like an actual recorded-deed entry.
+    .filter((r) => DEED_LANGUAGE_RE.test(`${r.title}\n${r.markdown}`));
 }
 
 async function aiExtractLeads(
@@ -140,8 +138,8 @@ async function aiExtractLeads(
     body: JSON.stringify({
       model: AI_MODEL,
       messages: [
-        { role: "system", content: "You extract recorded-deed (grantor → grantee) property-transfer records from web content. Return ONLY valid JSON. Skip anything that is a real-estate listing, broker page, or MLS posting — only true recorded deeds. Skip records without an address AND a grantor name." },
-        { role: "user", content: `${hint}\n\nReturn JSON: { "leads": [ { grantor_name (seller), grantee_name (buyer), owner_name (= grantor_name), property_address, property_city, property_zip, parcel_number, sale_price (number), sale_date (YYYY-MM-DD), deed_date (YYYY-MM-DD), property_type (one of SFR|Multifamily|Commercial|Land|Industrial|Mixed|Unknown), source_record_url, trigger_event (one of recent_sale|listed_for_sale|long_hold_owner|trust_transfer|off_market_signal) } ] }\n\nWeb content:\n\n${corpus.slice(0, 14000)}` },
+        { role: "system", content: "You extract recorded-deed (grantor → grantee) property-transfer records from web content. Return ONLY valid JSON. If the source is not a recorded-deed index entry or deed image, return { \"leads\": [] }. Never invent fields — leave them out rather than guess. Skip records missing an address, parcel, instrument number, or grantor name." },
+        { role: "user", content: `${hint}\n\nReturn JSON: { "leads": [ { grantor_name (seller), grantee_name (buyer), owner_name (= grantor_name), property_address, property_city, property_zip, parcel_number, instrument_number, sale_price (number), sale_date (YYYY-MM-DD), deed_date (YYYY-MM-DD), property_type (one of Multifamily|Commercial|Industrial|Mixed|Land), source_record_url, trigger_event (one of recent_sale|listed_for_sale|long_hold_owner|trust_transfer|off_market_signal), confidence (0-100 self-reported) } ] }\n\nWeb content:\n\n${corpus.slice(0, 14000)}` },
       ],
       response_format: { type: "json_object" },
     }),
@@ -245,6 +243,19 @@ Deno.serve(async (req) => {
   const errors: string[] = [];
   const allCandidates: Candidate[] = [];
   const queries = buildQueries(county.state, county.county, county.recorder_index_url);
+  const drops = { no_recorder_url: 0, page_rejected: 0, confidence_too_low: 0, under_price_floor: 0, wrong_property_type: 0, missing_required_fields: 0, broker_source: 0 };
+
+  if (queries.length === 0) {
+    drops.no_recorder_url = 1;
+    await supabase.from("counties").update({ last_run_at: new Date().toISOString() }).eq("id", county.id);
+    await supabase.from("pipeline_jobs").update({
+      status: "done",
+      finished_at: new Date().toISOString(),
+      result: { found: 0, inserted: 0, enqueued: 0, drops, note: "county has no recorder_index_url — parked" },
+    }).eq("id", jobId);
+    return jsonOk({ ok: true, county: county.county, found: 0, inserted: 0, enqueued: 0, drops });
+  }
+
   const hint = defaultHint(county.state, county.county);
   const tbs = county.last_run_at ? "qdr:w" : "qdr:m";
 
@@ -252,6 +263,7 @@ Deno.serve(async (req) => {
     if (Date.now() - start > HARD_BUDGET_MS) { errors.push("time budget hit"); break; }
     try {
       const results = await firecrawlSearch(q, firecrawlKey, tbs);
+      if (!results.length) { drops.page_rejected += 1; continue; }
       const corpus = results
         .map((r) => `### ${r.title}\nURL: ${r.url}\n\n${r.markdown.slice(0, 3500)}`)
         .join("\n\n---\n\n");
@@ -266,21 +278,32 @@ Deno.serve(async (req) => {
     }
   }
 
-  // Dedupe within batch + against existing leads in the same county.
+  // Dedupe + hard filters. Anything missing required fields gets dropped
+  // with a reason recorded for the Sources page.
   const seen = new Set<string>();
   const fresh: Candidate[] = [];
   for (const c of allCandidates) {
-    // Reject anything whose source URL is on the broker deny-list.
-    if (isBrokerUrl(c.source_record_url)) continue;
-    // Must have an address (or parcel) AND a grantor/owner name to be useful.
+    if (isBrokerUrl(c.source_record_url)) { drops.broker_source += 1; continue; }
     const sellerName = c.grantor_name ?? c.owner_name;
-    if ((!c.property_address && !c.parcel_number) || !sellerName) continue;
-    const k = `${norm(c.parcel_number)}|${norm(c.property_address)}`;
+    if (!sellerName || !c.property_address || !c.parcel_number || !c.instrument_number) {
+      drops.missing_required_fields += 1; continue;
+    }
+    if (typeof c.confidence === "number" && c.confidence < MIN_CONFIDENCE) {
+      drops.confidence_too_low += 1; continue;
+    }
+    if (!c.sale_price || c.sale_price < MIN_SALE_PRICE) {
+      drops.under_price_floor += 1; continue;
+    }
+    const mappedType = mapPropertyType(c.property_type);
+    if (!ALLOWED_PROPERTY_TYPES.has(mappedType)) {
+      drops.wrong_property_type += 1; continue;
+    }
+    const k = `${norm(c.parcel_number)}|${norm(c.instrument_number)}`;
     if (seen.has(k)) continue;
     seen.add(k);
-    // Normalize: always store grantor as owner_name (the seller).
     c.owner_name = sellerName;
     c.grantor_name = sellerName;
+    c.property_type = mappedType;
     fresh.push(c);
   }
 
@@ -288,7 +311,7 @@ Deno.serve(async (req) => {
   let enqueued = 0;
   for (const c of fresh) {
     const ownerType = inferOwnerType(c.owner_name);
-    const propertyType = mapPropertyType(c.property_type);
+    const propertyType = c.property_type ?? "Unknown";
     const triggerEvent = mapTrigger(c.trigger_event);
     const stage = triggerEvent === "commercial_listing" ? "pre_sale_prospect" : "raw_candidate";
 
@@ -311,7 +334,7 @@ Deno.serve(async (req) => {
         trigger_event: triggerEvent,
         source_record_url: c.source_record_url ?? null,
         data_sources: ["firecrawl:recorder"],
-        scout_confidence: 50,
+        scout_confidence: typeof c.confidence === "number" ? Math.min(100, c.confidence) : 75,
         pipeline_stage: stage,
       })
       .select("id")
@@ -327,12 +350,15 @@ Deno.serve(async (req) => {
       lead_id: leadRow.id,
       kind: "scout_found",
       summary: `Discovered via recorder-deed search in ${county.county}, ${county.state}` +
-        (c.grantee_name ? ` (grantee: ${c.grantee_name})` : ""),
+        (c.grantee_name ? ` (grantee: ${c.grantee_name})` : "") +
+        (c.instrument_number ? ` · Inst #${c.instrument_number}` : ""),
       payload: {
         source_url: c.source_record_url ?? null,
         job_id: jobId,
         grantor_name: c.grantor_name ?? null,
         grantee_name: c.grantee_name ?? null,
+        instrument_number: c.instrument_number ?? null,
+        confidence: c.confidence ?? null,
       },
     });
 
@@ -351,10 +377,10 @@ Deno.serve(async (req) => {
   await supabase.from("pipeline_jobs").update({
     status: "done",
     finished_at: new Date().toISOString(),
-    result: { found: fresh.length, inserted, enqueued, recorder_url: county.recorder_index_url, errors: errors.slice(0, 3) },
+    result: { found: fresh.length, inserted, enqueued, drops, recorder_url: county.recorder_index_url, errors: errors.slice(0, 3) },
   }).eq("id", jobId);
 
-  return jsonOk({ ok: true, county: county.county, found: fresh.length, inserted, enqueued, errors });
+  return jsonOk({ ok: true, county: county.county, found: fresh.length, inserted, enqueued, drops, errors });
 });
 
 function jsonOk(body: unknown) {

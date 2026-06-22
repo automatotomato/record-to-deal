@@ -1,60 +1,60 @@
 ## Goal
 
-Stop pulling "seller" info from Zillow / LoopNet / MLS / broker pages. Treat the **county recorder's recorded deed** as the source of truth, take the **grantor** as the real seller, and unmask LLC grantors to a human via free public sources (OpenCorporates + state Secretary of State filings).
+Trade volume for precision. Better to surface 5 real, contactable deeded sellers per morning than 50 broker-page guesses. Tighten every gate in the scout → qualify → enrich chain so anything that can't prove it came from a recorded deed (or be unmasked to a human) gets dropped instead of saved.
 
-## Why the current pipeline misses contacts
+## Where leads currently slip through
 
-- `scan-sources` queries the open web with broad keywords. Top results are broker/listing pages (LoopNet, Crexi, brokerages), so the "owner" we extract is often the listing agent, not the grantor on the deed.
-- `seller-discovery` has an OpenCorporates / SoS pass, but it runs *after* a Firecrawl / LinkedIn pass that locks in whatever name `scan-sources` saved first. If that name is a broker, every downstream pass enriches the wrong person.
-- Counties have a generic `source_url` field, but it isn't consistently a recorder/clerk deed index URL and `scan-sources` doesn't prioritize that domain.
+- `scan-sources` accepts any Firecrawl result that isn't on the broker deny-list and has an address + name. Government aggregator pages, news articles, and county "press release" pages still pass.
+- AI extraction trusts the model's `grantor_name` even when the page has no deed language.
+- `seller-discovery` runs LinkedIn / web passes when OpenCorporates + SoS return nothing, which re-introduces broker noise.
+- No minimum confidence to graduate from `raw_candidate` → `enriched` → `ready_for_outreach`.
 
 ## Plan
 
-### 1. Make the county recorder the primary source
+### 1. Recorder-only sourcing (drop Pass 2 + Pass 3 fallbacks)
 
-- Add a `recorder_index_url` column to `counties` (separate from `source_url`).
-- Rewrite `scan-sources` query strategy:
-  - Pass 1 — **recorder-first**: query restricted to `site:<recorder_index_url host>` plus a generic `"<county> county recorder" OR "official records" OR "recorded deed" grantor grantee` query.
-  - Pass 2 — **government aggregators**: `site:*.gov` and known recorder aggregator domains for that state.
-  - Hard-exclude broker/MLS hosts (LoopNet, Crexi, Zillow, Realtor, Redfin, Trulia, Auction.com, Movoto, Homes.com, brokerage domains) from every query, in every state — not just NV.
-- Update the AI extraction prompt to require `grantor_name` (seller) and `grantee_name` (buyer); save `grantor_name` into `leads.owner_name`.
-- Reject any record whose source URL is on the broker/MLS deny-list, even if the model fills fields.
+- In `scan-sources`, run **only the recorder-host query** (Pass 1). Skip the `.gov` aggregator query and the open-web fallback. Counties without a `recorder_index_url` produce zero leads instead of noisy ones — they stay parked until a recorder URL is seeded.
+- Require the source page to contain deed-language tokens (`grantor`, `grantee`, `warranty deed`, `grant deed`, `quitclaim`, `book/page`, `instrument #`, `recording date`). If the scraped markdown doesn't match, discard the page before sending to the AI.
+- Require the returned record to include **both** a recording date / instrument number AND a parcel/APN. No instrument # → drop.
 
-### 2. Disable counties without a free recorder source
+### 2. Stricter AI extraction
 
-- Counties whose recorder requires login or charges per record (several CA counties, etc.) get `enabled = false` and a `notes` value explaining "awaiting paid bulk source". They stay off the cron until we wire a paid provider.
-- Counties with a free public deed search (Miami-Dade, Maricopa, Travis, etc.) get a `recorder_index_url` seeded and stay enabled.
-- Surface the locked-out counties in the Sources page so it's obvious which ones are parked.
+- Tighten the system prompt: "If the page is not a recorded-deed index entry or deed image, return `{ leads: [] }`. Do not infer grantors from listings, news, or press releases."
+- Add a `confidence` field (0–100) the model must self-report per record; reject anything < 70.
+- Require `sale_price ≥ $500k` AND `property_type ∈ {Multifamily, Commercial, Industrial, Mixed, Land}`. Drop SFR/condo outright.
+- Lower `MAX_RESULTS_PER_QUERY` from 5 → 3 so we spend budget on deeper scrapes, not more URLs.
 
-### 3. Unmask the LLC first, before any LinkedIn / web pass
+### 3. Mandatory unmask before promotion
 
-In `seller-discovery`:
+- In `seller-discovery`, if `owner_type ∈ LLC/Trust/Corp/Estate` and OpenCorporates + SoS both return no human principal, mark the lead `discovery_status = 'failed'`, `pipeline_stage = 'needs_review'`, and **do not** run LinkedIn / web passes. No principal = no outreach candidate.
+- Individual grantors skip unmask but must still pass enrichment gates below.
 
-- Reorder passes so **Pass 1 (Entity Unmask via OpenCorporates + state SoS)** must run and complete for any `owner_type` in `LLC | Trust | Corporation | Estate` before later passes.
-- OpenCorporates: hit the public JSON API (`https://api.opencorporates.com/v0.4/companies/search`) filtered by jurisdiction = the lead's state. No key needed at low volume.
-- State SoS: Firecrawl-scrape the state's business entity search; tighten query to `"<entity name>" site:<state SoS host>` and parse registered agent + officers/members.
-- Persist findings to the lead: `entity_registry_url`, registered agent, officers/members list in a new `leads.entity_principals jsonb` column.
-- Promote the best human principal (manager → member → officer → registered agent) to `decision_maker_name` with role.
-- Only then does Pass 2 (LinkedIn / personal contact hunt) run, against the unmasked human, not the LLC string.
+### 4. Promotion gates (readiness tightening)
 
-### 4. Guardrails so brokers can't sneak back in
+Update `compute_lead_readiness` so a lead only reaches `ready_for_outreach` when ALL are true:
+- `owner_name` present AND not on broker deny-list
+- `decision_maker_name` present (human, not the LLC string) AND has a verified role (`Manager | Managing Member | Member | Officer | Trustee | Owner`)
+- `decision_maker_email` passes the existing regex AND domain is not a broker/MLS host AND not a generic role address (`info@`, `contact@`, `sales@`)
+- `property_address` present AND `parcel_number` present
+- `sale_price ≥ $500k`
+- `ai_brief.why_good` present
+- `scout_confidence ≥ 70`
 
-- In `enrich-contact` and `seller-discovery`, add a broker/agent deny-list check on any candidate name/email/phone (domains like `@compass.com`, `@kw.com`, `@cbre.com`, etc., and titles like "Realtor", "Listing Agent", "Broker Associate") — reject and try the next candidate.
-- In the lead drawer, surface the unmask trail: "Grantor on deed: ACME HOLDINGS LLC → SoS principal: Jane Doe (Manager) → contact found via …".
+Anything missing one of those → `needs_contact_info` or `needs_manual_review`, never `ready_for_outreach`.
 
-### 5. Backfill
+### 5. Cron throttle + observability
 
-- Re-queue `seller_discovery` for existing leads whose `owner_type` is LLC/Trust/Corp and whose `decision_maker_name` is empty or matches the broker deny-list, so we recover leads already in the DB.
+- `run_scout_cron` already enqueues one job per enabled county. Add a per-run cap: only enqueue counties whose `last_run_at` is > 24h old (skip counties scanned the same day).
+- Record per-job dropped-record counts (`page_rejected`, `confidence_too_low`, `unmask_failed`, `under_price_floor`) in `pipeline_jobs.result` so the Admin > Sources page can show why a county yielded zero leads that morning.
 
 ## Technical details
 
 Files touched:
 
-- `supabase/migrations/<new>.sql` — add `counties.recorder_index_url text`, add `leads.entity_principals jsonb`, set `enabled = false` + note on counties with no free recorder source, seed `recorder_index_url` on counties that do.
-- `supabase/functions/scan-sources/index.ts` — recorder-first query builder, universal broker deny-list, grantor/grantee extraction, `owner_name = grantor`.
-- `supabase/functions/seller-discovery/index.ts` — mandatory OpenCorporates + SoS Pass 1 for entity owners, OpenCorporates JSON API call, persist principals, deny-list filter on later passes.
-- `supabase/functions/enrich-contact/index.ts` — apply the broker deny-list before seeding LinkedIn.
-- `src/components/LeadDrawer.tsx` — show the unmask trail.
-- `src/pages/Admin.tsx` — display each county's `recorder_index_url` and parked-with-reason status; let admins paste a URL to re-enable.
+- `supabase/functions/scan-sources/index.ts` — remove Pass 2/3 queries, add deed-language gate, require instrument # + parcel, require self-reported `confidence ≥ 70`, drop SFR/sub-$500k.
+- `supabase/functions/seller-discovery/index.ts` — short-circuit on failed unmask for entity owners; do not fall through to LinkedIn.
+- `supabase/migrations/<new>.sql` — update `compute_lead_readiness` with the stricter gate; add `pipeline_jobs.result` drop-reason convention (no schema change, just docs).
+- `supabase/functions/pipeline-sweeper/index.ts` (optional) — daily downgrade of leads stuck in `researching` > 7 days with no decision maker to `needs_manual_review`.
+- `src/pages/Admin.tsx` — surface drop-reason counts per county on the last run.
 
-Out of scope (will ask before doing): paid data providers (DataTree, PropertyRadar, TitlePro), building per-county recorder scrapers beyond Travis, and any change to outreach / Touchpoints UI.
+Out of scope (will ask before doing): per-county recorder scrapers beyond Travis, paid data providers, changes to outreach cadence or email templates.
