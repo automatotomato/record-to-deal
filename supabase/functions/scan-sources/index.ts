@@ -121,8 +121,10 @@ async function firecrawlSearch(
       title: String(x.title ?? ""),
       markdown: String(x.markdown ?? x.description ?? ""),
     }))
-    // Hard-drop broker/MLS hosts before the AI sees them.
-    .filter((r) => !isBrokerUrl(r.url));
+    // Hard-drop broker/MLS hosts.
+    .filter((r) => !isBrokerUrl(r.url))
+    // Deed-language gate: page must look like an actual recorded-deed entry.
+    .filter((r) => DEED_LANGUAGE_RE.test(`${r.title}\n${r.markdown}`));
 }
 
 async function aiExtractLeads(
