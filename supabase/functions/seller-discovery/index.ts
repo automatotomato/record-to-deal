@@ -810,6 +810,7 @@ Deno.serve(async (req) => {
     company_website: d.company_website,
     entity_registry_url: d.entity_registry_url ?? lead.entity_registry_url,
     related_entities: d.related_entities,
+    entity_principals: d.principals.length ? d.principals : null,
     discovery_confidence_by_field: d.confidence_by_field,
     discovery_status: status,
     has_contact: willBeUseful,
