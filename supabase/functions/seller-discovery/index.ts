@@ -737,7 +737,7 @@ Deno.serve(async (req) => {
     }
     const allEvidence = evidence.join("\n---\n");
     if (!d.email) {
-      const emails = pullEmails(allEvidence);
+      const emails = pullEmails(allEvidence).filter((e) => !isBrokerEmail(e));
       let best: { e: string; s: number } | null = null;
       for (const e of emails) {
         const s = scoreEmail(e, targetName);
