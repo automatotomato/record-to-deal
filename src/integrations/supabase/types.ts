@@ -92,6 +92,39 @@ export type Database = {
         }
         Relationships: []
       }
+      firecrawl_usage: {
+        Row: {
+          actual_credits: number | null
+          caller: string
+          estimated_credits: number
+          id: string
+          note: string | null
+          released_at: string | null
+          started_at: string
+          status: string
+        }
+        Insert: {
+          actual_credits?: number | null
+          caller: string
+          estimated_credits?: number
+          id?: string
+          note?: string | null
+          released_at?: string | null
+          started_at?: string
+          status?: string
+        }
+        Update: {
+          actual_credits?: number | null
+          caller?: string
+          estimated_credits?: number
+          id?: string
+          note?: string | null
+          released_at?: string | null
+          started_at?: string
+          status?: string
+        }
+        Relationships: []
+      }
       lead_activities: {
         Row: {
           actor_id: string | null
@@ -950,6 +983,14 @@ export type Database = {
           isOneToOne: false
           isSetofReturn: true
         }
+      }
+      fc_release: {
+        Args: { p_actual: number; p_id: string; p_status: string }
+        Returns: undefined
+      }
+      fc_reserve: {
+        Args: { p_caller: string; p_credits: number }
+        Returns: string
       }
       has_role: {
         Args: {

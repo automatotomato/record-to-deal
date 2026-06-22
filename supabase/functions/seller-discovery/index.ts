@@ -21,7 +21,20 @@ const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-4o-mini";
 if (!(globalThis as any).__sdLogged) { console.log(`[seller-discovery] OpenAI model: ${AI_MODEL}`); (globalThis as any).__sdLogged = true; }
 
 // Per-call budget so a single lead can't burn the day's quota
-const BUDGET = { firecrawl: 15, ai: 3 };
+const BUDGET = { firecrawl: 8, ai: 3 };
+
+// Firecrawl global gate (5 concurrent / 5,000 cr/month enforced in DB).
+const FC_ADMIN = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+async function fcReserve(caller: string, credits: number): Promise<string | null> {
+  try {
+    const { data } = await FC_ADMIN.rpc("fc_reserve", { p_caller: caller, p_credits: credits });
+    return (data as string) ?? null;
+  } catch (e) { console.warn("fc_reserve threw", e); return null; }
+}
+async function fcRelease(id: string | null, actual: number, status = "done") {
+  if (!id) return;
+  try { await FC_ADMIN.rpc("fc_release", { p_id: id, p_actual: actual, p_status: status }); } catch (_) {}
+}
 
 const STATE_NAMES: Record<string, string> = {
   AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
@@ -84,6 +97,9 @@ class Budget {
 
 async function fcSearch(query: string, key: string, limit: number, scrape: boolean, budget: Budget) {
   if (!budget.canFc()) return [];
+  const cost = scrape ? limit * 2 : limit;
+  const resId = await fcReserve("seller-discovery:search", cost);
+  if (!resId) { console.warn("fc_throttled search"); return []; }
   budget.fc++;
   try {
     const r = await fetch(`${FC_V2}/search`, {
@@ -96,16 +112,20 @@ async function fcSearch(query: string, key: string, limit: number, scrape: boole
     });
     if (!r.ok) {
       console.warn(`fc ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      await fcRelease(resId, cost, "failed");
       return [];
     }
     const d = await r.json();
     const arr = d?.data?.web ?? d?.data ?? d?.web ?? [];
+    await fcRelease(resId, cost, "done");
     return Array.isArray(arr) ? arr : [];
-  } catch (e) { console.warn("fc threw", e); return []; }
+  } catch (e) { console.warn("fc threw", e); await fcRelease(resId, cost, "failed"); return []; }
 }
 
 async function fcScrape(url: string, key: string, budget: Budget): Promise<string | null> {
   if (!budget.canFc()) return null;
+  const resId = await fcReserve("seller-discovery:scrape", 1);
+  if (!resId) { console.warn("fc_throttled scrape"); return null; }
   budget.fc++;
   try {
     const r = await fetch(`${FC_V2}/scrape`, {
@@ -113,10 +133,11 @@ async function fcScrape(url: string, key: string, budget: Budget): Promise<strin
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({ url, formats: ["markdown"], onlyMainContent: true }),
     });
-    if (!r.ok) return null;
+    if (!r.ok) { await fcRelease(resId, 1, "failed"); return null; }
     const d = await r.json();
+    await fcRelease(resId, 1, "done");
     return d?.data?.markdown ?? d?.markdown ?? null;
-  } catch (_) { return null; }
+  } catch (_) { await fcRelease(resId, 1, "failed"); return null; }
 }
 
 const GATEWAY_HEADERS = (key: string) => ({

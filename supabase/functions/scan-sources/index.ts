@@ -97,34 +97,48 @@ Property type MUST be one of: Multifamily, Commercial, Industrial, Mixed, Land. 
 For each record also self-report a confidence score 0-100 reflecting how clearly this is a real recorded deed with verifiable fields. Anything below ${MIN_CONFIDENCE} will be discarded.`;
 }
 
+const FC_ADMIN = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+async function fcReserve(caller: string, credits: number): Promise<string | null> {
+  try { const { data } = await FC_ADMIN.rpc("fc_reserve", { p_caller: caller, p_credits: credits }); return (data as string) ?? null; }
+  catch (e) { console.warn("fc_reserve threw", e); return null; }
+}
+async function fcRelease(id: string | null, actual: number, status = "done") {
+  if (!id) return;
+  try { await FC_ADMIN.rpc("fc_release", { p_id: id, p_actual: actual, p_status: status }); } catch (_) {}
+}
+
 async function firecrawlSearch(
   query: string,
   apiKey: string,
   tbs: string,
 ): Promise<{ url: string; title: string; markdown: string }[]> {
-  const r = await fetch(`${FIRECRAWL_V2}/search`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      query,
-      limit: MAX_RESULTS_PER_QUERY,
-      tbs,
-      scrapeOptions: { onlyMainContent: true, formats: ["markdown"] },
-    }),
-  });
-  if (!r.ok) throw new Error(`Firecrawl ${r.status}: ${(await r.text()).slice(0, 200)}`);
-  const data = await r.json();
-  const results: any[] = (data?.data?.web as any[]) ?? (Array.isArray(data?.data) ? data.data : []) ?? [];
-  return results
-    .map((x) => ({
-      url: String(x.url ?? ""),
-      title: String(x.title ?? ""),
-      markdown: String(x.markdown ?? x.description ?? ""),
-    }))
-    // Hard-drop broker/MLS hosts.
-    .filter((r) => !isBrokerUrl(r.url))
-    // Deed-language gate: page must look like an actual recorded-deed entry.
-    .filter((r) => DEED_LANGUAGE_RE.test(`${r.title}\n${r.markdown}`));
+  const cost = MAX_RESULTS_PER_QUERY * 2; // search + scrape per result
+  const resId = await fcReserve("scan-sources:search", cost);
+  if (!resId) { console.warn("fc_throttled scan-sources search"); return []; }
+  try {
+    const r = await fetch(`${FIRECRAWL_V2}/search`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query,
+        limit: MAX_RESULTS_PER_QUERY,
+        tbs,
+        scrapeOptions: { onlyMainContent: true, formats: ["markdown"] },
+      }),
+    });
+    if (!r.ok) { await fcRelease(resId, cost, "failed"); throw new Error(`Firecrawl ${r.status}: ${(await r.text()).slice(0, 200)}`); }
+    const data = await r.json();
+    await fcRelease(resId, cost, "done");
+    const results: any[] = (data?.data?.web as any[]) ?? (Array.isArray(data?.data) ? data.data : []) ?? [];
+    return results
+      .map((x) => ({
+        url: String(x.url ?? ""),
+        title: String(x.title ?? ""),
+        markdown: String(x.markdown ?? x.description ?? ""),
+      }))
+      .filter((r) => !isBrokerUrl(r.url))
+      .filter((r) => DEED_LANGUAGE_RE.test(`${r.title}\n${r.markdown}`));
+  } catch (e) { await fcRelease(resId, cost, "failed"); throw e; }
 }
 
 async function aiExtractLeads(
