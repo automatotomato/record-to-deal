@@ -29,6 +29,17 @@ const HARD_BUDGET_MS = 90_000;
 
 type SourceKind = "commercial" | "residential" | "court" | "sec";
 const SOURCES: SourceKind[] = ["commercial", "residential", "court", "sec"];
+type FirecrawlCredential = { label: string; key: string };
+
+function firecrawlCredentials(): FirecrawlCredential[] {
+  const override = Deno.env.get("FIRECRAWL_API_KEY_OVERRIDE")?.trim();
+  const connector = Deno.env.get("FIRECRAWL_API_KEY")?.trim();
+  const creds = [
+    override ? { label: "override", key: override } : null,
+    connector ? { label: "connector", key: connector } : null,
+  ].filter(Boolean) as FirecrawlCredential[];
+  return creds.filter((cred, idx) => creds.findIndex((x) => x.key === cred.key) === idx);
+}
 
 if (!(globalThis as any).__sesLogged) {
   console.log(`[scan-external-sources] OpenAI model: ${AI_MODEL}`);
@@ -37,21 +48,25 @@ if (!(globalThis as any).__sesLogged) {
 
 function searchQueriesFor(source: SourceKind, state: string, counties: string[]): string[] {
   const top = counties.slice(0, 3).join(" OR ");
+  const year = new Date().getUTCFullYear();
+  const years = `${year} OR ${year - 1}`;
   switch (source) {
     case "commercial":
       return [
-        `site:crexi.com sold ${state} commercial multifamily 2025 ${top}`,
-        `site:loopnet.com sold ${state} ${top} 2025`,
+        `site:crexi.com sold ${state} commercial multifamily (${years}) ${top}`,
+        `site:loopnet.com sold ${state} ${top} (${years})`,
+        `"sold" "buyer" "seller" commercial real estate ${state} (${years}) ${top}`,
+        `"acquired" "sold" "LLC" "${state}" commercial property (${years})`,
       ];
     case "residential":
       return [
-        `site:redfin.com sold ${state} ${top} multifamily 2025`,
-        `site:redfin.com sold ${state} duplex triplex 2025`,
+        `site:redfin.com sold ${state} ${top} multifamily (${years})`,
+        `site:redfin.com sold ${state} duplex triplex (${years})`,
       ];
     case "court":
       return [
-        `${state} probate sale notice ${top} 2025`,
-        `${state} tax lien auction property 2025 ${top}`,
+        `${state} probate sale notice ${top} (${years})`,
+        `${state} tax lien auction property (${years}) ${top}`,
       ];
     case "sec":
       return [
@@ -71,32 +86,41 @@ async function fcRelease(id: string | null, actual: number, status = "done") {
   try { await FC_ADMIN.rpc("fc_release", { p_id: id, p_actual: actual, p_status: status }); } catch (_) {}
 }
 
-async function firecrawlSearch(query: string, fcKey: string, limit = 6): Promise<Array<{ url?: string; title?: string; markdown?: string; description?: string }>> {
+async function firecrawlSearch(query: string, credentials: FirecrawlCredential[], limit = 6): Promise<Array<{ url?: string; title?: string; markdown?: string; description?: string }>> {
   const ctrl = new AbortController();
   const tid = setTimeout(() => ctrl.abort(), 30_000);
-  const cost = limit * 2;
+  const cost = limit;
   const resId = await fcReserve("scan-external:search", cost);
   if (!resId) { console.warn("fc_throttled scan-external"); clearTimeout(tid); return []; }
   try {
-    const r = await fetch(`${FC_V2}/search`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${fcKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        query, limit,
-        scrapeOptions: { formats: ["markdown"], onlyMainContent: true },
-      }),
-      signal: ctrl.signal,
-    });
-    if (!r.ok) {
-      console.warn(`firecrawl ${r.status}: ${(await r.text()).slice(0, 200)}`);
-      await fcRelease(resId, cost, "failed");
-      return [];
+    let lastError = "Firecrawl credentials unavailable";
+    for (const cred of credentials) {
+      const r = await fetch(`${FC_V2}/search`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${cred.key}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query, limit,
+        }),
+        signal: ctrl.signal,
+      });
+      if (!r.ok) {
+        lastError = `Firecrawl ${r.status} (${cred.label}): ${(await r.text()).slice(0, 200)}`;
+        console.warn(lastError);
+        if ([401, 402, 403].includes(r.status) && credentials.length > 1) continue;
+        throw new Error(lastError);
+      }
+      const d = await r.json();
+      await fcRelease(resId, cost, "done");
+      const arr = d?.data?.web ?? d?.data ?? d?.web ?? [];
+      return Array.isArray(arr) ? arr : [];
     }
-    const d = await r.json();
-    await fcRelease(resId, cost, "done");
-    const arr = d?.data?.web ?? d?.data ?? d?.web ?? [];
-    return Array.isArray(arr) ? arr : [];
-  } catch (e) { console.warn("firecrawl threw", e); await fcRelease(resId, cost, "failed"); return []; }
+    throw new Error(lastError);
+  } catch (e) {
+    console.warn("firecrawl threw", e);
+    await fcRelease(resId, cost, "failed");
+    if (e instanceof Error && /Firecrawl\s+(401|402|403)/i.test(e.message)) throw e;
+    return [];
+  }
   finally { clearTimeout(tid); }
 }
 
@@ -109,7 +133,7 @@ async function extractFromEvidence(
   const sys = `You extract real-estate transactions from scraped web evidence into structured JSON. Use ONLY facts present in the evidence. Never invent emails, phones, or owner names. Return an empty list when nothing usable is present.`;
   const user = `Source family: ${source}. State: ${state}.
 
-Extract up to 12 distinct candidate 1031 leads from the evidence below. Each lead requires owner_name, property_address, and source_record_url, plus at least ONE reachability field (owner_contact_email, owner_contact_phone, or owner_website).
+Extract up to 12 distinct candidate 1031 leads from the evidence below. Each lead requires owner_name, property_address, and source_record_url. Include contact fields when present, but do not reject otherwise; later workers enrich contacts.
 
 Return ONLY:
 {
@@ -166,20 +190,21 @@ async function webGroundedExtract(
   source: SourceKind,
   state: string,
   counties: string[],
-  fcKey: string,
+  fcCreds: FirecrawlCredential[],
   aiKey: string,
-): Promise<Candidate[]> {
+): Promise<{ candidates: Candidate[]; searched: number; evidence: number }> {
   const queries = searchQueriesFor(source, state, counties);
   const evidenceParts: string[] = [];
   for (const q of queries) {
-    const results = await firecrawlSearch(q, fcKey, 6);
+    const results = await firecrawlSearch(q, fcCreds, 6);
     for (const r of results) {
       const chunk = `URL: ${r.url ?? ""}\nTITLE: ${r.title ?? ""}\n${(r.markdown ?? r.description ?? "").slice(0, 4000)}`;
       evidenceParts.push(chunk);
     }
   }
-  if (!evidenceParts.length) return [];
-  return extractFromEvidence(source, state, evidenceParts.join("\n---\n"), aiKey);
+  if (!evidenceParts.length) return { candidates: [], searched: queries.length, evidence: 0 };
+  const candidates = await extractFromEvidence(source, state, evidenceParts.join("\n---\n"), aiKey);
+  return { candidates, searched: queries.length, evidence: evidenceParts.length };
 }
 
 function inferOwnerType(name?: string | null) {
@@ -248,7 +273,7 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
   const lovableKey = Deno.env.get("OPENAI_API_KEY");
-  const fcKey = (Deno.env.get("FIRECRAWL_API_KEY_OVERRIDE") || Deno.env.get("FIRECRAWL_API_KEY"));
+  const fcCreds = firecrawlCredentials();
 
   let body: { job_id?: string; enqueue?: boolean } = {};
   try { body = await req.json(); } catch (_) {}
@@ -287,7 +312,7 @@ Deno.serve(async (req) => {
   // ---- Worker mode: process one (state, source) job ----
   if (!body.job_id) return jsonErr("job_id or enqueue required", 400);
   if (!lovableKey) return jsonErr("OPENAI_API_KEY not configured", 500);
-  if (!fcKey) return jsonErr("FIRECRAWL_API_KEY not configured", 500);
+  if (!fcCreds.length) return jsonErr("FIRECRAWL_API_KEY not configured", 500);
 
   const { data: job } = await supabase
     .from("pipeline_jobs").select("*").eq("id", body.job_id).maybeSingle();
@@ -314,10 +339,26 @@ Deno.serve(async (req) => {
   const start = Date.now();
   const errors: string[] = [];
   let candidates: Candidate[] = [];
+  let searched = 0;
+  let evidence = 0;
   try {
-    candidates = await webGroundedExtract(source, state, countyNames, fcKey, lovableKey);
+    const extracted = await webGroundedExtract(source, state, countyNames, fcCreds, lovableKey);
+    candidates = extracted.candidates;
+    searched = extracted.searched;
+    evidence = extracted.evidence;
   } catch (e) {
     errors.push(e instanceof Error ? e.message : String(e));
+  }
+
+  const credentialBlocked = errors.some((e) => /Firecrawl\s+(401|402|403)/i.test(e));
+  if (credentialBlocked) {
+    await supabase.from("pipeline_jobs").update({
+      status: "failed",
+      finished_at: new Date().toISOString(),
+      last_error: errors[0] ?? "Firecrawl credential failed",
+      result: { state, source, searched, evidence, candidates: candidates.length, found: 0, inserted: 0, enqueued: 0, errors: errors.slice(0, 3) },
+    }).eq("id", body.job_id);
+    return jsonOk({ ok: false, state, source, found: 0, inserted: 0, enqueued: 0, errors });
   }
 
   // Dedupe + drop incomplete records.
@@ -325,7 +366,6 @@ Deno.serve(async (req) => {
   const fresh: Candidate[] = [];
   for (const c of candidates) {
     if (!c.owner_name || !c.property_address || !c.source_record_url) continue;
-    if (!hasReachability(c)) continue;
     const k = `${norm(c.property_address)}|${norm(c.owner_name)}`;
     if (seen.has(k)) continue;
     seen.add(k);
@@ -348,7 +388,8 @@ Deno.serve(async (req) => {
     const ownerType = inferOwnerType(c.owner_name);
     const propertyType = mapPropertyType(c.property_type);
     const triggerEvent = mapTrigger(c.trigger_event);
-    const sourceTag = `gemini:${source}`;
+    const reachable = hasReachability(c);
+    const sourceTag = `external:${source}`;
 
     const { data: leadRow, error: insErr } = await supabase
       .from("leads")
@@ -366,8 +407,8 @@ Deno.serve(async (req) => {
         contact_email: isUnlockedEmail(c.owner_contact_email) ? c.owner_contact_email : null,
         contact_phone: hasUsablePhone(c.owner_contact_phone) ? c.owner_contact_phone : null,
         company_website: normalizeWebsite(c.owner_website),
-        has_contact: true,
-        has_outreach_contact: true,
+        has_contact: reachable,
+        has_outreach_contact: reachable,
         property_type: propertyType,
         sale_price: c.sale_price ?? null,
         sale_date: c.sale_date ?? null,
@@ -376,7 +417,7 @@ Deno.serve(async (req) => {
         source_record_url: c.source_record_url,
         data_sources: [sourceTag],
         scout_confidence: source === "sec" ? 70 : 55,
-        pipeline_stage: "enriched",
+        pipeline_stage: reachable ? "enriched" : "raw_candidate",
       })
       .select("id").single();
 
@@ -390,18 +431,20 @@ Deno.serve(async (req) => {
       payload: { source, source_url: c.source_record_url, job_id: body.job_id },
     });
 
-    await supabase.from("pipeline_jobs").insert({
-      kind: "verify_property", lead_id: leadRow.id, priority: 100,
-    });
-    enqueued += 1;
+    const followups: Array<{ kind: string; lead_id: string; priority: number }> = [
+      { kind: "verify_property", lead_id: leadRow.id, priority: 100 },
+    ];
+    if (!reachable) followups.push({ kind: "enrich_contact", lead_id: leadRow.id, priority: 120 });
+    await supabase.from("pipeline_jobs").insert(followups);
+    enqueued += followups.length;
   }
 
   await supabase.from("pipeline_jobs").update({
     status: "done", finished_at: new Date().toISOString(),
-    result: { state, source, found: fresh.length, inserted, enqueued, errors: errors.slice(0, 3) },
+    result: { state, source, searched, evidence, candidates: candidates.length, found: fresh.length, inserted, enqueued, errors: errors.slice(0, 3) },
   }).eq("id", body.job_id);
 
-  return jsonOk({ ok: true, state, source, found: fresh.length, inserted, enqueued, errors });
+  return jsonOk({ ok: true, state, source, searched, evidence, candidates: candidates.length, found: fresh.length, inserted, enqueued, errors });
 });
 
 function jsonOk(b: unknown) {
