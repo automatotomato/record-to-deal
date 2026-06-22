@@ -72,29 +72,15 @@ function isBrokerUrl(url?: string | null): boolean {
   return BROKER_DENY_RE.test(h);
 }
 
-function buildQueries(state: string, county: string, recorderUrl: string | null) {
-  const countyClean = county.replace(/\s+county$/i, "").trim();
+function buildQueries(_state: string, _county: string, recorderUrl: string | null) {
+  // Recorder-only sourcing. If we don't have a recorder index URL for this
+  // county, we produce ZERO queries — county stays parked rather than
+  // pulling noise from listings/news/aggregators.
   const recorderHost = hostOf(recorderUrl);
-  const queries: string[] = [];
-
-  // Pass 1: recorder-first. If we have a recorder URL, restrict to it.
-  if (recorderHost) {
-    queries.push(
-      `site:${recorderHost} (deed OR "warranty deed" OR "grant deed" OR "special warranty") grantor grantee`,
-    );
-  }
-
-  // Pass 2: government / official records search across .gov / .us domains.
-  queries.push(
-    `("${countyClean} County" ${state}) ("official records" OR "recorded deed" OR "deed of trust" OR "grantor" OR "grantee") (LLC OR Trust OR Inc OR Corp) site:.gov OR site:.us ${NEG_SITE_FILTER}`,
-  );
-
-  // Pass 3: open web fallback — investment/commercial transfers, broker hosts excluded.
-  queries.push(
-    `"${countyClean} County" ${state} ("recorded" OR "deed") (multifamily OR commercial OR NNN OR industrial OR "apartment building") (LLC OR Trust OR Inc OR Corp) ${NEG_SITE_FILTER}`,
-  );
-
-  return queries;
+  if (!recorderHost) return [];
+  return [
+    `site:${recorderHost} (deed OR "warranty deed" OR "grant deed" OR "special warranty" OR "deed of trust") grantor grantee`,
+  ];
 }
 
 function defaultHint(state: string, county: string) {
