@@ -253,6 +253,17 @@ Deno.serve(async (req) => {
     return jsonOk({ ok: false, error: "county missing" });
   }
 
+  // Cooldown: skip if this county was scanned within the last 12 hours
+  // (manual button + cron + dispatcher retries can otherwise stack up).
+  const force = !!(job.payload as any)?.force;
+  if (!force && county.last_run_at && (Date.now() - new Date(county.last_run_at).getTime()) < 12 * 60 * 60 * 1000) {
+    await supabase.from("pipeline_jobs").update({
+      status: "done", finished_at: new Date().toISOString(),
+      result: { skipped: "cooldown_12h", last_run_at: county.last_run_at },
+    }).eq("id", jobId);
+    return jsonOk({ ok: true, skipped: "cooldown_12h", county: county.county });
+  }
+
   const start = Date.now();
   const errors: string[] = [];
   const allCandidates: Candidate[] = [];

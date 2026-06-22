@@ -20,7 +20,7 @@ const Admin = () => {
     setRunning(true);
     try {
       const [{ data: counties, error: cErr }, { data: rates }, { data: activeJobs }] = await Promise.all([
-        supabase.from("counties").select("id, state").eq("enabled", true),
+        supabase.from("counties").select("id, state, last_run_at").eq("enabled", true),
         supabase.from("state_tax_rates").select("state, priority_rank, is_target"),
         supabase
           .from("pipeline_jobs")
@@ -32,12 +32,21 @@ const Admin = () => {
       const rankByState = new Map<string, number>();
       for (const r of rates ?? []) rankByState.set(r.state, r.priority_rank ?? 99);
       const activeCountyIds = new Set((activeJobs ?? []).map((j) => j.county_id).filter(Boolean));
-      const rows = (counties ?? []).filter((c) => !activeCountyIds.has(c.id)).map((c) => ({
+      const cutoff = Date.now() - 12 * 60 * 60 * 1000;
+      const eligible = (counties ?? []).filter((c) => !activeCountyIds.has(c.id))
+        .filter((c) => !c.last_run_at || new Date(c.last_run_at).getTime() < cutoff);
+      const cooledDown = (counties ?? []).length - eligible.length - activeCountyIds.size;
+      const rows = eligible.map((c) => ({
         kind: "scan_sources",
         county_id: c.id,
         priority: (rankByState.get(c.state) ?? 99) * 10,
       }));
-      if (!rows.length) { toast.info("A scan is already queued or running for every enabled county."); return; }
+      if (!rows.length) {
+        toast.info(cooledDown > 0
+          ? `All counties scanned within the last 12h — nothing new to queue.`
+          : `A scan is already queued or running for every enabled county.`);
+        return;
+      }
       const { error } = await supabase.from("pipeline_jobs").insert(rows);
       if (error) throw error;
       supabase.functions.invoke("job-dispatcher", { body: { trigger: "manual" } });
