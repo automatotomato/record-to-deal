@@ -496,9 +496,31 @@ Deno.serve(async (req) => {
   // Cache: only skip when we already have a real email/phone. A LinkedIn-only
   // partial needs another pass because Gemini search may now succeed.
   if (!body.force && !body.company_website && lead.discovery_status === "reachable" && (isUnlockedEmail(lead.decision_maker_email) || lead.decision_maker_phone)) {
+    if (jobId) await supabaseEarly.from("pipeline_jobs").update({ status: "done", finished_at: new Date().toISOString(), result: { skipped: "already_reachable" } }).eq("id", jobId);
     return new Response(JSON.stringify({ ok: true, cached: true, status: lead.discovery_status }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
+  }
+
+  // Cooldown: don't re-run seller-discovery for the same lead within 24h
+  // unless explicitly forced. Prevents the dispatcher from re-enqueueing
+  // the same lead over and over and burning Firecrawl credits.
+  if (!body.force && !body.company_website) {
+    const { data: recent } = await supabaseEarly
+      .from("pipeline_jobs")
+      .select("id, finished_at")
+      .eq("kind", "seller_discovery")
+      .eq("lead_id", leadId)
+      .eq("status", "done")
+      .gte("finished_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+      .limit(1)
+      .maybeSingle();
+    if (recent) {
+      if (jobId) await supabaseEarly.from("pipeline_jobs").update({ status: "done", finished_at: new Date().toISOString(), result: { skipped: "cooldown_24h", prior_job: recent.id } }).eq("id", jobId);
+      return new Response(JSON.stringify({ ok: true, skipped: "cooldown_24h" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
   }
 
   const budget = new Budget();
