@@ -243,6 +243,19 @@ Deno.serve(async (req) => {
   const errors: string[] = [];
   const allCandidates: Candidate[] = [];
   const queries = buildQueries(county.state, county.county, county.recorder_index_url);
+  const drops = { no_recorder_url: 0, page_rejected: 0, confidence_too_low: 0, under_price_floor: 0, wrong_property_type: 0, missing_required_fields: 0, broker_source: 0 };
+
+  if (queries.length === 0) {
+    drops.no_recorder_url = 1;
+    await supabase.from("counties").update({ last_run_at: new Date().toISOString() }).eq("id", county.id);
+    await supabase.from("pipeline_jobs").update({
+      status: "done",
+      finished_at: new Date().toISOString(),
+      result: { found: 0, inserted: 0, enqueued: 0, drops, note: "county has no recorder_index_url — parked" },
+    }).eq("id", jobId);
+    return jsonOk({ ok: true, county: county.county, found: 0, inserted: 0, enqueued: 0, drops });
+  }
+
   const hint = defaultHint(county.state, county.county);
   const tbs = county.last_run_at ? "qdr:w" : "qdr:m";
 
@@ -250,6 +263,7 @@ Deno.serve(async (req) => {
     if (Date.now() - start > HARD_BUDGET_MS) { errors.push("time budget hit"); break; }
     try {
       const results = await firecrawlSearch(q, firecrawlKey, tbs);
+      if (!results.length) { drops.page_rejected += 1; continue; }
       const corpus = results
         .map((r) => `### ${r.title}\nURL: ${r.url}\n\n${r.markdown.slice(0, 3500)}`)
         .join("\n\n---\n\n");
@@ -264,21 +278,32 @@ Deno.serve(async (req) => {
     }
   }
 
-  // Dedupe within batch + against existing leads in the same county.
+  // Dedupe + hard filters. Anything missing required fields gets dropped
+  // with a reason recorded for the Sources page.
   const seen = new Set<string>();
   const fresh: Candidate[] = [];
   for (const c of allCandidates) {
-    // Reject anything whose source URL is on the broker deny-list.
-    if (isBrokerUrl(c.source_record_url)) continue;
-    // Must have an address (or parcel) AND a grantor/owner name to be useful.
+    if (isBrokerUrl(c.source_record_url)) { drops.broker_source += 1; continue; }
     const sellerName = c.grantor_name ?? c.owner_name;
-    if ((!c.property_address && !c.parcel_number) || !sellerName) continue;
-    const k = `${norm(c.parcel_number)}|${norm(c.property_address)}`;
+    if (!sellerName || !c.property_address || !c.parcel_number || !c.instrument_number) {
+      drops.missing_required_fields += 1; continue;
+    }
+    if (typeof c.confidence === "number" && c.confidence < MIN_CONFIDENCE) {
+      drops.confidence_too_low += 1; continue;
+    }
+    if (!c.sale_price || c.sale_price < MIN_SALE_PRICE) {
+      drops.under_price_floor += 1; continue;
+    }
+    const mappedType = mapPropertyType(c.property_type);
+    if (!ALLOWED_PROPERTY_TYPES.has(mappedType)) {
+      drops.wrong_property_type += 1; continue;
+    }
+    const k = `${norm(c.parcel_number)}|${norm(c.instrument_number)}`;
     if (seen.has(k)) continue;
     seen.add(k);
-    // Normalize: always store grantor as owner_name (the seller).
     c.owner_name = sellerName;
     c.grantor_name = sellerName;
+    c.property_type = mappedType;
     fresh.push(c);
   }
 
@@ -286,7 +311,7 @@ Deno.serve(async (req) => {
   let enqueued = 0;
   for (const c of fresh) {
     const ownerType = inferOwnerType(c.owner_name);
-    const propertyType = mapPropertyType(c.property_type);
+    const propertyType = c.property_type ?? "Unknown";
     const triggerEvent = mapTrigger(c.trigger_event);
     const stage = triggerEvent === "commercial_listing" ? "pre_sale_prospect" : "raw_candidate";
 
@@ -309,7 +334,7 @@ Deno.serve(async (req) => {
         trigger_event: triggerEvent,
         source_record_url: c.source_record_url ?? null,
         data_sources: ["firecrawl:recorder"],
-        scout_confidence: 50,
+        scout_confidence: typeof c.confidence === "number" ? Math.min(100, c.confidence) : 75,
         pipeline_stage: stage,
       })
       .select("id")
@@ -325,12 +350,15 @@ Deno.serve(async (req) => {
       lead_id: leadRow.id,
       kind: "scout_found",
       summary: `Discovered via recorder-deed search in ${county.county}, ${county.state}` +
-        (c.grantee_name ? ` (grantee: ${c.grantee_name})` : ""),
+        (c.grantee_name ? ` (grantee: ${c.grantee_name})` : "") +
+        (c.instrument_number ? ` · Inst #${c.instrument_number}` : ""),
       payload: {
         source_url: c.source_record_url ?? null,
         job_id: jobId,
         grantor_name: c.grantor_name ?? null,
         grantee_name: c.grantee_name ?? null,
+        instrument_number: c.instrument_number ?? null,
+        confidence: c.confidence ?? null,
       },
     });
 
@@ -349,10 +377,10 @@ Deno.serve(async (req) => {
   await supabase.from("pipeline_jobs").update({
     status: "done",
     finished_at: new Date().toISOString(),
-    result: { found: fresh.length, inserted, enqueued, recorder_url: county.recorder_index_url, errors: errors.slice(0, 3) },
+    result: { found: fresh.length, inserted, enqueued, drops, recorder_url: county.recorder_index_url, errors: errors.slice(0, 3) },
   }).eq("id", jobId);
 
-  return jsonOk({ ok: true, county: county.county, found: fresh.length, inserted, enqueued, errors });
+  return jsonOk({ ok: true, county: county.county, found: fresh.length, inserted, enqueued, drops, errors });
 });
 
 function jsonOk(body: unknown) {
