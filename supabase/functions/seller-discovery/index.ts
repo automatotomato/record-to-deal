@@ -1,6 +1,6 @@
 // Seller Discovery agent — dedicated multi-pass contact hunt for one lead.
 // Passes (Apollo removed — Gemini grounded search + Firecrawl scraping only):
-//   1. Entity unmask (OpenCorporates + state SoS via Firecrawl)
+//   1. Entity unmask (state SoS / bizapedia via Firecrawl)
 //   2. Person identity (LinkedIn / RocketReach / ZoomInfo / Bizapedia)
 //   3. Company website discovery + homepage/contact scrape
 //   4. Source record scrape (broker/listing pages)
