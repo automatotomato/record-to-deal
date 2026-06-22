@@ -672,17 +672,16 @@ Deno.serve(async (req) => {
     if (contactMd) evidence.push(`CONTACT ${domain}\n${contactMd.slice(0, 4000)}`);
   }
 
-  // Source records and broker/listing pages often carry the only reachable
-  // path (broker phone, listing contact, press release contact). Scrape them
-  // before paid/AI fallbacks so website-less owners are still actionable.
-  if (lead.source_record_url) {
+  // Source records sometimes carry contact info — but ONLY if the host is
+  // not a broker/MLS portal. We never want a listing agent's email.
+  if (lead.source_record_url && !isBrokerHost(lead.source_record_url)) {
     d.passes.source_record_contact = true;
     const sourceMd = await fcScrape(lead.source_record_url, fcKey, budget);
     if (sourceMd) {
       evidence.push(`SOURCE RECORD ${lead.source_record_url}\n${sourceMd.slice(0, 6000)}`);
       const host = pickHostFromUrl(lead.source_record_url);
       if (!d.company_website && host && !SOCIAL_RE.test(host)) setField(d, "company_website", normalizeWebsite(host), 45, "source_record");
-      const emails = pullEmails(sourceMd);
+      const emails = pullEmails(sourceMd).filter((e) => !isBrokerEmail(e));
       let bestEmail: { e: string; s: number } | null = null;
       for (const e of emails) {
         const s = Math.max(scoreEmail(e, targetName), host && e.endsWith(`@${host}`) ? 55 : 0);
