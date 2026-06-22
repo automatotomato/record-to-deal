@@ -21,7 +21,20 @@ const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-4o-mini";
 if (!(globalThis as any).__sdLogged) { console.log(`[seller-discovery] OpenAI model: ${AI_MODEL}`); (globalThis as any).__sdLogged = true; }
 
 // Per-call budget so a single lead can't burn the day's quota
-const BUDGET = { firecrawl: 15, ai: 3 };
+const BUDGET = { firecrawl: 8, ai: 3 };
+
+// Firecrawl global gate (5 concurrent / 5,000 cr/month enforced in DB).
+const FC_ADMIN = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+async function fcReserve(caller: string, credits: number): Promise<string | null> {
+  try {
+    const { data } = await FC_ADMIN.rpc("fc_reserve", { p_caller: caller, p_credits: credits });
+    return (data as string) ?? null;
+  } catch (e) { console.warn("fc_reserve threw", e); return null; }
+}
+async function fcRelease(id: string | null, actual: number, status = "done") {
+  if (!id) return;
+  try { await FC_ADMIN.rpc("fc_release", { p_id: id, p_actual: actual, p_status: status }); } catch (_) {}
+}
 
 const STATE_NAMES: Record<string, string> = {
   AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
