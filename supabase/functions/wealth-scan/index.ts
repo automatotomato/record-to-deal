@@ -101,32 +101,43 @@ Deno.serve(async (req) => {
       }
     } catch (e) { console.warn("EDGAR failed", e); }
 
-    // 3) FAA aircraft registry (Firecrawl, optional)
+    // 3) FAA aircraft registry (Firecrawl, optional, gated)
     if (FC_KEY) {
-      try {
-        const url = `https://registry.faa.gov/AircraftInquiry/Search/NameInquiry?nametxt=${encodeURIComponent(subjectName)}&sort_option=2&PageNo=1`;
-        const r = await fetch("https://api.firecrawl.dev/v2/scrape", {
-          method: "POST",
-          headers: { "Authorization": `Bearer ${FC_KEY}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ url, formats: ["markdown"], onlyMainContent: true }),
-          signal: AbortSignal.timeout(20_000),
-        });
-        if (r.ok) {
-          const j = await r.json();
-          const md: string = j?.markdown ?? j?.data?.markdown ?? "";
-          if (md && /N\d{2,5}[A-Z]{0,2}/.test(md) && /aircraft/i.test(md)) {
-            const tail = md.match(/N\d{2,5}[A-Z]{0,2}/g)?.[0];
-            signals.push({
-              source: "FAA",
-              kind: "aircraft_owner",
-              value: tail ? `Aircraft tail ${tail}` : "Aircraft registration found",
-              url,
-              confidence: 0.65,
-            });
+      const resId = await (async () => {
+        try { const { data } = await supabase.rpc("fc_reserve", { p_caller: "wealth-scan:faa", p_credits: 1 }); return (data as string) ?? null; }
+        catch { return null; }
+      })();
+      if (!resId) { console.warn("fc_throttled wealth-scan"); }
+      else {
+        try {
+          const url = `https://registry.faa.gov/AircraftInquiry/Search/NameInquiry?nametxt=${encodeURIComponent(subjectName)}&sort_option=2&PageNo=1`;
+          const r = await fetch("https://api.firecrawl.dev/v2/scrape", {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${FC_KEY}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ url, formats: ["markdown"], onlyMainContent: true }),
+            signal: AbortSignal.timeout(20_000),
+          });
+          if (r.ok) {
+            const j = await r.json();
+            await supabase.rpc("fc_release", { p_id: resId, p_actual: 1, p_status: "done" });
+            const md: string = j?.markdown ?? j?.data?.markdown ?? "";
+            if (md && /N\d{2,5}[A-Z]{0,2}/.test(md) && /aircraft/i.test(md)) {
+              const tail = md.match(/N\d{2,5}[A-Z]{0,2}/g)?.[0];
+              signals.push({
+                source: "FAA",
+                kind: "aircraft_owner",
+                value: tail ? `Aircraft tail ${tail}` : "Aircraft registration found",
+                url,
+                confidence: 0.65,
+              });
+            }
+          } else {
+            await supabase.rpc("fc_release", { p_id: resId, p_actual: 1, p_status: "failed" });
           }
-        }
-      } catch (e) { console.warn("FAA failed", e); }
+        } catch (e) { console.warn("FAA failed", e); await supabase.rpc("fc_release", { p_id: resId, p_actual: 1, p_status: "failed" }); }
+      }
     }
+
 
     // 4) Score → wealth tier
     const hasWhaleSignal = signals.some((s) =>
