@@ -127,6 +127,39 @@ function pickHostFromUrl(url: string): string | null {
 
 const SOCIAL_RE = /(linkedin|facebook|twitter|x\.com|instagram|youtube|google|maps|wikipedia|opencorporates|secretary|sos\.|gov$|bizapedia|zoominfo|rocketreach|crunchbase|signalhire|apollo|yelp|bbb\.org|yellowpages|loopnet|crexi|redfin|zillow|realtor\.com|sec\.gov)/i;
 
+// Broker / MLS / listing-agent deny-list. If a candidate name, email, phone,
+// or website matches any of these, it's almost certainly the listing agent,
+// not the deed grantor — reject and keep hunting.
+const BROKER_DENY_DOMAINS = [
+  "compass.com", "kw.com", "kellerwilliams.com", "cbre.com", "jll.com",
+  "marcusmillichap.com", "colliers.com", "cushmanwakefield.com",
+  "berkshirehathawayhs.com", "century21.com", "remax.com", "coldwellbanker.com",
+  "sothebysrealty.com", "douglaselliman.com", "corcoran.com", "exprealty.com",
+  "har.com", "loopnet.com", "crexi.com", "zillow.com", "realtor.com",
+  "redfin.com", "trulia.com",
+];
+const BROKER_DOMAIN_RE = new RegExp(
+  "@(" + BROKER_DENY_DOMAINS.map((h) => h.replace(/\./g, "\\.")).join("|") + ")$",
+  "i",
+);
+const BROKER_HOST_RE = new RegExp(
+  "\\b(" + BROKER_DENY_DOMAINS.map((h) => h.replace(/\./g, "\\.")).join("|") + ")\\b",
+  "i",
+);
+const BROKER_TITLE_RE =
+  /\b(realtor|listing agent|broker associate|real estate agent|sales associate|leasing agent|broker\/owner|managing broker)\b/i;
+
+function isBrokerEmail(email?: string | null): boolean {
+  return !!email && BROKER_DOMAIN_RE.test(email);
+}
+function isBrokerHost(url?: string | null): boolean {
+  const h = pickHostFromUrl(url ?? "");
+  return !!h && BROKER_HOST_RE.test(h);
+}
+function isBrokerTitle(role?: string | null): boolean {
+  return !!role && BROKER_TITLE_RE.test(role);
+}
+
 function pickDomainFromText(text: string, ownerName: string | null): string | null {
   const slug = (ownerName ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
   // Markdown links + bare urls
