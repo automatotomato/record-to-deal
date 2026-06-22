@@ -1,6 +1,6 @@
 // Seller Discovery agent — dedicated multi-pass contact hunt for one lead.
 // Passes (Apollo removed — Gemini grounded search + Firecrawl scraping only):
-//   1. Entity unmask (OpenCorporates + state SoS via Firecrawl)
+//   1. Entity unmask (state SoS / bizapedia via Firecrawl)
 //   2. Person identity (LinkedIn / RocketReach / ZoomInfo / Bizapedia)
 //   3. Company website discovery + homepage/contact scrape
 //   4. Source record scrape (broker/listing pages)
@@ -301,7 +301,7 @@ async function geminiPublicContactHunt(lead: any, targetName: string | null, ent
     targetName ? `"${targetName}" ${lead.property_city ?? ""} email contact` : null,
     targetName ? `"${targetName}" linkedin OR rocketreach` : null,
     `"${owner}" contact email phone`,
-    entity ? `"${owner}" site:opencorporates.com OR site:bizapedia.com` : null,
+    entity ? `"${owner}" site:bizapedia.com` : null,
   ].filter(Boolean) as string[];
 
   const evidence: string[] = [];
@@ -401,48 +401,8 @@ ${blob.slice(0, 14000)}` },
   finally { clearTimeout(tid); }
 }
 
-// ====== OpenCorporates direct API (no key needed for low volume) ======
-// Returns up to 5 candidate companies in the lead's jurisdiction.
-async function ocSearchCompanies(entityName: string, stateCode: string | null): Promise<any[]> {
-  try {
-    const jurisdiction = stateCode ? `us_${stateCode.toLowerCase()}` : "";
-    const url = new URL("https://api.opencorporates.com/v0.4/companies/search");
-    url.searchParams.set("q", entityName);
-    if (jurisdiction) url.searchParams.set("jurisdiction_code", jurisdiction);
-    url.searchParams.set("per_page", "5");
-    url.searchParams.set("order", "score");
-    const r = await fetch(url.toString(), { headers: { "Accept": "application/json" } });
-    if (!r.ok) {
-      console.warn(`opencorporates ${r.status}`);
-      return [];
-    }
-    const d = await r.json();
-    return d?.results?.companies?.map((c: any) => c.company).filter(Boolean) ?? [];
-  } catch (e) {
-    console.warn("opencorporates threw", e);
-    return [];
-  }
-}
+// ====== (OpenCorporates removed — API requires paid key; using SoS/bizapedia via Firecrawl instead) ======
 
-// Returns the company's officers list (name, position) from OpenCorporates.
-async function ocGetOfficers(jurisdiction: string, companyNumber: string): Promise<Principal[]> {
-  try {
-    const url = `https://api.opencorporates.com/v0.4/companies/${jurisdiction}/${companyNumber}/officers`;
-    const r = await fetch(url, { headers: { "Accept": "application/json" } });
-    if (!r.ok) return [];
-    const d = await r.json();
-    const arr = d?.results?.officers ?? [];
-    return arr.map((o: any) => o.officer).filter(Boolean).map((o: any) => ({
-      name: String(o.name ?? "").trim(),
-      role: o.position ? String(o.position) : null,
-      source: "opencorporates",
-      source_url: o.opencorporates_url ?? null,
-    })).filter((p: Principal) => looksLikePersonName(p.name));
-  } catch (e) {
-    console.warn("opencorporates officers threw", e);
-    return [];
-  }
-}
 
 // Rank principals: manager > managing member > member > officer > director > registered agent.
 function rankPrincipal(p: Principal): number {
@@ -546,39 +506,16 @@ Deno.serve(async (req) => {
   if (entity && ownerName) {
     d.passes.entity_unmask = true;
 
-    // 1a. OpenCorporates direct API (free, no key).
-    const ocCompanies = await ocSearchCompanies(ownerName, state);
-    const top = ocCompanies[0];
-    if (top) {
-      if (top.opencorporates_url && !d.entity_registry_url) {
-        d.entity_registry_url = top.opencorporates_url;
-        d.sources.push("opencorporates.com");
-      }
-      // Try officers endpoint for the best match.
-      if (top.jurisdiction_code && top.company_number) {
-        const officers = await ocGetOfficers(top.jurisdiction_code, top.company_number);
-        if (officers.length) {
-          d.principals.push(...officers);
-          d.sources.push("opencorporates:officers");
-        }
-      }
-    }
-
-    // 1b. Firecrawl SoS / bizapedia search to fill gaps and grab registered agent.
+    // 1a. Firecrawl SoS / bizapedia search to find principals and registered agent.
     const queries = [
       `"${ownerName}" ${stateName} secretary of state business entity search`,
       `"${ownerName}" site:bizapedia.com`,
-      `"${ownerName}" site:opencorporates.com`,
     ];
     for (const q of queries) {
       const res = await fcSearch(q, fcKey, 3, true, budget);
       for (const r of res) {
         const md = `${r.url ?? ""}\n${r.title ?? ""}\n${r.markdown ?? r.description ?? ""}`;
         evidence.push(md);
-        if (r.url && /opencorporates\.com/.test(r.url) && !d.entity_registry_url) {
-          d.entity_registry_url = r.url;
-          d.sources.push("opencorporates.com");
-        }
         // Pull every (role → name) match, not just the first.
         const roleRe = /(Manager|Managing Member|President|CEO|Officer|Member|Director|Registered Agent)[\s:|\-]+([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)/g;
         let mm: RegExpExecArray | null;
@@ -587,7 +524,7 @@ Deno.serve(async (req) => {
             d.principals.push({
               name: mm[2],
               role: mm[1],
-              source: r.url && /opencorporates/.test(r.url) ? "opencorporates" : "sos",
+              source: "sos",
               source_url: r.url ?? null,
             });
           }
@@ -602,6 +539,7 @@ Deno.serve(async (req) => {
         }
       }
     }
+
 
     // 1c. Pick the best human principal — skip brokers/agents.
     d.principals = dedupePrincipals(d.principals).filter((p) => !isBrokerTitle(p.role));
@@ -623,7 +561,7 @@ Deno.serve(async (req) => {
   // broker noise. Mark needs_review and exit early.
   const unmaskFailed = entity && (!d.principals.length || !looksLikePersonName(d.name));
   if (unmaskFailed) {
-    d.notes.push(`Entity unmask failed for ${ownerName ?? "owner"} — no human principal found in OpenCorporates or SoS. Skipping web passes.`);
+    d.notes.push(`Entity unmask failed for ${ownerName ?? "owner"} — no human principal found via SoS / bizapedia. Skipping web passes.`);
     const updates: Record<string, unknown> = {
       decision_maker_name: null,
       decision_maker_role: null,
