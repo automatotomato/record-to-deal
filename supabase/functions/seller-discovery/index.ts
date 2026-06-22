@@ -618,6 +618,42 @@ Deno.serve(async (req) => {
     setField(d, "role", "Owner", 60, "deed:grantor");
   }
 
+  // HARD GATE: if owner is an entity and we could NOT unmask a human
+  // principal, do not run LinkedIn / web / Gemini passes. They re-introduce
+  // broker noise. Mark needs_review and exit early.
+  const unmaskFailed = entity && (!d.principals.length || !looksLikePersonName(d.name));
+  if (unmaskFailed) {
+    d.notes.push(`Entity unmask failed for ${ownerName ?? "owner"} — no human principal found in OpenCorporates or SoS. Skipping web passes.`);
+    const updates: Record<string, unknown> = {
+      decision_maker_name: null,
+      decision_maker_role: null,
+      entity_registry_url: d.entity_registry_url ?? lead.entity_registry_url,
+      entity_principals: d.principals.length ? d.principals : null,
+      discovery_status: "failed",
+      has_contact: false,
+      has_outreach_contact: false,
+      pipeline_stage: "needs_review",
+      enrichment_payload: { ...(lead.enrichment_payload ?? {}), discovery_v2: { ...d, budget_used: budget, unmask_failed: true } },
+      data_sources: Array.from(new Set([...(lead.data_sources ?? []), ...d.sources])),
+    };
+    await supabase.from("leads").update(updates).eq("id", leadId);
+    await supabase.from("lead_activities").insert({
+      lead_id: leadId,
+      kind: "seller_discovery",
+      summary: `Discovery: unmask_failed (entity ${ownerName ?? ""}) — needs manual review`,
+      payload: { discovery: d, budget_used: budget },
+    });
+    if (jobId) {
+      await supabase.from("pipeline_jobs").update({
+        status: "done", finished_at: new Date().toISOString(),
+        result: { status: "failed", reason: "unmask_failed" },
+      }).eq("id", jobId);
+    }
+    return new Response(JSON.stringify({ ok: true, status: "failed", reason: "unmask_failed" }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
   const targetName = isKnownOwnerName(d.name) ? d.name : (isKnownOwnerName(ownerName) ? ownerName : null);
 
   // ============ PASS 2 — Person identity (LinkedIn + people-search) ============
