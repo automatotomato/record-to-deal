@@ -506,39 +506,16 @@ Deno.serve(async (req) => {
   if (entity && ownerName) {
     d.passes.entity_unmask = true;
 
-    // 1a. OpenCorporates direct API (free, no key).
-    const ocCompanies = await ocSearchCompanies(ownerName, state);
-    const top = ocCompanies[0];
-    if (top) {
-      if (top.opencorporates_url && !d.entity_registry_url) {
-        d.entity_registry_url = top.opencorporates_url;
-        d.sources.push("opencorporates.com");
-      }
-      // Try officers endpoint for the best match.
-      if (top.jurisdiction_code && top.company_number) {
-        const officers = await ocGetOfficers(top.jurisdiction_code, top.company_number);
-        if (officers.length) {
-          d.principals.push(...officers);
-          d.sources.push("opencorporates:officers");
-        }
-      }
-    }
-
-    // 1b. Firecrawl SoS / bizapedia search to fill gaps and grab registered agent.
+    // 1a. Firecrawl SoS / bizapedia search to find principals and registered agent.
     const queries = [
       `"${ownerName}" ${stateName} secretary of state business entity search`,
       `"${ownerName}" site:bizapedia.com`,
-      `"${ownerName}" site:opencorporates.com`,
     ];
     for (const q of queries) {
       const res = await fcSearch(q, fcKey, 3, true, budget);
       for (const r of res) {
         const md = `${r.url ?? ""}\n${r.title ?? ""}\n${r.markdown ?? r.description ?? ""}`;
         evidence.push(md);
-        if (r.url && /opencorporates\.com/.test(r.url) && !d.entity_registry_url) {
-          d.entity_registry_url = r.url;
-          d.sources.push("opencorporates.com");
-        }
         // Pull every (role → name) match, not just the first.
         const roleRe = /(Manager|Managing Member|President|CEO|Officer|Member|Director|Registered Agent)[\s:|\-]+([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)/g;
         let mm: RegExpExecArray | null;
@@ -547,7 +524,7 @@ Deno.serve(async (req) => {
             d.principals.push({
               name: mm[2],
               role: mm[1],
-              source: r.url && /opencorporates/.test(r.url) ? "opencorporates" : "sos",
+              source: "sos",
               source_url: r.url ?? null,
             });
           }
@@ -562,6 +539,7 @@ Deno.serve(async (req) => {
         }
       }
     }
+
 
     // 1c. Pick the best human principal — skip brokers/agents.
     d.principals = dedupePrincipals(d.principals).filter((p) => !isBrokerTitle(p.role));
