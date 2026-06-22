@@ -37,6 +37,13 @@ const STATE_NAMES: Record<string, string> = {
   DC: "District of Columbia",
 };
 
+interface Principal {
+  name: string;
+  role: string | null;
+  source: string; // "opencorporates" | "sos" | "bizapedia" | ...
+  source_url?: string | null;
+}
+
 interface Discovery {
   name: string | null;
   role: string | null;
@@ -46,6 +53,7 @@ interface Discovery {
   company_website: string | null;
   entity_registry_url: string | null;
   related_entities: Array<{ name: string; url?: string }>;
+  principals: Principal[];
   confidence_by_field: Record<string, { score: number; source: string }>;
   sources: string[];
   passes: Record<string, boolean>;
@@ -55,6 +63,7 @@ interface Discovery {
 const empty = (): Discovery => ({
   name: null, role: null, email: null, phone: null, linkedin: null,
   company_website: null, entity_registry_url: null, related_entities: [],
+  principals: [],
   confidence_by_field: {}, sources: [], passes: {}, notes: [],
 });
 
