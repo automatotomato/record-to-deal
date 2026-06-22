@@ -30,12 +30,7 @@ type FirecrawlCredential = { label: string; key: string };
 
 function firecrawlCredentials(): FirecrawlCredential[] {
   const override = Deno.env.get("FIRECRAWL_API_KEY_OVERRIDE")?.trim();
-  const connector = Deno.env.get("FIRECRAWL_API_KEY")?.trim();
-  const creds = [
-    override ? { label: "override", key: override } : null,
-    connector ? { label: "connector", key: connector } : null,
-  ].filter(Boolean) as FirecrawlCredential[];
-  return creds.filter((cred, idx) => creds.findIndex((x) => x.key === cred.key) === idx);
+  return override ? [{ label: "override", key: override }] : [];
 }
 
 type Candidate = {
