@@ -147,7 +147,7 @@ async function firecrawlSearch(
       }
       const data = await r.json();
       await fcRelease(resId, cost, "done");
-      const results: any[] = (data?.data?.web as any[]) ?? (Array.isArray(data?.data) ? data.data : []) ?? [];
+      const results: any[] = (data?.data?.web as any[]) ?? (data?.web as any[]) ?? (Array.isArray(data?.data) ? data.data : []) ?? [];
       return results
         .map((x) => ({
           url: String(x.url ?? ""),
@@ -155,7 +155,11 @@ async function firecrawlSearch(
           markdown: String(x.markdown ?? x.description ?? ""),
         }))
         .filter((r) => !isBrokerUrl(r.url))
-        .filter((r) => DEED_LANGUAGE_RE.test(`${r.title}\n${r.markdown}`));
+        .filter((r) => {
+          const resultHost = hostOf(r.url);
+          const queryHost = query.match(/site:([^\s]+)/)?.[1]?.replace(/^www\./, "");
+          return !!queryHost && resultHost === queryHost || DEED_LANGUAGE_RE.test(`${r.title}\n${r.markdown}`);
+        });
     }
     throw new Error(lastError);
   } catch (e) { await fcRelease(resId, cost, "failed"); throw e; }
