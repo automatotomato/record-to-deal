@@ -16,8 +16,8 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
-  const aiKey = Deno.env.get("OPENAI_API_KEY");
-  const aiModel = Deno.env.get("OPENAI_MODEL") || "gpt-4o-mini";
+  const aiKey = (Deno.env.get("LOVABLE_API_KEY") || Deno.env.get("OPENAI_API_KEY"));
+  const aiModel = Deno.env.get("OPENAI_MODEL") || "google/gemini-2.5-flash-lite";
 
   try {
     const body = await req.json().catch(() => ({}));
@@ -74,7 +74,7 @@ We help sellers defer federal + state capital-gains and depreciation-recapture t
     const tid = setTimeout(() => ctrl.abort(), 30_000);
     let r: Response;
     try {
-      r = await fetch("https://api.openai.com/v1/chat/completions", {
+      r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: { "Authorization": `Bearer ${aiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({

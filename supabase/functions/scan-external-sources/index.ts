@@ -22,8 +22,8 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const AI_URL = "https://api.openai.com/v1/chat/completions";
-const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-4o-mini";
+const AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
+const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "google/gemini-2.5-flash-lite";
 const FC_V2 = "https://api.firecrawl.dev/v2";
 const HARD_BUDGET_MS = 90_000;
 
@@ -247,7 +247,7 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
-  const lovableKey = Deno.env.get("OPENAI_API_KEY");
+  const lovableKey = (Deno.env.get("LOVABLE_API_KEY") || Deno.env.get("OPENAI_API_KEY"));
   const fcKey = (Deno.env.get("FIRECRAWL_API_KEY_OVERRIDE") || Deno.env.get("FIRECRAWL_API_KEY"));
 
   let body: { job_id?: string; enqueue?: boolean } = {};
