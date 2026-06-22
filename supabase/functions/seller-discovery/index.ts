@@ -401,48 +401,8 @@ ${blob.slice(0, 14000)}` },
   finally { clearTimeout(tid); }
 }
 
-// ====== OpenCorporates direct API (no key needed for low volume) ======
-// Returns up to 5 candidate companies in the lead's jurisdiction.
-async function ocSearchCompanies(entityName: string, stateCode: string | null): Promise<any[]> {
-  try {
-    const jurisdiction = stateCode ? `us_${stateCode.toLowerCase()}` : "";
-    const url = new URL("https://api.opencorporates.com/v0.4/companies/search");
-    url.searchParams.set("q", entityName);
-    if (jurisdiction) url.searchParams.set("jurisdiction_code", jurisdiction);
-    url.searchParams.set("per_page", "5");
-    url.searchParams.set("order", "score");
-    const r = await fetch(url.toString(), { headers: { "Accept": "application/json" } });
-    if (!r.ok) {
-      console.warn(`opencorporates ${r.status}`);
-      return [];
-    }
-    const d = await r.json();
-    return d?.results?.companies?.map((c: any) => c.company).filter(Boolean) ?? [];
-  } catch (e) {
-    console.warn("opencorporates threw", e);
-    return [];
-  }
-}
+// ====== (OpenCorporates removed — API requires paid key; using SoS/bizapedia via Firecrawl instead) ======
 
-// Returns the company's officers list (name, position) from OpenCorporates.
-async function ocGetOfficers(jurisdiction: string, companyNumber: string): Promise<Principal[]> {
-  try {
-    const url = `https://api.opencorporates.com/v0.4/companies/${jurisdiction}/${companyNumber}/officers`;
-    const r = await fetch(url, { headers: { "Accept": "application/json" } });
-    if (!r.ok) return [];
-    const d = await r.json();
-    const arr = d?.results?.officers ?? [];
-    return arr.map((o: any) => o.officer).filter(Boolean).map((o: any) => ({
-      name: String(o.name ?? "").trim(),
-      role: o.position ? String(o.position) : null,
-      source: "opencorporates",
-      source_url: o.opencorporates_url ?? null,
-    })).filter((p: Principal) => looksLikePersonName(p.name));
-  } catch (e) {
-    console.warn("opencorporates officers threw", e);
-    return [];
-  }
-}
 
 // Rank principals: manager > managing member > member > officer > director > registered agent.
 function rankPrincipal(p: Principal): number {
