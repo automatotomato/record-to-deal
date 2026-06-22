@@ -540,13 +540,35 @@ Deno.serve(async (req) => {
 
   const evidence: string[] = [];
 
-  // ============ PASS 1 — Entity unmask ============
+  // ============ PASS 1 — Entity unmask (MANDATORY for LLC/Trust/Corp/Estate) ============
+  // We unmask the LLC to a human BEFORE any LinkedIn / web pass, so later
+  // passes hunt the real person, not the entity string.
   if (entity && ownerName) {
     d.passes.entity_unmask = true;
+
+    // 1a. OpenCorporates direct API (free, no key).
+    const ocCompanies = await ocSearchCompanies(ownerName, state);
+    const top = ocCompanies[0];
+    if (top) {
+      if (top.opencorporates_url && !d.entity_registry_url) {
+        d.entity_registry_url = top.opencorporates_url;
+        d.sources.push("opencorporates.com");
+      }
+      // Try officers endpoint for the best match.
+      if (top.jurisdiction_code && top.company_number) {
+        const officers = await ocGetOfficers(top.jurisdiction_code, top.company_number);
+        if (officers.length) {
+          d.principals.push(...officers);
+          d.sources.push("opencorporates:officers");
+        }
+      }
+    }
+
+    // 1b. Firecrawl SoS / bizapedia search to fill gaps and grab registered agent.
     const queries = [
-      `"${ownerName}" site:opencorporates.com`,
-      `"${ownerName}" ${stateName} secretary of state`,
+      `"${ownerName}" ${stateName} secretary of state business entity search`,
       `"${ownerName}" site:bizapedia.com`,
+      `"${ownerName}" site:opencorporates.com`,
     ];
     for (const q of queries) {
       const res = await fcSearch(q, fcKey, 3, true, budget);
@@ -557,27 +579,43 @@ Deno.serve(async (req) => {
           d.entity_registry_url = r.url;
           d.sources.push("opencorporates.com");
         }
-        // Officer regex
-        const m = md.match(/(?:Manager|Managing Member|President|CEO|Officer|Member|Director|Registered Agent)[\s:-]+([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)/);
-        if (m && looksLikePersonName(m[1])) {
-          const role = m[0].split(/[\s:-]+/)[0];
-          setField(d, "name", m[1], 55, "sos");
-          setField(d, "role", role, 55, "sos");
+        // Pull every (role → name) match, not just the first.
+        const roleRe = /(Manager|Managing Member|President|CEO|Officer|Member|Director|Registered Agent)[\s:|\-]+([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)/g;
+        let mm: RegExpExecArray | null;
+        while ((mm = roleRe.exec(md)) !== null) {
+          if (looksLikePersonName(mm[2])) {
+            d.principals.push({
+              name: mm[2],
+              role: mm[1],
+              source: r.url && /opencorporates/.test(r.url) ? "opencorporates" : "sos",
+              source_url: r.url ?? null,
+            });
+          }
         }
         // Related entities (other LLCs near this name)
         const rel = Array.from(md.matchAll(/([A-Z][A-Za-z0-9& ]{2,}?\s+(?:LLC|INC|CORP|LP|LLP|HOLDINGS|PARTNERS))/g))
-          .map((mm) => mm[1])
+          .map((mm2) => mm2[1])
           .filter((n) => n.toUpperCase() !== (ownerName ?? "").toUpperCase())
           .slice(0, 5);
         for (const r2 of rel) {
           if (!d.related_entities.find((e) => e.name === r2)) d.related_entities.push({ name: r2, url: r.url });
         }
       }
-      if (d.name) break;
+    }
+
+    // 1c. Pick the best human principal — skip brokers/agents.
+    d.principals = dedupePrincipals(d.principals).filter((p) => !isBrokerTitle(p.role));
+    const ranked = [...d.principals].sort((a, b) => rankPrincipal(b) - rankPrincipal(a));
+    const best = ranked[0];
+    if (best) {
+      setField(d, "name", best.name, 60, `unmask:${best.source}`);
+      setField(d, "role", best.role ?? "Principal", 60, `unmask:${best.source}`);
+      d.notes.push(`Unmasked ${ownerName} → ${best.name} (${best.role ?? "principal"}, via ${best.source})`);
     }
   } else if (isKnownOwnerName(ownerName)) {
-    setField(d, "name", ownerName, 50, "deed");
-    setField(d, "role", "Owner", 50, "deed");
+    // Individual owner: the grantor on the deed IS the decision-maker.
+    setField(d, "name", ownerName, 60, "deed:grantor");
+    setField(d, "role", "Owner", 60, "deed:grantor");
   }
 
   const targetName = isKnownOwnerName(d.name) ? d.name : (isKnownOwnerName(ownerName) ? ownerName : null);
