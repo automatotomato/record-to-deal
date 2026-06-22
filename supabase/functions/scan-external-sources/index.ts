@@ -61,9 +61,22 @@ function searchQueriesFor(source: SourceKind, state: string, counties: string[])
   }
 }
 
+const FC_ADMIN = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+async function fcReserve(caller: string, credits: number): Promise<string | null> {
+  try { const { data } = await FC_ADMIN.rpc("fc_reserve", { p_caller: caller, p_credits: credits }); return (data as string) ?? null; }
+  catch { return null; }
+}
+async function fcRelease(id: string | null, actual: number, status = "done") {
+  if (!id) return;
+  try { await FC_ADMIN.rpc("fc_release", { p_id: id, p_actual: actual, p_status: status }); } catch (_) {}
+}
+
 async function firecrawlSearch(query: string, fcKey: string, limit = 6): Promise<Array<{ url?: string; title?: string; markdown?: string; description?: string }>> {
   const ctrl = new AbortController();
   const tid = setTimeout(() => ctrl.abort(), 30_000);
+  const cost = limit * 2;
+  const resId = await fcReserve("scan-external:search", cost);
+  if (!resId) { console.warn("fc_throttled scan-external"); clearTimeout(tid); return []; }
   try {
     const r = await fetch(`${FC_V2}/search`, {
       method: "POST",
@@ -76,12 +89,14 @@ async function firecrawlSearch(query: string, fcKey: string, limit = 6): Promise
     });
     if (!r.ok) {
       console.warn(`firecrawl ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      await fcRelease(resId, cost, "failed");
       return [];
     }
     const d = await r.json();
+    await fcRelease(resId, cost, "done");
     const arr = d?.data?.web ?? d?.data ?? d?.web ?? [];
     return Array.isArray(arr) ? arr : [];
-  } catch (e) { console.warn("firecrawl threw", e); return []; }
+  } catch (e) { console.warn("firecrawl threw", e); await fcRelease(resId, cost, "failed"); return []; }
   finally { clearTimeout(tid); }
 }
 
