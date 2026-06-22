@@ -17,8 +17,14 @@ const corsHeaders = {
 const FIRECRAWL_V2 = "https://api.firecrawl.dev/v2";
 const AI_URL = "https://api.openai.com/v1/chat/completions";
 const AI_MODEL = "gpt-4o-mini";
-const MAX_RESULTS_PER_QUERY = 5;
+const MAX_RESULTS_PER_QUERY = 3;
 const HARD_BUDGET_MS = 45_000;
+const MIN_SALE_PRICE = 500_000;
+const MIN_CONFIDENCE = 70;
+// Tokens that signal we're looking at an actual recorded-deed index/page,
+// not a listing, news article, or press release.
+const DEED_LANGUAGE_RE = /\b(grantor|grantee|warranty deed|grant deed|quitclaim|special warranty|trustee'?s deed|deed of trust|book\s*\/?\s*page|instrument\s*(no|number|#)|recording date|recorded date|doc(ument)?\s*(no|number|#))\b/i;
+const ALLOWED_PROPERTY_TYPES = new Set(["Multifamily", "Commercial", "Industrial", "Mixed", "Land"]);
 
 type Candidate = {
   grantor_name?: string;     // seller — what we actually want
