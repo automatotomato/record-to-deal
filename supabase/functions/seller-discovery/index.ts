@@ -708,7 +708,7 @@ Deno.serve(async (req) => {
       const c = publicHit.confidence ?? {};
       if (publicHit.name && isKnownOwnerName(publicHit.name) && looksLikePersonName(publicHit.name)) setField(d, "name", publicHit.name, c.name ?? 55, "gemini.public_search");
       if (publicHit.role) setField(d, "role", publicHit.role, c.role ?? 45, "gemini.public_search");
-      if (isUnlockedEmail(publicHit.email)) setField(d, "email", publicHit.email, c.email ?? 65, "gemini.public_search");
+      if (isUnlockedEmail(publicHit.email) && !isBrokerEmail(publicHit.email)) setField(d, "email", publicHit.email, c.email ?? 65, "gemini.public_search");
       if (publicHit.phone && String(publicHit.phone).replace(/\D/g, "").length >= 10) setField(d, "phone", publicHit.phone, c.phone ?? 55, "gemini.public_search");
       if (publicHit.linkedin && /linkedin\.com\/in\//i.test(publicHit.linkedin)) setField(d, "linkedin", publicHit.linkedin, c.linkedin ?? 55, "gemini.public_search");
       if (publicHit.company_website) {
