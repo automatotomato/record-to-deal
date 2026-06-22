@@ -16,8 +16,8 @@ const corsHeaders = {
 };
 
 const FC_V2 = "https://api.firecrawl.dev/v2";
-const AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
-const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "google/gemini-2.5-flash-lite";
+const AI_URL = "https://api.openai.com/v1/chat/completions";
+const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-4o-mini";
 if (!(globalThis as any).__sdLogged) { console.log(`[seller-discovery] OpenAI model: ${AI_MODEL}`); (globalThis as any).__sdLogged = true; }
 
 // Per-call budget so a single lead can't burn the day's quota
@@ -455,7 +455,7 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const fcKey = (Deno.env.get("FIRECRAWL_API_KEY_OVERRIDE") || Deno.env.get("FIRECRAWL_API_KEY"));
-  const lovableKey = (Deno.env.get("LOVABLE_API_KEY") || Deno.env.get("OPENAI_API_KEY"));
+  const lovableKey = Deno.env.get("OPENAI_API_KEY");
 
   if (!fcKey || !lovableKey) {
     return new Response(JSON.stringify({ error: "FIRECRAWL_API_KEY and OPENAI_API_KEY are required" }), {
