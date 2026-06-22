@@ -34,12 +34,14 @@ type Candidate = {
   property_city?: string;
   property_zip?: string;
   parcel_number?: string;
+  instrument_number?: string;
   sale_price?: number;
   sale_date?: string;
   deed_date?: string;
   property_type?: string;
   source_record_url?: string;
   trigger_event?: string;
+  confidence?: number;       // self-reported 0-100; we reject < MIN_CONFIDENCE
 };
 
 // Hosts we never want as a source — these are listing/broker/MLS portals
