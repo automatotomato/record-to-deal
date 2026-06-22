@@ -21,18 +21,31 @@ function isUnlockedEmail(e?: string | null): boolean {
   return !/email_not_unlocked|domain\.com$|@apollo-locked/i.test(e);
 }
 
+const FC_ADMIN = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+async function fcReserve(caller: string, credits: number): Promise<string | null> {
+  try { const { data } = await FC_ADMIN.rpc("fc_reserve", { p_caller: caller, p_credits: credits }); return (data as string) ?? null; }
+  catch { return null; }
+}
+async function fcRelease(id: string | null, actual: number, status = "done") {
+  if (!id) return;
+  try { await FC_ADMIN.rpc("fc_release", { p_id: id, p_actual: actual, p_status: status }); } catch (_) {}
+}
+
 async function fcSearch(query: string, key: string, limit = 3) {
+  const resId = await fcReserve("enrich-contact:search", limit);
+  if (!resId) { console.warn("fc_throttled enrich-contact"); return []; }
   try {
     const resp = await fetch(`${FIRECRAWL_V2}/search`, {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({ query, limit }),
     });
-    if (!resp.ok) return [];
+    if (!resp.ok) { await fcRelease(resId, limit, "failed"); return []; }
     const data = await resp.json();
+    await fcRelease(resId, limit, "done");
     const arr = data?.data?.web ?? data?.data ?? [];
     return Array.isArray(arr) ? arr : [];
-  } catch { return []; }
+  } catch { await fcRelease(resId, limit, "failed"); return []; }
 }
 
 function isOutreachContact(l: any): boolean {
