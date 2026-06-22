@@ -301,7 +301,7 @@ async function geminiPublicContactHunt(lead: any, targetName: string | null, ent
     targetName ? `"${targetName}" ${lead.property_city ?? ""} email contact` : null,
     targetName ? `"${targetName}" linkedin OR rocketreach` : null,
     `"${owner}" contact email phone`,
-    entity ? `"${owner}" site:opencorporates.com OR site:bizapedia.com` : null,
+    entity ? `"${owner}" site:bizapedia.com` : null,
   ].filter(Boolean) as string[];
 
   const evidence: string[] = [];
