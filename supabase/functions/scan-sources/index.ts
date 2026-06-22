@@ -138,8 +138,8 @@ async function aiExtractLeads(
     body: JSON.stringify({
       model: AI_MODEL,
       messages: [
-        { role: "system", content: "You extract recorded-deed (grantor → grantee) property-transfer records from web content. Return ONLY valid JSON. Skip anything that is a real-estate listing, broker page, or MLS posting — only true recorded deeds. Skip records without an address AND a grantor name." },
-        { role: "user", content: `${hint}\n\nReturn JSON: { "leads": [ { grantor_name (seller), grantee_name (buyer), owner_name (= grantor_name), property_address, property_city, property_zip, parcel_number, sale_price (number), sale_date (YYYY-MM-DD), deed_date (YYYY-MM-DD), property_type (one of SFR|Multifamily|Commercial|Land|Industrial|Mixed|Unknown), source_record_url, trigger_event (one of recent_sale|listed_for_sale|long_hold_owner|trust_transfer|off_market_signal) } ] }\n\nWeb content:\n\n${corpus.slice(0, 14000)}` },
+        { role: "system", content: "You extract recorded-deed (grantor → grantee) property-transfer records from web content. Return ONLY valid JSON. If the source is not a recorded-deed index entry or deed image, return { \"leads\": [] }. Never invent fields — leave them out rather than guess. Skip records missing an address, parcel, instrument number, or grantor name." },
+        { role: "user", content: `${hint}\n\nReturn JSON: { "leads": [ { grantor_name (seller), grantee_name (buyer), owner_name (= grantor_name), property_address, property_city, property_zip, parcel_number, instrument_number, sale_price (number), sale_date (YYYY-MM-DD), deed_date (YYYY-MM-DD), property_type (one of Multifamily|Commercial|Industrial|Mixed|Land), source_record_url, trigger_event (one of recent_sale|listed_for_sale|long_hold_owner|trust_transfer|off_market_signal), confidence (0-100 self-reported) } ] }\n\nWeb content:\n\n${corpus.slice(0, 14000)}` },
       ],
       response_format: { type: "json_object" },
     }),
