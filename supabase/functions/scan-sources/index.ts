@@ -88,11 +88,13 @@ function defaultHint(state: string, county: string) {
 
 PRIMARY GOAL: extract the GRANTOR (the seller on the recorded deed). The grantor is the actual property seller — the person or entity we want to contact. The grantee is the buyer.
 
-Only extract records that look like actual recorded deeds (warranty deed, grant deed, special warranty deed, deed of trust, quitclaim, trustee's deed). Skip anything that is a listing, MLS posting, broker page, or auction promo — those are not deeds.
+STRICT RULES — if the source page is not a recorded-deed index entry, a deed image, or an official records search result, return { "leads": [] }. Do NOT infer grantors from listings, MLS pages, news articles, broker pages, or press releases.
 
-INVESTMENT property only: entity-owned multifamily ≥4-units, commercial/retail/NNN/office/industrial, mixed-use, land ≥$250k. EXCLUDE single-family homes, condos, townhomes, owner-occupied residences, primary residences, and any sale under $500k. Prefer LLC/Trust/Corp grantors over individuals.
+Every record MUST have ALL of: grantor_name, property_address, parcel_number (APN), instrument_number (or recording number/document number), recording or deed date, and sale_price ≥ $${MIN_SALE_PRICE.toLocaleString()}.
 
-For each deed, extract: grantor_name (seller), grantee_name (buyer), property address, sale price, sale/deed date, parcel/APN if present.`;
+Property type MUST be one of: Multifamily, Commercial, Industrial, Mixed, Land. EXCLUDE single-family homes, condos, townhomes, owner-occupied residences. Prefer LLC/Trust/Corp grantors.
+
+For each record also self-report a confidence score 0-100 reflecting how clearly this is a real recorded deed with verifiable fields. Anything below ${MIN_CONFIDENCE} will be discarded.`;
 }
 
 async function firecrawlSearch(
