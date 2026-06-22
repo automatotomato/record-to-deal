@@ -15,8 +15,8 @@ const corsHeaders = {
 };
 
 const FIRECRAWL_V2 = "https://api.firecrawl.dev/v2";
-const AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
-const AI_MODEL = "google/gemini-2.5-flash-lite";
+const AI_URL = "https://api.openai.com/v1/chat/completions";
+const AI_MODEL = "gpt-4o-mini";
 const MAX_RESULTS_PER_QUERY = 3;
 const HARD_BUDGET_MS = 45_000;
 const MIN_SALE_PRICE = 500_000;
@@ -218,7 +218,7 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
   const firecrawlKey = (Deno.env.get("FIRECRAWL_API_KEY_OVERRIDE") || Deno.env.get("FIRECRAWL_API_KEY"));
-  const openaiKey = (Deno.env.get("LOVABLE_API_KEY") || Deno.env.get("OPENAI_API_KEY"));
+  const openaiKey = Deno.env.get("OPENAI_API_KEY");
   if (!firecrawlKey || !openaiKey) {
     return new Response(JSON.stringify({ error: "FIRECRAWL_API_KEY or OPENAI_API_KEY missing" }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },

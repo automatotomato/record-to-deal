@@ -11,7 +11,7 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "google/gemini-2.5-flash-lite";
+const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-4o-mini";
 
 function fmtMoney(n: number | null | undefined): string {
   if (!n) return "—";
@@ -27,7 +27,7 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
-  const aiKey = (Deno.env.get("LOVABLE_API_KEY") || Deno.env.get("OPENAI_API_KEY"));
+  const aiKey = Deno.env.get("OPENAI_API_KEY");
 
   try {
     const body = await req.json().catch(() => ({}));
@@ -116,7 +116,7 @@ Deno.serve(async (req) => {
 
     if (aiKey) {
       try {
-        const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        const r = await fetch("https://api.openai.com/v1/chat/completions", {
           method: "POST",
           headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
           body: JSON.stringify({
