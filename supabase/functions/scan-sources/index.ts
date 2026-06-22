@@ -26,6 +26,18 @@ const MIN_CONFIDENCE = 70;
 const DEED_LANGUAGE_RE = /\b(grantor|grantee|warranty deed|grant deed|quitclaim|special warranty|trustee'?s deed|deed of trust|book\s*\/?\s*page|instrument\s*(no|number|#)|recording date|recorded date|doc(ument)?\s*(no|number|#))\b/i;
 const ALLOWED_PROPERTY_TYPES = new Set(["Multifamily", "Commercial", "Industrial", "Mixed", "Land"]);
 
+type FirecrawlCredential = { label: string; key: string };
+
+function firecrawlCredentials(): FirecrawlCredential[] {
+  const override = Deno.env.get("FIRECRAWL_API_KEY_OVERRIDE")?.trim();
+  const connector = Deno.env.get("FIRECRAWL_API_KEY")?.trim();
+  const creds = [
+    override ? { label: "override", key: override } : null,
+    connector ? { label: "connector", key: connector } : null,
+  ].filter(Boolean) as FirecrawlCredential[];
+  return creds.filter((cred, idx) => creds.findIndex((x) => x.key === cred.key) === idx);
+}
+
 type Candidate = {
   grantor_name?: string;     // seller — what we actually want
   grantee_name?: string;     // buyer
@@ -109,35 +121,47 @@ async function fcRelease(id: string | null, actual: number, status = "done") {
 
 async function firecrawlSearch(
   query: string,
-  apiKey: string,
+  credentials: FirecrawlCredential[],
   tbs: string,
 ): Promise<{ url: string; title: string; markdown: string }[]> {
   const cost = MAX_RESULTS_PER_QUERY * 2; // search + scrape per result
   const resId = await fcReserve("scan-sources:search", cost);
   if (!resId) { console.warn("fc_throttled scan-sources search"); return []; }
   try {
-    const r = await fetch(`${FIRECRAWL_V2}/search`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        query,
-        limit: MAX_RESULTS_PER_QUERY,
-        tbs,
-        scrapeOptions: { onlyMainContent: true, formats: ["markdown"] },
-      }),
-    });
-    if (!r.ok) { await fcRelease(resId, cost, "failed"); throw new Error(`Firecrawl ${r.status}: ${(await r.text()).slice(0, 200)}`); }
-    const data = await r.json();
-    await fcRelease(resId, cost, "done");
-    const results: any[] = (data?.data?.web as any[]) ?? (Array.isArray(data?.data) ? data.data : []) ?? [];
-    return results
-      .map((x) => ({
-        url: String(x.url ?? ""),
-        title: String(x.title ?? ""),
-        markdown: String(x.markdown ?? x.description ?? ""),
-      }))
-      .filter((r) => !isBrokerUrl(r.url))
-      .filter((r) => DEED_LANGUAGE_RE.test(`${r.title}\n${r.markdown}`));
+    let lastError = "Firecrawl credentials unavailable";
+    for (const cred of credentials) {
+      const r = await fetch(`${FIRECRAWL_V2}/search`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${cred.key}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query,
+          limit: MAX_RESULTS_PER_QUERY,
+          tbs,
+          scrapeOptions: { onlyMainContent: true, formats: ["markdown"] },
+        }),
+      });
+      if (!r.ok) {
+        lastError = `Firecrawl ${r.status} (${cred.label}): ${(await r.text()).slice(0, 200)}`;
+        if ([401, 402, 403].includes(r.status) && credentials.length > 1) continue;
+        throw new Error(lastError);
+      }
+      const data = await r.json();
+      await fcRelease(resId, cost, "done");
+      const results: any[] = (data?.data?.web as any[]) ?? (data?.web as any[]) ?? (Array.isArray(data?.data) ? data.data : []) ?? [];
+      return results
+        .map((x) => ({
+          url: String(x.url ?? ""),
+          title: String(x.title ?? ""),
+          markdown: String(x.markdown ?? x.description ?? ""),
+        }))
+        .filter((r) => !isBrokerUrl(r.url))
+        .filter((r) => {
+          const resultHost = hostOf(r.url);
+          const queryHost = query.match(/site:([^\s]+)/)?.[1]?.replace(/^www\./, "");
+          return !!queryHost && resultHost === queryHost || DEED_LANGUAGE_RE.test(`${r.title}\n${r.markdown}`);
+        });
+    }
+    throw new Error(lastError);
   } catch (e) { await fcRelease(resId, cost, "failed"); throw e; }
 }
 
@@ -217,9 +241,9 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
-  const firecrawlKey = (Deno.env.get("FIRECRAWL_API_KEY_OVERRIDE") || Deno.env.get("FIRECRAWL_API_KEY"));
+  const firecrawlCreds = firecrawlCredentials();
   const openaiKey = Deno.env.get("OPENAI_API_KEY");
-  if (!firecrawlKey || !openaiKey) {
+  if (!firecrawlCreds.length || !openaiKey) {
     return new Response(JSON.stringify({ error: "FIRECRAWL_API_KEY or OPENAI_API_KEY missing" }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
@@ -287,7 +311,7 @@ Deno.serve(async (req) => {
   for (const q of queries) {
     if (Date.now() - start > HARD_BUDGET_MS) { errors.push("time budget hit"); break; }
     try {
-      const results = await firecrawlSearch(q, firecrawlKey, tbs);
+      const results = await firecrawlSearch(q, firecrawlCreds, tbs);
       if (!results.length) { drops.page_rejected += 1; continue; }
       const corpus = results
         .map((r) => `### ${r.title}\nURL: ${r.url}\n\n${r.markdown.slice(0, 3500)}`)
@@ -395,6 +419,15 @@ Deno.serve(async (req) => {
       });
       enqueued += 1;
     }
+  }
+
+  const credentialBlocked = inserted === 0 && errors.some((e) => /Firecrawl\s+(401|402|403)/i.test(e));
+  if (credentialBlocked) {
+    await markFailed(supabase, jobId, errors[0] ?? "Firecrawl credential failed");
+    await supabase.from("pipeline_jobs").update({
+      result: { found: fresh.length, inserted, enqueued, drops, recorder_url: county.recorder_index_url, errors: errors.slice(0, 3) },
+    }).eq("id", jobId);
+    return jsonOk({ ok: false, county: county.county, found: fresh.length, inserted, enqueued, drops, errors });
   }
 
   await supabase.from("counties").update({ last_run_at: new Date().toISOString() }).eq("id", county.id);
