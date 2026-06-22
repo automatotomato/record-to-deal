@@ -401,6 +401,8 @@ const ContactCard = ({ lead, onFind, discovering }: { lead: any; onFind: () => v
         )}
       </div>
 
+      <UnmaskTrail lead={lead} />
+
       {hasAny ? (
         <div className="space-y-2">
           {!isEmptyValue(email) && <ContactRow icon={<Mail className="h-3.5 w-3.5" />} value={email} href={`mailto:${email}`} />}
@@ -412,6 +414,47 @@ const ContactCard = ({ lead, onFind, discovering }: { lead: any; onFind: () => v
         <div className="text-xs text-muted-foreground italic">No contact details yet — searching automatically.</div>
       )}
     </Section>
+  );
+};
+
+const UnmaskTrail = ({ lead }: { lead: any }) => {
+  const grantor = lead.owner_name;
+  const isEntity = lead.owner_type && lead.owner_type !== "Individual" && lead.owner_type !== "Unknown";
+  const principals: Array<{ name: string; role: string | null; source: string; source_url?: string | null }> =
+    Array.isArray(lead.entity_principals) ? lead.entity_principals : [];
+  const picked = lead.decision_maker_name;
+
+  if (!isEntity || !grantor) return null;
+
+  return (
+    <div className="mb-3 border border-border bg-secondary/40 px-3 py-2 font-mono text-[10px]">
+      <div className="text-muted-foreground uppercase tracking-wider mb-1">Unmask trail</div>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="text-foreground">Grantor: {grantor}</span>
+        {principals.length > 0 && (
+          <>
+            <span className="text-muted-foreground">→</span>
+            <span>
+              {principals.slice(0, 3).map((p, i) => (
+                <span key={i}>
+                  {i > 0 && <span className="text-muted-foreground">, </span>}
+                  <span className={picked && p.name === picked ? "text-accent font-semibold" : "text-foreground"}>
+                    {p.name}
+                  </span>
+                  {p.role && <span className="text-muted-foreground"> ({p.role})</span>}
+                </span>
+              ))}
+            </span>
+            <span className="text-muted-foreground">
+              via {Array.from(new Set(principals.map((p) => p.source))).join(", ")}
+            </span>
+          </>
+        )}
+        {principals.length === 0 && (
+          <span className="text-muted-foreground">→ no SoS/OpenCorporates principal yet</span>
+        )}
+      </div>
+    </div>
   );
 };
 

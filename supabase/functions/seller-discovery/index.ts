@@ -37,6 +37,13 @@ const STATE_NAMES: Record<string, string> = {
   DC: "District of Columbia",
 };
 
+interface Principal {
+  name: string;
+  role: string | null;
+  source: string; // "opencorporates" | "sos" | "bizapedia" | ...
+  source_url?: string | null;
+}
+
 interface Discovery {
   name: string | null;
   role: string | null;
@@ -46,6 +53,7 @@ interface Discovery {
   company_website: string | null;
   entity_registry_url: string | null;
   related_entities: Array<{ name: string; url?: string }>;
+  principals: Principal[];
   confidence_by_field: Record<string, { score: number; source: string }>;
   sources: string[];
   passes: Record<string, boolean>;
@@ -55,6 +63,7 @@ interface Discovery {
 const empty = (): Discovery => ({
   name: null, role: null, email: null, phone: null, linkedin: null,
   company_website: null, entity_registry_url: null, related_entities: [],
+  principals: [],
   confidence_by_field: {}, sources: [], passes: {}, notes: [],
 });
 
@@ -126,6 +135,39 @@ function pickHostFromUrl(url: string): string | null {
 }
 
 const SOCIAL_RE = /(linkedin|facebook|twitter|x\.com|instagram|youtube|google|maps|wikipedia|opencorporates|secretary|sos\.|gov$|bizapedia|zoominfo|rocketreach|crunchbase|signalhire|apollo|yelp|bbb\.org|yellowpages|loopnet|crexi|redfin|zillow|realtor\.com|sec\.gov)/i;
+
+// Broker / MLS / listing-agent deny-list. If a candidate name, email, phone,
+// or website matches any of these, it's almost certainly the listing agent,
+// not the deed grantor — reject and keep hunting.
+const BROKER_DENY_DOMAINS = [
+  "compass.com", "kw.com", "kellerwilliams.com", "cbre.com", "jll.com",
+  "marcusmillichap.com", "colliers.com", "cushmanwakefield.com",
+  "berkshirehathawayhs.com", "century21.com", "remax.com", "coldwellbanker.com",
+  "sothebysrealty.com", "douglaselliman.com", "corcoran.com", "exprealty.com",
+  "har.com", "loopnet.com", "crexi.com", "zillow.com", "realtor.com",
+  "redfin.com", "trulia.com",
+];
+const BROKER_DOMAIN_RE = new RegExp(
+  "@(" + BROKER_DENY_DOMAINS.map((h) => h.replace(/\./g, "\\.")).join("|") + ")$",
+  "i",
+);
+const BROKER_HOST_RE = new RegExp(
+  "\\b(" + BROKER_DENY_DOMAINS.map((h) => h.replace(/\./g, "\\.")).join("|") + ")\\b",
+  "i",
+);
+const BROKER_TITLE_RE =
+  /\b(realtor|listing agent|broker associate|real estate agent|sales associate|leasing agent|broker\/owner|managing broker)\b/i;
+
+function isBrokerEmail(email?: string | null): boolean {
+  return !!email && BROKER_DOMAIN_RE.test(email);
+}
+function isBrokerHost(url?: string | null): boolean {
+  const h = pickHostFromUrl(url ?? "");
+  return !!h && BROKER_HOST_RE.test(h);
+}
+function isBrokerTitle(role?: string | null): boolean {
+  return !!role && BROKER_TITLE_RE.test(role);
+}
 
 function pickDomainFromText(text: string, ownerName: string | null): string | null {
   const slug = (ownerName ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -359,6 +401,73 @@ ${blob.slice(0, 14000)}` },
   finally { clearTimeout(tid); }
 }
 
+// ====== OpenCorporates direct API (no key needed for low volume) ======
+// Returns up to 5 candidate companies in the lead's jurisdiction.
+async function ocSearchCompanies(entityName: string, stateCode: string | null): Promise<any[]> {
+  try {
+    const jurisdiction = stateCode ? `us_${stateCode.toLowerCase()}` : "";
+    const url = new URL("https://api.opencorporates.com/v0.4/companies/search");
+    url.searchParams.set("q", entityName);
+    if (jurisdiction) url.searchParams.set("jurisdiction_code", jurisdiction);
+    url.searchParams.set("per_page", "5");
+    url.searchParams.set("order", "score");
+    const r = await fetch(url.toString(), { headers: { "Accept": "application/json" } });
+    if (!r.ok) {
+      console.warn(`opencorporates ${r.status}`);
+      return [];
+    }
+    const d = await r.json();
+    return d?.results?.companies?.map((c: any) => c.company).filter(Boolean) ?? [];
+  } catch (e) {
+    console.warn("opencorporates threw", e);
+    return [];
+  }
+}
+
+// Returns the company's officers list (name, position) from OpenCorporates.
+async function ocGetOfficers(jurisdiction: string, companyNumber: string): Promise<Principal[]> {
+  try {
+    const url = `https://api.opencorporates.com/v0.4/companies/${jurisdiction}/${companyNumber}/officers`;
+    const r = await fetch(url, { headers: { "Accept": "application/json" } });
+    if (!r.ok) return [];
+    const d = await r.json();
+    const arr = d?.results?.officers ?? [];
+    return arr.map((o: any) => o.officer).filter(Boolean).map((o: any) => ({
+      name: String(o.name ?? "").trim(),
+      role: o.position ? String(o.position) : null,
+      source: "opencorporates",
+      source_url: o.opencorporates_url ?? null,
+    })).filter((p: Principal) => looksLikePersonName(p.name));
+  } catch (e) {
+    console.warn("opencorporates officers threw", e);
+    return [];
+  }
+}
+
+// Rank principals: manager > managing member > member > officer > director > registered agent.
+function rankPrincipal(p: Principal): number {
+  const r = (p.role ?? "").toLowerCase();
+  if (/managing member|manager/.test(r)) return 100;
+  if (/president|ceo|chief executive/.test(r)) return 90;
+  if (/\bmember\b/.test(r)) return 80;
+  if (/officer|director|principal/.test(r)) return 70;
+  if (/registered agent/.test(r)) return 40;
+  if (!r) return 30;
+  return 20;
+}
+
+function dedupePrincipals(arr: Principal[]): Principal[] {
+  const seen = new Set<string>();
+  const out: Principal[] = [];
+  for (const p of arr) {
+    const k = p.name.toUpperCase().replace(/\s+/g, " ").trim();
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(p);
+  }
+  return out;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -431,13 +540,35 @@ Deno.serve(async (req) => {
 
   const evidence: string[] = [];
 
-  // ============ PASS 1 — Entity unmask ============
+  // ============ PASS 1 — Entity unmask (MANDATORY for LLC/Trust/Corp/Estate) ============
+  // We unmask the LLC to a human BEFORE any LinkedIn / web pass, so later
+  // passes hunt the real person, not the entity string.
   if (entity && ownerName) {
     d.passes.entity_unmask = true;
+
+    // 1a. OpenCorporates direct API (free, no key).
+    const ocCompanies = await ocSearchCompanies(ownerName, state);
+    const top = ocCompanies[0];
+    if (top) {
+      if (top.opencorporates_url && !d.entity_registry_url) {
+        d.entity_registry_url = top.opencorporates_url;
+        d.sources.push("opencorporates.com");
+      }
+      // Try officers endpoint for the best match.
+      if (top.jurisdiction_code && top.company_number) {
+        const officers = await ocGetOfficers(top.jurisdiction_code, top.company_number);
+        if (officers.length) {
+          d.principals.push(...officers);
+          d.sources.push("opencorporates:officers");
+        }
+      }
+    }
+
+    // 1b. Firecrawl SoS / bizapedia search to fill gaps and grab registered agent.
     const queries = [
-      `"${ownerName}" site:opencorporates.com`,
-      `"${ownerName}" ${stateName} secretary of state`,
+      `"${ownerName}" ${stateName} secretary of state business entity search`,
       `"${ownerName}" site:bizapedia.com`,
+      `"${ownerName}" site:opencorporates.com`,
     ];
     for (const q of queries) {
       const res = await fcSearch(q, fcKey, 3, true, budget);
@@ -448,27 +579,43 @@ Deno.serve(async (req) => {
           d.entity_registry_url = r.url;
           d.sources.push("opencorporates.com");
         }
-        // Officer regex
-        const m = md.match(/(?:Manager|Managing Member|President|CEO|Officer|Member|Director|Registered Agent)[\s:-]+([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)/);
-        if (m && looksLikePersonName(m[1])) {
-          const role = m[0].split(/[\s:-]+/)[0];
-          setField(d, "name", m[1], 55, "sos");
-          setField(d, "role", role, 55, "sos");
+        // Pull every (role → name) match, not just the first.
+        const roleRe = /(Manager|Managing Member|President|CEO|Officer|Member|Director|Registered Agent)[\s:|\-]+([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)/g;
+        let mm: RegExpExecArray | null;
+        while ((mm = roleRe.exec(md)) !== null) {
+          if (looksLikePersonName(mm[2])) {
+            d.principals.push({
+              name: mm[2],
+              role: mm[1],
+              source: r.url && /opencorporates/.test(r.url) ? "opencorporates" : "sos",
+              source_url: r.url ?? null,
+            });
+          }
         }
         // Related entities (other LLCs near this name)
         const rel = Array.from(md.matchAll(/([A-Z][A-Za-z0-9& ]{2,}?\s+(?:LLC|INC|CORP|LP|LLP|HOLDINGS|PARTNERS))/g))
-          .map((mm) => mm[1])
+          .map((mm2) => mm2[1])
           .filter((n) => n.toUpperCase() !== (ownerName ?? "").toUpperCase())
           .slice(0, 5);
         for (const r2 of rel) {
           if (!d.related_entities.find((e) => e.name === r2)) d.related_entities.push({ name: r2, url: r.url });
         }
       }
-      if (d.name) break;
+    }
+
+    // 1c. Pick the best human principal — skip brokers/agents.
+    d.principals = dedupePrincipals(d.principals).filter((p) => !isBrokerTitle(p.role));
+    const ranked = [...d.principals].sort((a, b) => rankPrincipal(b) - rankPrincipal(a));
+    const best = ranked[0];
+    if (best) {
+      setField(d, "name", best.name, 60, `unmask:${best.source}`);
+      setField(d, "role", best.role ?? "Principal", 60, `unmask:${best.source}`);
+      d.notes.push(`Unmasked ${ownerName} → ${best.name} (${best.role ?? "principal"}, via ${best.source})`);
     }
   } else if (isKnownOwnerName(ownerName)) {
-    setField(d, "name", ownerName, 50, "deed");
-    setField(d, "role", "Owner", 50, "deed");
+    // Individual owner: the grantor on the deed IS the decision-maker.
+    setField(d, "name", ownerName, 60, "deed:grantor");
+    setField(d, "role", "Owner", 60, "deed:grantor");
   }
 
   const targetName = isKnownOwnerName(d.name) ? d.name : (isKnownOwnerName(ownerName) ? ownerName : null);
@@ -525,17 +672,16 @@ Deno.serve(async (req) => {
     if (contactMd) evidence.push(`CONTACT ${domain}\n${contactMd.slice(0, 4000)}`);
   }
 
-  // Source records and broker/listing pages often carry the only reachable
-  // path (broker phone, listing contact, press release contact). Scrape them
-  // before paid/AI fallbacks so website-less owners are still actionable.
-  if (lead.source_record_url) {
+  // Source records sometimes carry contact info — but ONLY if the host is
+  // not a broker/MLS portal. We never want a listing agent's email.
+  if (lead.source_record_url && !isBrokerHost(lead.source_record_url)) {
     d.passes.source_record_contact = true;
     const sourceMd = await fcScrape(lead.source_record_url, fcKey, budget);
     if (sourceMd) {
       evidence.push(`SOURCE RECORD ${lead.source_record_url}\n${sourceMd.slice(0, 6000)}`);
       const host = pickHostFromUrl(lead.source_record_url);
       if (!d.company_website && host && !SOCIAL_RE.test(host)) setField(d, "company_website", normalizeWebsite(host), 45, "source_record");
-      const emails = pullEmails(sourceMd);
+      const emails = pullEmails(sourceMd).filter((e) => !isBrokerEmail(e));
       let bestEmail: { e: string; s: number } | null = null;
       for (const e of emails) {
         const s = Math.max(scoreEmail(e, targetName), host && e.endsWith(`@${host}`) ? 55 : 0);
@@ -562,7 +708,7 @@ Deno.serve(async (req) => {
       const c = publicHit.confidence ?? {};
       if (publicHit.name && isKnownOwnerName(publicHit.name) && looksLikePersonName(publicHit.name)) setField(d, "name", publicHit.name, c.name ?? 55, "gemini.public_search");
       if (publicHit.role) setField(d, "role", publicHit.role, c.role ?? 45, "gemini.public_search");
-      if (isUnlockedEmail(publicHit.email)) setField(d, "email", publicHit.email, c.email ?? 65, "gemini.public_search");
+      if (isUnlockedEmail(publicHit.email) && !isBrokerEmail(publicHit.email)) setField(d, "email", publicHit.email, c.email ?? 65, "gemini.public_search");
       if (publicHit.phone && String(publicHit.phone).replace(/\D/g, "").length >= 10) setField(d, "phone", publicHit.phone, c.phone ?? 55, "gemini.public_search");
       if (publicHit.linkedin && /linkedin\.com\/in\//i.test(publicHit.linkedin)) setField(d, "linkedin", publicHit.linkedin, c.linkedin ?? 55, "gemini.public_search");
       if (publicHit.company_website) {
@@ -591,7 +737,7 @@ Deno.serve(async (req) => {
     }
     const allEvidence = evidence.join("\n---\n");
     if (!d.email) {
-      const emails = pullEmails(allEvidence);
+      const emails = pullEmails(allEvidence).filter((e) => !isBrokerEmail(e));
       let best: { e: string; s: number } | null = null;
       for (const e of emails) {
         const s = scoreEmail(e, targetName);
@@ -617,7 +763,7 @@ Deno.serve(async (req) => {
       const c = ai.confidence ?? {};
       if (ai.name && isKnownOwnerName(ai.name)) setField(d, "name", ai.name, c.name ?? 50, "ai");
       if (ai.role) setField(d, "role", ai.role, c.role ?? 50, "ai");
-      if (isUnlockedEmail(ai.email)) setField(d, "email", ai.email, c.email ?? 45, "ai");
+      if (isUnlockedEmail(ai.email) && !isBrokerEmail(ai.email)) setField(d, "email", ai.email, c.email ?? 45, "ai");
       if (ai.phone && String(ai.phone).replace(/\D/g, "").length >= 10) setField(d, "phone", ai.phone, c.phone ?? 35, "ai");
       if (ai.linkedin && /linkedin\.com\/in\//i.test(ai.linkedin)) setField(d, "linkedin", ai.linkedin, c.linkedin ?? 50, "ai");
       if (ai.company_website) {
@@ -664,6 +810,7 @@ Deno.serve(async (req) => {
     company_website: d.company_website,
     entity_registry_url: d.entity_registry_url ?? lead.entity_registry_url,
     related_entities: d.related_entities,
+    entity_principals: d.principals.length ? d.principals : null,
     discovery_confidence_by_field: d.confidence_by_field,
     discovery_status: status,
     has_contact: willBeUseful,

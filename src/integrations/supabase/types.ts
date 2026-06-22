@@ -55,6 +55,7 @@ export type Database = {
           notes: string | null
           parser_key: string
           priority: string
+          recorder_index_url: string | null
           source_url: string | null
           state: string
           updated_at: string
@@ -69,6 +70,7 @@ export type Database = {
           notes?: string | null
           parser_key: string
           priority?: string
+          recorder_index_url?: string | null
           source_url?: string | null
           state: string
           updated_at?: string
@@ -83,6 +85,7 @@ export type Database = {
           notes?: string | null
           parser_key?: string
           priority?: string
+          recorder_index_url?: string | null
           source_url?: string | null
           state?: string
           updated_at?: string
@@ -215,6 +218,7 @@ export type Database = {
           effective_tax_rate: number | null
           enrichment_confidence: number
           enrichment_payload: Json
+          entity_principals: Json | null
           entity_registry_url: string | null
           fed_capital_gains_estimate: number | null
           has_contact: boolean
@@ -318,6 +322,7 @@ export type Database = {
           effective_tax_rate?: number | null
           enrichment_confidence?: number
           enrichment_payload?: Json
+          entity_principals?: Json | null
           entity_registry_url?: string | null
           fed_capital_gains_estimate?: number | null
           has_contact?: boolean
@@ -421,6 +426,7 @@ export type Database = {
           effective_tax_rate?: number | null
           enrichment_confidence?: number
           enrichment_payload?: Json
+          entity_principals?: Json | null
           entity_registry_url?: string | null
           fed_capital_gains_estimate?: number | null
           has_contact?: boolean

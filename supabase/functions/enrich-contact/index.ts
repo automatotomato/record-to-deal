@@ -95,10 +95,16 @@ Deno.serve(async (req) => {
   if (firecrawlKey && (dmName || ownerName)) {
     const target = dmName ?? ownerName!;
     const liRes = await fcSearch(
-      `"${target}" ${lead.property_city ?? ""} ${lead.state ?? ""} site:linkedin.com/in`,
+      `"${target}" ${lead.property_city ?? ""} ${lead.state ?? ""} site:linkedin.com/in -realtor -broker -"real estate agent" -"listing agent"`,
       firecrawlKey, 2,
     );
-    const liUrl = liRes.find((r: any) => /linkedin\.com\/in\//.test(r.url ?? ""))?.url;
+    const liUrl = liRes.find((r: any) => {
+      const u = r.url ?? "";
+      if (!/linkedin\.com\/in\//.test(u)) return false;
+      // Skip slugs that clearly belong to brokers/agents.
+      const slug = u.toLowerCase();
+      return !/-realtor|-broker|-real-?estate-?agent|-listing-?agent/.test(slug);
+    })?.url;
     if (liUrl && !dmLinkedIn) {
       dmLinkedIn = liUrl;
       confidence += 10;
