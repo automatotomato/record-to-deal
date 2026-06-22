@@ -183,7 +183,13 @@ export type Database = {
           ai_brief: Json | null
           ai_brief_generated_at: string | null
           assessed_value: number | null
+          assessor_fetched_at: string | null
+          assessor_last_sale_date: string | null
+          assessor_last_sale_price: number | null
+          assessor_status: string | null
+          assessor_url: string | null
           assigned_to: string | null
+          building_sqft: number | null
           capital_gains_estimate: number | null
           company_website: string | null
           contact_completeness: number | null
@@ -201,9 +207,11 @@ export type Database = {
           decision_maker_phone: string | null
           decision_maker_role: string | null
           deed_date: string | null
+          deed_source_url: string | null
           depreciation_recapture_est: number | null
           discovery_confidence_by_field: Json
           discovery_status: string
+          document_type: string | null
           effective_tax_rate: number | null
           enrichment_confidence: number
           enrichment_payload: Json
@@ -218,7 +226,13 @@ export type Database = {
           last_touchpoint_kind: string | null
           list_date: string | null
           list_price: number | null
+          lot_size_sqft: number | null
           lv_property_recommendation: string | null
+          mailing_address: string | null
+          mailing_city: string | null
+          mailing_state: string | null
+          mailing_zip: string | null
+          market_value: number | null
           motivation_type: string | null
           next_action: string | null
           next_action_at: string | null
@@ -227,6 +241,7 @@ export type Database = {
           outreach_sequence_id: string | null
           outreach_step_index: number
           owner_name: string | null
+          owner_occupied: boolean | null
           owner_type: Database["public"]["Enums"]["owner_type"] | null
           ownership_years: number | null
           parcel_number: string | null
@@ -234,6 +249,7 @@ export type Database = {
           pipeline_stage: string
           pitch_angle: string | null
           preferred_channel: string | null
+          prior_owner_name: string | null
           profiler_summary: string | null
           property_address: string | null
           property_city: string | null
@@ -242,6 +258,7 @@ export type Database = {
           qualification_reason: string | null
           qualifier_notes: string | null
           readiness: string
+          recording_number: string | null
           related_entities: Json
           sale_date: string | null
           sale_price: number | null
@@ -257,16 +274,25 @@ export type Database = {
           tier: Database["public"]["Enums"]["lead_tier"]
           total_tax_exposure: number | null
           trigger_event: Database["public"]["Enums"]["trigger_event"] | null
+          unmask_source: string | null
+          unmask_status: string | null
           updated_at: string
           wealth_signals: Json | null
           wealth_tier: string
+          year_built: number | null
         }
         Insert: {
           actual_capital_gain?: number | null
           ai_brief?: Json | null
           ai_brief_generated_at?: string | null
           assessed_value?: number | null
+          assessor_fetched_at?: string | null
+          assessor_last_sale_date?: string | null
+          assessor_last_sale_price?: number | null
+          assessor_status?: string | null
+          assessor_url?: string | null
           assigned_to?: string | null
+          building_sqft?: number | null
           capital_gains_estimate?: number | null
           company_website?: string | null
           contact_completeness?: number | null
@@ -284,9 +310,11 @@ export type Database = {
           decision_maker_phone?: string | null
           decision_maker_role?: string | null
           deed_date?: string | null
+          deed_source_url?: string | null
           depreciation_recapture_est?: number | null
           discovery_confidence_by_field?: Json
           discovery_status?: string
+          document_type?: string | null
           effective_tax_rate?: number | null
           enrichment_confidence?: number
           enrichment_payload?: Json
@@ -301,7 +329,13 @@ export type Database = {
           last_touchpoint_kind?: string | null
           list_date?: string | null
           list_price?: number | null
+          lot_size_sqft?: number | null
           lv_property_recommendation?: string | null
+          mailing_address?: string | null
+          mailing_city?: string | null
+          mailing_state?: string | null
+          mailing_zip?: string | null
+          market_value?: number | null
           motivation_type?: string | null
           next_action?: string | null
           next_action_at?: string | null
@@ -310,6 +344,7 @@ export type Database = {
           outreach_sequence_id?: string | null
           outreach_step_index?: number
           owner_name?: string | null
+          owner_occupied?: boolean | null
           owner_type?: Database["public"]["Enums"]["owner_type"] | null
           ownership_years?: number | null
           parcel_number?: string | null
@@ -317,6 +352,7 @@ export type Database = {
           pipeline_stage?: string
           pitch_angle?: string | null
           preferred_channel?: string | null
+          prior_owner_name?: string | null
           profiler_summary?: string | null
           property_address?: string | null
           property_city?: string | null
@@ -325,6 +361,7 @@ export type Database = {
           qualification_reason?: string | null
           qualifier_notes?: string | null
           readiness?: string
+          recording_number?: string | null
           related_entities?: Json
           sale_date?: string | null
           sale_price?: number | null
@@ -340,16 +377,25 @@ export type Database = {
           tier?: Database["public"]["Enums"]["lead_tier"]
           total_tax_exposure?: number | null
           trigger_event?: Database["public"]["Enums"]["trigger_event"] | null
+          unmask_source?: string | null
+          unmask_status?: string | null
           updated_at?: string
           wealth_signals?: Json | null
           wealth_tier?: string
+          year_built?: number | null
         }
         Update: {
           actual_capital_gain?: number | null
           ai_brief?: Json | null
           ai_brief_generated_at?: string | null
           assessed_value?: number | null
+          assessor_fetched_at?: string | null
+          assessor_last_sale_date?: string | null
+          assessor_last_sale_price?: number | null
+          assessor_status?: string | null
+          assessor_url?: string | null
           assigned_to?: string | null
+          building_sqft?: number | null
           capital_gains_estimate?: number | null
           company_website?: string | null
           contact_completeness?: number | null
@@ -367,9 +413,11 @@ export type Database = {
           decision_maker_phone?: string | null
           decision_maker_role?: string | null
           deed_date?: string | null
+          deed_source_url?: string | null
           depreciation_recapture_est?: number | null
           discovery_confidence_by_field?: Json
           discovery_status?: string
+          document_type?: string | null
           effective_tax_rate?: number | null
           enrichment_confidence?: number
           enrichment_payload?: Json
@@ -384,7 +432,13 @@ export type Database = {
           last_touchpoint_kind?: string | null
           list_date?: string | null
           list_price?: number | null
+          lot_size_sqft?: number | null
           lv_property_recommendation?: string | null
+          mailing_address?: string | null
+          mailing_city?: string | null
+          mailing_state?: string | null
+          mailing_zip?: string | null
+          market_value?: number | null
           motivation_type?: string | null
           next_action?: string | null
           next_action_at?: string | null
@@ -393,6 +447,7 @@ export type Database = {
           outreach_sequence_id?: string | null
           outreach_step_index?: number
           owner_name?: string | null
+          owner_occupied?: boolean | null
           owner_type?: Database["public"]["Enums"]["owner_type"] | null
           ownership_years?: number | null
           parcel_number?: string | null
@@ -400,6 +455,7 @@ export type Database = {
           pipeline_stage?: string
           pitch_angle?: string | null
           preferred_channel?: string | null
+          prior_owner_name?: string | null
           profiler_summary?: string | null
           property_address?: string | null
           property_city?: string | null
@@ -408,6 +464,7 @@ export type Database = {
           qualification_reason?: string | null
           qualifier_notes?: string | null
           readiness?: string
+          recording_number?: string | null
           related_entities?: Json
           sale_date?: string | null
           sale_price?: number | null
@@ -423,9 +480,12 @@ export type Database = {
           tier?: Database["public"]["Enums"]["lead_tier"]
           total_tax_exposure?: number | null
           trigger_event?: Database["public"]["Enums"]["trigger_event"] | null
+          unmask_source?: string | null
+          unmask_status?: string | null
           updated_at?: string
           wealth_signals?: Json | null
           wealth_tier?: string
+          year_built?: number | null
         }
         Relationships: [
           {
@@ -612,6 +672,30 @@ export type Database = {
         }
         Relationships: []
       }
+      paused_cron_jobs: {
+        Row: {
+          command: string
+          id: string
+          jobname: string
+          paused_at: string
+          schedule: string
+        }
+        Insert: {
+          command: string
+          id?: string
+          jobname: string
+          paused_at?: string
+          schedule: string
+        }
+        Update: {
+          command?: string
+          id?: string
+          jobname?: string
+          paused_at?: string
+          schedule?: string
+        }
+        Relationships: []
+      }
       pipeline_jobs: {
         Row: {
           attempts: number
@@ -771,6 +855,33 @@ export type Database = {
         }
         Relationships: []
       }
+      system_settings: {
+        Row: {
+          created_at: string
+          id: boolean
+          paused: boolean
+          paused_at: string | null
+          paused_by: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: boolean
+          paused?: boolean
+          paused_at?: string | null
+          paused_by?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: boolean
+          paused?: boolean
+          paused_at?: string | null
+          paused_by?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           created_at: string
@@ -842,6 +953,7 @@ export type Database = {
         Returns: boolean
       }
       is_staff: { Args: { _user_id: string }; Returns: boolean }
+      run_scout_cron: { Args: never; Returns: Json }
     }
     Enums: {
       app_role: "admin" | "agent"
