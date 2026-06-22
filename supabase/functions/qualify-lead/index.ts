@@ -85,22 +85,13 @@ function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
   // --- Hard disqualifiers ---
   const trig = lead.trigger_event ?? "";
   const acceptedTriggers = new Set(["sale_recorded", "deed_recorded", "transfer_recorded"]);
-  if (!acceptedTriggers.has(trig)) {
-    return disq("No confirmed sale/deed/transfer event.", days, stateRate);
-  }
-  // Missing sale_date OR $0 sale_price → needs assessor enrichment first, not a hard disqualify.
-  // (Many county recorder search results don't expose consideration cleanly.)
-  if (!lead.sale_date || sp === 0) {
-    return needsReview(
-      !lead.sale_date
-        ? "Missing sale date — enqueued assessor lookup."
-        : "$0 consideration on deed — enqueued assessor lookup to confirm value.",
-      days, stateRate,
-    );
+  if (!acceptedTriggers.has(trig) || !lead.sale_date) {
+    return disq("No confirmed sale/deed/transfer event with a sale date.", days, stateRate);
   }
   if (!lead.property_address) {
     return needsReview("Property address could not be resolved.", days, stateRate);
   }
+  if (sp === 0) return disq("Disqualified: $0 transfer (likely quitclaim or non-arms-length).", days, stateRate);
 
   // Hard 1031 floor: individual owner of an unclear/SFR property under $750k will
   // essentially never do a 1031. Drop those before they pollute the pipeline.
@@ -203,9 +194,7 @@ function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
   breakdown.contactability = cc;
 
   // Source confidence (max 5)
-  // Source confidence (max 5): official recorder = full credit.
-  const fromCounty = (lead.data_sources ?? []).some((s: string) =>
-    /county|attom|firecrawl:(recorder|tccsearch|travis|acris|cook|la|mass)/i.test(s));
+  const fromCounty = (lead.data_sources ?? []).some((s: string) => /county|attom/i.test(s));
   const sc = fromCounty ? 5 : 2;
   breakdown.source_confidence = sc;
 
@@ -312,35 +301,20 @@ Deno.serve(async (req) => {
     : r.tier === "EXPIRED" ? "expired"
     : "qualified";
 
-  // Disqualified / expired → SOFT mark (no purge). Preserve activity history
-  // for audit and so the orchestrator's scout_runs accounting stays sane.
-  // needs_review → enqueue assessor enrichment if not already done, then exit.
-  if (r.needs_review) {
-    await supabase.from("leads").update({
-      tier: "UNSCORED",
-      qualification_reason: r.reason,
-      score_breakdown: r.breakdown,
-      days_since_sale: r.days_since_sale,
-      state_tax_rate: r.state_tax_rate,
-      pipeline_stage: "needs_review",
-      updated_at: new Date().toISOString(),
-    }).eq("id", leadId);
-    if (lead.assessor_status !== "ok" && lead.assessor_status !== "not_found") {
-      await supabase.from("pipeline_jobs").insert({
-        kind: "enrich_assessor", lead_id: leadId, priority: 85,
-      });
-    }
-    await supabase.from("lead_activities").insert({
-      lead_id: leadId,
-      kind: "qualifier_needs_review",
-      summary: r.reason,
-      payload: { stage: "needs_review", breakdown: r.breakdown },
-    });
+  // If lead is disqualified or expired (outside 90-day actionable window),
+  // purge it entirely — we don't keep a graveyard of unreachable opportunities.
+  if (r.disqualified || r.tier === "EXPIRED" || r.tier === "DISQUALIFIED") {
+    await supabase.from("lead_activities").delete().eq("lead_id", leadId);
+    await supabase.from("lead_touchpoints").delete().eq("lead_id", leadId);
+    await supabase.from("outreach_touches").delete().eq("lead_id", leadId);
+    await supabase.from("outreach_emails").delete().eq("lead_id", leadId);
+    await supabase.from("pipeline_jobs").delete().eq("lead_id", leadId).neq("id", body.job_id);
+    await supabase.from("leads").delete().eq("id", leadId);
     await supabase.from("pipeline_jobs").update({
       status: "done", finished_at: new Date().toISOString(),
-      result: { tier: r.tier, score: r.score, stage: "needs_review" },
+      result: { tier: r.tier, score: r.score, stage, purged: true, reason: r.reason },
     }).eq("id", body.job_id);
-    return jsonOk({ ok: true, tier: r.tier, score: r.score, stage: "needs_review" });
+    return jsonOk({ ok: true, tier: r.tier, score: r.score, stage, purged: true });
   }
 
   await supabase.from("leads").update({

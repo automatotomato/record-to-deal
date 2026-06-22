@@ -14,7 +14,7 @@ const corsHeaders = {
 };
 
 const FEC_KEY = Deno.env.get("FEC_API_KEY") || "DEMO_KEY";
-const FC_KEY = (Deno.env.get("FIRECRAWL_API_KEY_OVERRIDE") ?? Deno.env.get("FIRECRAWL_API_KEY"));
+const FC_KEY = Deno.env.get("FIRECRAWL_API_KEY");
 
 type Signal = { source: string; kind: string; value: string; url?: string; confidence: number };
 

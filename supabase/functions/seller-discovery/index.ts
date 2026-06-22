@@ -1,16 +1,13 @@
 // Seller Discovery agent — dedicated multi-pass contact hunt for one lead.
-// Passes:
-//   1. Entity unmask (OpenCorporates scrape + per-state SoS scrape) — REQUIRED
-//      for any LLC/Inc/Corp/Trust grantee. Registered-agent-only matches are
-//      demoted (CT Corp, NRAI, Cogency are not the owner).
+// Passes (Apollo removed — Gemini grounded search + Firecrawl scraping only):
+//   1. Entity unmask (OpenCorporates + state SoS via Firecrawl)
 //   2. Person identity (LinkedIn / RocketReach / ZoomInfo / Bizapedia)
 //   3. Company website discovery + homepage/contact scrape
-//   4. Source record scrape (recorder doc — usually no email/phone there)
-//   5. Gemini grounded public-contact hunt
+//   4. Source record scrape (broker/listing pages)
+//   5. Gemini grounded public-contact hunt (Google Search)
 //   6. Personal contact scrape (regex + scoring)
-//   7. AI consolidation
+//   7. AI consolidation (Gemini picks best per field with confidence)
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { getStateSource } from "../_shared/recorder-sources.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -24,7 +21,7 @@ const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-4o-mini";
 if (!(globalThis as any).__sdLogged) { console.log(`[seller-discovery] OpenAI model: ${AI_MODEL}`); (globalThis as any).__sdLogged = true; }
 
 // Per-call budget so a single lead can't burn the day's quota
-const BUDGET = { firecrawl: 15, ai: 3, apollo: 2 };
+const BUDGET = { firecrawl: 15, ai: 3 };
 
 const STATE_NAMES: Record<string, string> = {
   AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
@@ -71,56 +68,10 @@ function setField(d: Discovery, field: keyof Discovery, value: any, score: numbe
 }
 
 class Budget {
-  constructor(public fc = 0, public ai = 0, public apollo = 0) {}
+  constructor(public fc = 0, public ai = 0) {}
   canFc() { return this.fc < BUDGET.firecrawl; }
   canAi() { return this.ai < BUDGET.ai; }
-  canApollo() { return this.apollo < BUDGET.apollo; }
 }
-
-// ---- Apollo people/match: returns enriched person + organization data.
-// Requires APOLLO_API_KEY. We do NOT pass reveal_phone_number=true (Apollo
-// requires a webhook_url for that and bills mobile reveals separately). We
-// DO request personal_emails which are returned synchronously when known.
-async function apolloMatch(
-  apiKey: string,
-  budget: Budget,
-  args: { name?: string | null; first_name?: string | null; last_name?: string | null; domain?: string | null; organization_name?: string | null },
-): Promise<any | null> {
-  if (!budget.canApollo()) return null;
-  if (!args.name && !(args.first_name && args.last_name) && !args.domain) return null;
-  budget.apollo++;
-  const ctrl = new AbortController();
-  const tid = setTimeout(() => ctrl.abort(), 15_000);
-  try {
-    const body: Record<string, unknown> = { reveal_personal_emails: true };
-    if (args.name) body.name = args.name;
-    if (args.first_name) body.first_name = args.first_name;
-    if (args.last_name) body.last_name = args.last_name;
-    if (args.domain) body.domain = args.domain;
-    if (args.organization_name) body.organization_name = args.organization_name;
-    const r = await fetch("https://api.apollo.io/api/v1/people/match", {
-      method: "POST",
-      signal: ctrl.signal,
-      headers: {
-        "Cache-Control": "no-cache",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "x-api-key": apiKey,
-      },
-      body: JSON.stringify(body),
-    });
-    if (!r.ok) {
-      console.warn(`apollo ${r.status}: ${(await r.text()).slice(0, 200)}`);
-      return null;
-    }
-    const data = await r.json();
-    return data?.person ?? null;
-  } catch (e) {
-    console.warn("apollo threw", e);
-    return null;
-  } finally { clearTimeout(tid); }
-}
-
 
 async function fcSearch(query: string, key: string, limit: number, scrape: boolean, budget: Budget) {
   if (!budget.canFc()) return [];
@@ -413,9 +364,8 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const fcKey = (Deno.env.get("FIRECRAWL_API_KEY_OVERRIDE") ?? Deno.env.get("FIRECRAWL_API_KEY"));
+  const fcKey = Deno.env.get("FIRECRAWL_API_KEY");
   const lovableKey = Deno.env.get("OPENAI_API_KEY");
-  const apolloKey = Deno.env.get("APOLLO_API_KEY");
 
   if (!fcKey || !lovableKey) {
     return new Response(JSON.stringify({ error: "FIRECRAWL_API_KEY and OPENAI_API_KEY are required" }), {
@@ -481,131 +431,44 @@ Deno.serve(async (req) => {
 
   const evidence: string[] = [];
 
-  // ============ PASS 1 — Entity unmask (OpenCorporates + State SoS) ============
-  // Goal: convert the LLC/Inc/Corp/Trust grantee into a real human name BEFORE
-  // we waste budget on LinkedIn / Gemini / scraping. We always prefer Manager /
-  // Managing Member / President / Sole Member / Member over Registered Agent
-  // because agents-for-service (CT Corp, NRAI, Cogency, InCorp, etc.) are NOT
-  // the owner.
-  const REG_AGENT_BLOCKLIST = /\b(CT CORPORATION|C T CORP|CORPORATION SERVICE COMPANY|CSC[- ]LAWYERS|NORTHWEST REGISTERED AGENT|NATIONAL REGISTERED AGENTS|NRAI|COGENCY GLOBAL|INCORP SERVICES|INCORPORATING SERVICES|REGISTERED AGENT SOLUTIONS|LEGALINC|HARVARD BUSINESS SERVICES|UNITED STATES CORPORATION AGENTS|PARACORP|VCORP)\b/i;
-  const OFFICER_ROLE_PRIORITY = [
-    /\b(managing member|sole member|manager)\b/i,
-    /\b(president|ceo|chief executive)\b/i,
-    /\b(director|vice president|vp|cfo|secretary|treasurer)\b/i,
-    /\b(member|officer|principal)\b/i,
-    /\b(registered agent|agent for service|agent)\b/i, // lowest priority
-  ];
-  type OfficerHit = { name: string; role: string; rank: number; isAgent: boolean };
-
-  function rankRole(role: string): number {
-    for (let i = 0; i < OFFICER_ROLE_PRIORITY.length; i++) {
-      if (OFFICER_ROLE_PRIORITY[i].test(role)) return i;
-    }
-    return 99;
-  }
-
-  function isLikelyAgentEntity(name: string): boolean {
-    return REG_AGENT_BLOCKLIST.test(name);
-  }
-
-  function parseOfficersFromMarkdown(md: string): OfficerHit[] {
-    const hits: OfficerHit[] = [];
-    const text = md.replace(/\r/g, "");
-    // Pattern A: "Role: Name" or "Role - Name" lines
-    const reA = /(Managing Member|Sole Member|Manager|President|CEO|Chief Executive|Director|Vice President|VP|CFO|Secretary|Treasurer|Member|Officer|Principal|Registered Agent|Agent for Service|Agent)\s*[:\-–—|]\s*([A-Z][A-Za-z'`\-]+(?:\s+[A-Z][A-Za-z'`\-]+){1,3})/g;
-    for (const m of text.matchAll(reA)) {
-      const role = m[1];
-      const name = m[2].trim();
-      if (!looksLikePersonName(name)) continue;
-      const rank = rankRole(role);
-      hits.push({ name, role, rank, isAgent: /agent/i.test(role) || isLikelyAgentEntity(name) });
-    }
-    // Pattern B: "Name | Role" rows (table-style)
-    const reB = /([A-Z][A-Za-z'`\-]+(?:\s+[A-Z][A-Za-z'`\-]+){1,3})\s*[|\t]\s*(Managing Member|Sole Member|Manager|President|CEO|Director|Member|Officer|Principal|Registered Agent|Agent)/g;
-    for (const m of text.matchAll(reB)) {
-      const name = m[1].trim();
-      const role = m[2];
-      if (!looksLikePersonName(name)) continue;
-      const rank = rankRole(role);
-      hits.push({ name, role, rank, isAgent: /agent/i.test(role) });
-    }
-    return hits;
-  }
-
-  function pickBestOfficer(hits: OfficerHit[]): OfficerHit | null {
-    if (!hits.length) return null;
-    const ranked = [...hits].sort((a, b) => {
-      // Prefer non-agent
-      if (a.isAgent !== b.isAgent) return a.isAgent ? 1 : -1;
-      return a.rank - b.rank;
-    });
-    return ranked[0];
-  }
-
-  let unmaskSource: string | null = null;
-
+  // ============ PASS 1 — Entity unmask ============
   if (entity && ownerName) {
     d.passes.entity_unmask = true;
-
-    // --- 1A: OpenCorporates two-step (search → scrape detail page) ---
-    const ocSearch = await fcSearch(`"${ownerName}" site:opencorporates.com`, fcKey, 4, false, budget);
-    const ocHit = ocSearch.find((r: any) => /opencorporates\.com\/companies\//i.test(String(r.url ?? "")));
-    if (ocHit?.url) {
-      d.entity_registry_url = ocHit.url;
-      d.sources.push("opencorporates.com");
-      const ocMd = await fcScrape(ocHit.url, fcKey, budget);
-      if (ocMd) {
-        evidence.push(`OPENCORPORATES ${ocHit.url}\n${ocMd.slice(0, 6000)}`);
-        const officers = parseOfficersFromMarkdown(ocMd);
-        const best = pickBestOfficer(officers);
-        if (best && !best.isAgent) {
-          setField(d, "name", best.name, 65, "opencorporates");
-          setField(d, "role", best.role, 65, "opencorporates");
-          unmaskSource = "opencorporates";
-        } else if (best && best.isAgent) {
-          d.notes.push(`OpenCorporates only exposed registered agent: ${best.name} (${best.role})`);
+    const queries = [
+      `"${ownerName}" site:opencorporates.com`,
+      `"${ownerName}" ${stateName} secretary of state`,
+      `"${ownerName}" site:bizapedia.com`,
+    ];
+    for (const q of queries) {
+      const res = await fcSearch(q, fcKey, 3, true, budget);
+      for (const r of res) {
+        const md = `${r.url ?? ""}\n${r.title ?? ""}\n${r.markdown ?? r.description ?? ""}`;
+        evidence.push(md);
+        if (r.url && /opencorporates\.com/.test(r.url) && !d.entity_registry_url) {
+          d.entity_registry_url = r.url;
+          d.sources.push("opencorporates.com");
         }
-        // Related entities (other LLCs surfaced on the page)
-        const rel = Array.from(ocMd.matchAll(/([A-Z][A-Za-z0-9& ]{2,}?\s+(?:LLC|INC|CORP|LP|LLP|HOLDINGS|PARTNERS))/g))
+        // Officer regex
+        const m = md.match(/(?:Manager|Managing Member|President|CEO|Officer|Member|Director|Registered Agent)[\s:-]+([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)/);
+        if (m && looksLikePersonName(m[1])) {
+          const role = m[0].split(/[\s:-]+/)[0];
+          setField(d, "name", m[1], 55, "sos");
+          setField(d, "role", role, 55, "sos");
+        }
+        // Related entities (other LLCs near this name)
+        const rel = Array.from(md.matchAll(/([A-Z][A-Za-z0-9& ]{2,}?\s+(?:LLC|INC|CORP|LP|LLP|HOLDINGS|PARTNERS))/g))
           .map((mm) => mm[1])
           .filter((n) => n.toUpperCase() !== (ownerName ?? "").toUpperCase())
           .slice(0, 5);
         for (const r2 of rel) {
-          if (!d.related_entities.find((e) => e.name === r2)) d.related_entities.push({ name: r2, url: ocHit.url });
+          if (!d.related_entities.find((e) => e.name === r2)) d.related_entities.push({ name: r2, url: r.url });
         }
       }
-    }
-
-    // --- 1B: State Secretary of State scrape (only for priority states) ---
-    if (!d.name && state) {
-      const stateSrc = getStateSource(state);
-      if (stateSrc) {
-        const sosSearchQuery = `"${ownerName}" site:${new URL(stateSrc.sosBusinessSearchUrl).hostname}`;
-        const sosResults = await fcSearch(sosSearchQuery, fcKey, 4, false, budget);
-        const sosHit = sosResults[0];
-        if (sosHit?.url) {
-          const sosMd = await fcScrape(sosHit.url, fcKey, budget);
-          if (sosMd) {
-            evidence.push(`SOS ${state} ${sosHit.url}\n${sosMd.slice(0, 6000)}`);
-            d.sources.push(`sos:${state}`);
-            const officers = parseOfficersFromMarkdown(sosMd);
-            const best = pickBestOfficer(officers);
-            if (best && !best.isAgent) {
-              setField(d, "name", best.name, 70, `sos:${state}`);
-              setField(d, "role", best.role, 70, `sos:${state}`);
-              unmaskSource = unmaskSource ?? `sos:${state}`;
-            } else if (best && best.isAgent && !d.notes.find((n) => n.includes("registered agent"))) {
-              d.notes.push(`${stateSrc.sosName} only exposed registered agent: ${best.name} (${best.role})`);
-            }
-            if (!d.entity_registry_url) d.entity_registry_url = sosHit.url;
-          }
-        }
-      }
+      if (d.name) break;
     }
   } else if (isKnownOwnerName(ownerName)) {
     setField(d, "name", ownerName, 50, "deed");
     setField(d, "role", "Owner", 50, "deed");
-    unmaskSource = "deed";
   }
 
   const targetName = isKnownOwnerName(d.name) ? d.name : (isKnownOwnerName(ownerName) ? ownerName : null);
@@ -687,47 +550,6 @@ Deno.serve(async (req) => {
       }
       if (bestPhone) setField(d, "phone", bestPhone.p, bestPhone.s, "source_record");
       d.sources.push("source_record");
-    }
-  }
-
-  // ============ PASS 3.5 — Apollo people enrichment ============
-  // We hit Apollo only when we have a candidate person name (post-unmask) OR a
-  // known company domain. Apollo is by far the best source for B2B email; we
-  // also accept personal_emails when revealed. Capped by BUDGET.apollo per lead.
-  if (apolloKey && (!d.email || !d.phone)) {
-    const apolloName = targetName && looksLikePersonName(targetName) ? targetName : null;
-    const parts = splitName(apolloName);
-    const first = parts?.first ?? null;
-    const last = parts?.last ?? null;
-    const orgName = entity && ownerName ? ownerName : null;
-    if (apolloName || domain || orgName) {
-      d.passes.apollo = true;
-      const person = await apolloMatch(apolloKey, budget, {
-        name: apolloName,
-        first_name: first,
-        last_name: last,
-        domain: domain ?? null,
-        organization_name: orgName,
-      });
-      if (person && typeof person === "object") {
-        d.sources.push("apollo");
-        const workEmail: string | null = person.email && !/email_not_unlocked/i.test(person.email) ? person.email : null;
-        const personalEmails: string[] = Array.isArray(person.personal_emails) ? person.personal_emails.filter((e: any) => typeof e === "string" && isUnlockedEmail(e)) : [];
-        const bestEmail = workEmail ?? personalEmails[0] ?? null;
-        if (bestEmail) setField(d, "email", bestEmail, 80, "apollo");
-        const phones: any[] = Array.isArray(person.phone_numbers) ? person.phone_numbers : [];
-        const bestPhone = phones.map((p) => p?.sanitized_number ?? p?.raw_number).find((p) => p && String(p).replace(/\D/g, "").length >= 10);
-        if (bestPhone) setField(d, "phone", String(bestPhone), 70, "apollo");
-        if (person.linkedin_url && /linkedin\.com\/in\//i.test(person.linkedin_url)) setField(d, "linkedin", person.linkedin_url, 75, "apollo");
-        if (person.name && looksLikePersonName(person.name) && !d.name) setField(d, "name", person.name, 75, "apollo");
-        if (person.title) setField(d, "role", person.title, 70, "apollo");
-        const orgSite = person.organization?.website_url ?? person.organization?.primary_domain ?? null;
-        if (orgSite && !d.company_website) {
-          const h = pickHostFromUrl(String(orgSite).startsWith("http") ? orgSite : `https://${orgSite}`);
-          if (h) setField(d, "company_website", normalizeWebsite(h), 70, "apollo");
-        }
-        evidence.push(`APOLLO MATCH\n${JSON.stringify({ name: person.name, title: person.title, email: bestEmail, phone: bestPhone, linkedin: person.linkedin_url, org: person.organization?.name }).slice(0, 1200)}`);
-      }
     }
   }
 
@@ -854,10 +676,6 @@ Deno.serve(async (req) => {
     contact_completeness: Math.max(lead.contact_completeness ?? 0, completeness),
     enrichment_payload: { ...(lead.enrichment_payload ?? {}), discovery_v2: { ...d, budget_used: budget } },
     data_sources: Array.from(new Set([...(lead.data_sources ?? []), ...d.sources])),
-    unmask_status: entity
-      ? (d.name && unmaskSource && unmaskSource !== "deed" ? "unmasked" : (d.entity_registry_url ? "sos_only" : "failed"))
-      : "unmasked",
-    unmask_source: unmaskSource ?? lead.unmask_source ?? null,
   };
 
   // If draft email exists with no recipient, update it

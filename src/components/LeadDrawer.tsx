@@ -213,12 +213,8 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
             <TouchpointMessages lead={lead} />
 
 
-            {/* DEED PROVENANCE — recorder source + LLC unmask trail */}
-            <DeedProvenance lead={lead} />
-
             {/* PROPERTY SNAPSHOT */}
             <PropertySnapshot lead={lead} />
-
 
             {/* 1031 FIT SCORE */}
             <FitScoreSection lead={lead} />
@@ -431,87 +427,6 @@ const ContactRow = ({ icon, value, href, external }: { icon: React.ReactNode; va
     {external && <ExternalLink className="h-3 w-3 ml-auto text-muted-foreground" />}
   </a>
 );
-
-const DeedProvenance = ({ lead }: { lead: any }) => {
-  const hasDeed = lead.document_type || lead.recording_number || lead.deed_source_url || lead.prior_owner_name;
-  const hasUnmask = lead.unmask_status || lead.unmask_source || lead.entity_registry_url;
-  if (!hasDeed && !hasUnmask) return null;
-
-  const sourceLabel = (s: string | null | undefined) => {
-    if (!s) return null;
-    if (s === "opencorporates") return "OpenCorporates";
-    if (s.startsWith("sos:")) return `${s.slice(4).toUpperCase()} Secretary of State`;
-    if (s === "deed") return "Recorded deed";
-    return s;
-  };
-  const statusTone = (s: string | null | undefined) => {
-    if (s === "unmasked") return "text-emerald-600 dark:text-emerald-400";
-    if (s === "sos_only") return "text-amber-600 dark:text-amber-400";
-    if (s === "failed") return "text-destructive";
-    if (s === "pending") return "text-muted-foreground";
-    return "text-muted-foreground";
-  };
-
-  return (
-    <Section title="Deed provenance">
-      <div className="space-y-3">
-        {hasDeed && (
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Document type" value={lead.document_type} />
-            <Field label="Recording #" value={lead.recording_number} />
-            <Field label="Recorded" value={lead.deed_date ? fmtDate(lead.deed_date) : null} />
-            <Field
-              label="Recorder source"
-              value={
-                lead.deed_source_url ? (
-                  <a href={lead.deed_source_url} target="_blank" rel="noreferrer" className="text-primary hover:underline inline-flex items-center gap-1">
-                    Open record <ExternalLink className="h-3 w-3" />
-                  </a>
-                ) : null
-              }
-            />
-            <Field
-              label="Grantor → Grantee"
-              value={
-                lead.prior_owner_name && lead.owner_name ? (
-                  <span className="font-mono text-xs">
-                    {lead.prior_owner_name} <ArrowRight className="inline h-3 w-3 mx-1 text-muted-foreground" /> {lead.owner_name}
-                  </span>
-                ) : null
-              }
-            />
-          </div>
-        )}
-        {hasUnmask && (
-          <div className="pt-2 border-t border-border space-y-2">
-            <div className="flex items-center gap-2 text-xs font-mono">
-              <span className="text-muted-foreground">LLC unmask:</span>
-              <span className={statusTone(lead.unmask_status)}>
-                {lead.unmask_status ?? "—"}
-              </span>
-              {lead.unmask_source && (
-                <span className="text-muted-foreground">via {sourceLabel(lead.unmask_source)}</span>
-              )}
-              {lead.entity_registry_url && (
-                <a href={lead.entity_registry_url} target="_blank" rel="noreferrer" className="text-primary hover:underline inline-flex items-center gap-1 ml-auto">
-                  Registry <ExternalLink className="h-3 w-3" />
-                </a>
-              )}
-            </div>
-            {Array.isArray(lead.related_entities) && lead.related_entities.length > 0 && (
-              <div className="text-xs">
-                <span className="text-muted-foreground font-mono">Related entities: </span>
-                <span className="font-mono">
-                  {lead.related_entities.slice(0, 4).map((e: any) => e.name).join(", ")}
-                </span>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </Section>
-  );
-};
 
 const PropertySnapshot = ({ lead }: { lead: any }) => {
   const stateTaxRate = typeof lead.state_tax_rate === "number" ? lead.state_tax_rate : null;

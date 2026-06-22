@@ -145,11 +145,9 @@ Deno.serve(async (req) => {
   });
 
   if (hasResolvedAddress) {
-    // Kick assessor enrichment in parallel (idempotent inside the worker).
-    await supabase.from("pipeline_jobs").insert([
-      { kind: "enrich_assessor", lead_id: leadId, priority: 95 },
-      { kind: "qualify_lead",    lead_id: leadId, priority: 90 },
-    ]);
+    await supabase.from("pipeline_jobs").insert({
+      kind: "qualify_lead", lead_id: leadId, priority: 90,
+    });
   }
 
   await supabase.from("pipeline_jobs").update({
