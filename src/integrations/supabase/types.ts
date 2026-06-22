@@ -672,6 +672,30 @@ export type Database = {
         }
         Relationships: []
       }
+      paused_cron_jobs: {
+        Row: {
+          command: string
+          id: string
+          jobname: string
+          paused_at: string
+          schedule: string
+        }
+        Insert: {
+          command: string
+          id?: string
+          jobname: string
+          paused_at?: string
+          schedule: string
+        }
+        Update: {
+          command?: string
+          id?: string
+          jobname?: string
+          paused_at?: string
+          schedule?: string
+        }
+        Relationships: []
+      }
       pipeline_jobs: {
         Row: {
           attempts: number
@@ -827,6 +851,33 @@ export type Database = {
           state?: string
           state_name?: string
           surcharge?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      system_settings: {
+        Row: {
+          created_at: string
+          id: boolean
+          paused: boolean
+          paused_at: string | null
+          paused_by: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: boolean
+          paused?: boolean
+          paused_at?: string | null
+          paused_by?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: boolean
+          paused?: boolean
+          paused_at?: string | null
+          paused_by?: string | null
           updated_at?: string
         }
         Relationships: []
