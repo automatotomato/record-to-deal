@@ -561,7 +561,7 @@ Deno.serve(async (req) => {
   // broker noise. Mark needs_review and exit early.
   const unmaskFailed = entity && (!d.principals.length || !looksLikePersonName(d.name));
   if (unmaskFailed) {
-    d.notes.push(`Entity unmask failed for ${ownerName ?? "owner"} — no human principal found in OpenCorporates or SoS. Skipping web passes.`);
+    d.notes.push(`Entity unmask failed for ${ownerName ?? "owner"} — no human principal found via SoS / bizapedia. Skipping web passes.`);
     const updates: Record<string, unknown> = {
       decision_maker_name: null,
       decision_maker_role: null,
