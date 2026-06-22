@@ -1,74 +1,60 @@
+## Goal
 
-# Improve 1031 lead-flow without adding new connections
+Stop pulling "seller" info from Zillow / LoopNet / MLS / broker pages. Treat the **county recorder's recorded deed** as the source of truth, take the **grantor** as the real seller, and unmask LLC grantors to a human via free public sources (OpenCorporates + state Secretary of State filings).
 
-Goal: turn the existing Firecrawl + Apollo + OpenAI + Smarty stack into a sharper 1031 prospecting machine for You Decide Realty (NV-based, nationwide broker). Today the funnel produces lots of noise — 785 low-confidence leads, 566 disqualified, and only 6 leads marked ready-for-outreach. The fixes below are all software/config changes against existing tables and edge functions.
+## Why the current pipeline misses contacts
 
-## Where the leverage is
+- `scan-sources` queries the open web with broad keywords. Top results are broker/listing pages (LoopNet, Crexi, brokerages), so the "owner" we extract is often the listing agent, not the grantor on the deed.
+- `seller-discovery` has an OpenCorporates / SoS pass, but it runs *after* a Firecrawl / LinkedIn pass that locks in whatever name `scan-sources` saved first. If that name is a broker, every downstream pass enriches the wrong person.
+- Counties have a generic `source_url` field, but it isn't consistently a recorder/clerk deed index URL and `scan-sources` doesn't prioritize that domain.
 
-Your data right now:
-- **96 leads sold in the last 45 days** (the 1031 identification window) — these are the most valuable prospects in the system, but the UI does not surface them as such.
-- **155 pre-sale prospects** (listings) sitting idle — these are the *best* 1031 prospects because you can engage *before* the clock starts.
-- Geo: NY 63, CA 54, NJ 27, OR 17, MA 9, MN 7, HI 5 — high-state-tax sellers are exactly who benefit most from a 1031, and exactly who would pair well with NV replacement property.
-- Property types skew Commercial (190) and Multifamily (65) — already on-thesis. SFR is correctly minimal.
+## Plan
 
-## What to build
+### 1. Make the county recorder the primary source
 
-### 1. 1031 deadline tracking (frontend + small schema use)
-Add two computed concepts everywhere a lead is shown:
-- **Identification day** = `current_date - sale_date` out of 45.
-- **Exchange day** = same out of 180.
-Show a colored countdown chip (green ≤15, amber 16–35, red 36–45, grey 46+). Sort the "Ready" tab by *days remaining* by default, not by score. Pre-sale prospects get a "pre-clock" chip instead.
+- Add a `recorder_index_url` column to `counties` (separate from `source_url`).
+- Rewrite `scan-sources` query strategy:
+  - Pass 1 — **recorder-first**: query restricted to `site:<recorder_index_url host>` plus a generic `"<county> county recorder" OR "official records" OR "recorded deed" grantor grantee` query.
+  - Pass 2 — **government aggregators**: `site:*.gov` and known recorder aggregator domains for that state.
+  - Hard-exclude broker/MLS hosts (LoopNet, Crexi, Zillow, Realtor, Redfin, Trulia, Auction.com, Movoto, Homes.com, brokerage domains) from every query, in every state — not just NV.
+- Update the AI extraction prompt to require `grantor_name` (seller) and `grantee_name` (buyer); save `grantor_name` into `leads.owner_name`.
+- Reject any record whose source URL is on the broker/MLS deny-list, even if the model fills fields.
 
-### 2. Pre-sale prospect track (highest ROI, currently unused)
-155 listings are stuck in `pre_sale_prospect` and never reach outreach. Add:
-- A dedicated "Pre-sale (no clock yet)" tab in `OutreachDashboard`.
-- Have `outreach-cadence-tick` assign a new sequence key `pre_sale_advisor` to these leads so they enter cadence with a softer "planning your replacement strategy" angle.
-- A new row in `outreach_sequences` + `outreach_steps` (no schema changes, just data).
+### 2. Disable counties without a free recorder source
 
-### 3. NV-replacement-property angle (firm differentiator)
-You Decide Realty is NV-based but most sellers are in high-tax states. Add a `replacement_market_fit` field to the AI brief (computed in `lead-brief`, not a new column) that highlights:
-- High state tax state → potential NV/TX/FL replacement.
-- Property type → comparable NV inventory class.
-This becomes a one-line hook in the brief and the first email.
+- Counties whose recorder requires login or charges per record (several CA counties, etc.) get `enabled = false` and a `notes` value explaining "awaiting paid bulk source". They stay off the cron until we wire a paid provider.
+- Counties with a free public deed search (Miami-Dade, Maricopa, Travis, etc.) get a `recorder_index_url` seeded and stay enabled.
+- Surface the locked-out counties in the Sources page so it's obvious which ones are parked.
 
-### 4. Tighter qualification + scout queries
-- `scan-sources` query templates: add explicit "investment property", "NNN", "DST eligible", "apartment building ≥4 units", and exclude "owner occupied", "primary residence", "townhome", "condo unit".
-- `qualify-lead`: auto-disqualify owner_type=Individual + property_type=SFR + sale_price<$750k (these will never 1031). That alone removes a large chunk of the 785 low-confidence leads going forward.
-- Boost score for: entity owner + commercial/multifamily + state in high-tax set + sale in last 30 days.
+### 3. Unmask the LLC first, before any LinkedIn / web pass
 
-### 5. Owner deduplication / portfolio plays
-One LLC often appears across several sales. Add a server-side view / RPC `lead_owner_rollup` (read-only, no schema change) that groups by normalized `owner_name`. Surface a "Portfolio owner — N properties, $X total" badge on the lead row. These are whales worth a single high-touch reach.
+In `seller-discovery`:
 
-### 6. Heal the 127 stuck leads
-26 `enriched` + 101 `needs_review` are stuck. `pipeline-sweeper` already re-enqueues some of these — extend it to:
-- Re-run `seller-discovery` on `needs_review` older than 48h with no recent attempt.
-- Promote `enriched` + `has_outreach_contact=true` straight to `ready` and let cadence pick them up.
+- Reorder passes so **Pass 1 (Entity Unmask via OpenCorporates + state SoS)** must run and complete for any `owner_type` in `LLC | Trust | Corporation | Estate` before later passes.
+- OpenCorporates: hit the public JSON API (`https://api.opencorporates.com/v0.4/companies/search`) filtered by jurisdiction = the lead's state. No key needed at low volume.
+- State SoS: Firecrawl-scrape the state's business entity search; tighten query to `"<entity name>" site:<state SoS host>` and parse registered agent + officers/members.
+- Persist findings to the lead: `entity_registry_url`, registered agent, officers/members list in a new `leads.entity_principals jsonb` column.
+- Promote the best human principal (manager → member → officer → registered agent) to `decision_maker_name` with role.
+- Only then does Pass 2 (LinkedIn / personal contact hunt) run, against the unmasked human, not the LLC string.
 
-### 7. Outreach dashboard polish for client review
-- Top-of-page "1031 Pipeline Health" strip: # sellers in 45-day window, # in 46–180 window, # pre-sale prospects, # portfolio owners, average days-to-deadline.
-- Default sort: deadline ascending within "Ready".
-- Per-state filter pre-populated with the 7 highest-tax states.
-- Export CSV ordered by deadline (for the broker to print/work offline).
+### 4. Guardrails so brokers can't sneak back in
 
-### 8. Drop dead weight from the UI
-Hide `low_confidence` and `EXPIRED` from the main view by default (still reachable via filter). Today they bury the 6 ready leads visually.
+- In `enrich-contact` and `seller-discovery`, add a broker/agent deny-list check on any candidate name/email/phone (domains like `@compass.com`, `@kw.com`, `@cbre.com`, etc., and titles like "Realtor", "Listing Agent", "Broker Associate") — reject and try the next candidate.
+- In the lead drawer, surface the unmask trail: "Grantor on deed: ACME HOLDINGS LLC → SoS principal: Jane Doe (Manager) → contact found via …".
 
-## Technical notes
+### 5. Backfill
 
-- All work is in existing files: `OutreachDashboard.tsx`, `lead-brief/index.ts`, `qualify-lead/index.ts`, `scan-sources/index.ts`, `outreach-cadence-tick/index.ts`, `pipeline-sweeper/index.ts`, plus a small data-only migration to seed the `pre_sale_advisor` sequence + steps and a read-only `lead_owner_rollup` view.
-- No new API keys, no new vendors, no new tables beyond the view.
-- Lovable AI (already wired) handles the new brief field and any A/B subject-line generation.
+- Re-queue `seller_discovery` for existing leads whose `owner_type` is LLC/Trust/Corp and whose `decision_maker_name` is empty or matches the broker deny-list, so we recover leads already in the DB.
 
-## Out of scope (call out, do not build)
-- New data vendors (ATTOM, Reonomy, PropStream, ZoomInfo).
-- Email-sending infra changes — current Gmail draft flow stays.
-- Auth/role changes — RLS is already correct after last week's work.
+## Technical details
 
-## Suggested build order
-1. Deadline countdown UI + default sort (immediate visible win for client demo).
-2. Hide low_confidence/expired by default + pipeline health strip.
-3. Pre-sale advisor sequence + tab.
-4. Qualification rules tightening + scout query refinement.
-5. Owner rollup view + portfolio badge.
-6. Sweeper extensions for stuck leads.
-7. Replacement-market-fit brief field.
+Files touched:
+
+- `supabase/migrations/<new>.sql` — add `counties.recorder_index_url text`, add `leads.entity_principals jsonb`, set `enabled = false` + note on counties with no free recorder source, seed `recorder_index_url` on counties that do.
+- `supabase/functions/scan-sources/index.ts` — recorder-first query builder, universal broker deny-list, grantor/grantee extraction, `owner_name = grantor`.
+- `supabase/functions/seller-discovery/index.ts` — mandatory OpenCorporates + SoS Pass 1 for entity owners, OpenCorporates JSON API call, persist principals, deny-list filter on later passes.
+- `supabase/functions/enrich-contact/index.ts` — apply the broker deny-list before seeding LinkedIn.
+- `src/components/LeadDrawer.tsx` — show the unmask trail.
+- `src/pages/Admin.tsx` — display each county's `recorder_index_url` and parked-with-reason status; let admins paste a URL to re-enable.
+
+Out of scope (will ask before doing): paid data providers (DataTree, PropertyRadar, TitlePro), building per-county recorder scrapers beyond Travis, and any change to outreach / Touchpoints UI.
