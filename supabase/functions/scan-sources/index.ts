@@ -1,7 +1,11 @@
-// scan-sources worker: pulls raw candidate sales for ONE county via Firecrawl
-// search + AI extraction, dedupes, and enqueues a verify_property job per
-// candidate. Strictly time-budgeted (≤25 search results, ≤45s) so it never
-// times out. Job kind: scan_sources.
+// scan-sources worker: pulls raw candidate sales for ONE county.
+//
+// Strategy: recorder-deed-first. We bias every query toward the county's
+// public recorder/clerk deed index and government domains; we explicitly
+// deny-list broker/MLS/listing portals so the "owner" we extract is the
+// GRANTOR on the recorded deed (the real seller), never a listing agent.
+//
+// Job kind: scan_sources. Strictly time-budgeted (≤45s).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders = {
@@ -13,12 +17,13 @@ const corsHeaders = {
 const FIRECRAWL_V2 = "https://api.firecrawl.dev/v2";
 const AI_URL = "https://api.openai.com/v1/chat/completions";
 const AI_MODEL = "gpt-4o-mini";
-const MAX_QUERIES_PER_RUN = 2;
-const MAX_RESULTS_PER_QUERY = 4;
+const MAX_RESULTS_PER_QUERY = 5;
 const HARD_BUDGET_MS = 45_000;
 
 type Candidate = {
-  owner_name?: string;
+  grantor_name?: string;     // seller — what we actually want
+  grantee_name?: string;     // buyer
+  owner_name?: string;       // alias, kept for legacy AI output
   property_address?: string;
   property_city?: string;
   property_zip?: string;
@@ -31,18 +36,69 @@ type Candidate = {
   trigger_event?: string;
 };
 
-const NV_EXCLUSIONS =
-  "-site:zillow.com -site:trulia.com -site:realtor.com -site:redfin.com -site:auction.com -site:movoto.com -site:homes.com";
+// Hosts we never want as a source — these are listing/broker/MLS portals
+// where the "seller" is almost always a listing agent, not the deed grantor.
+const BROKER_DENY_HOSTS = [
+  "zillow.com", "trulia.com", "realtor.com", "redfin.com", "auction.com",
+  "movoto.com", "homes.com", "loopnet.com", "crexi.com", "ten-x.com",
+  "compass.com", "kw.com", "cbre.com", "jll.com", "marcusmillichap.com",
+  "colliers.com", "cushmanwakefield.com", "berkshirehathawayhs.com",
+  "century21.com", "remax.com", "coldwellbanker.com", "sothebysrealty.com",
+  "douglaselliman.com", "corcoran.com", "exprealty.com", "har.com",
+  "showmls.com", "har.com", "stellarmls.com", "mlslistings.com",
+];
+const BROKER_DENY_RE = new RegExp(
+  "\\b(" + BROKER_DENY_HOSTS.map((h) => h.replace(/\./g, "\\.")).join("|") + ")\\b",
+  "i",
+);
+const NEG_SITE_FILTER = BROKER_DENY_HOSTS.map((h) => `-site:${h}`).join(" ");
 
-function defaultQueries(state: string, county: string) {
-  return [
-    `${county} County ${state} ("investment property" OR "commercial real estate" OR "apartment building" OR multifamily OR NNN OR industrial) sold "$" (LLC OR Trust OR Inc OR Corp) -"single family" -"owner occupied" -"primary residence" ${NV_EXCLUSIONS}`,
-    `site:loopnet.com OR site:crexi.com ${county} ${state} sold`,
-  ];
+function hostOf(url?: string | null): string | null {
+  if (!url) return null;
+  try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return null; }
+}
+
+function isBrokerUrl(url?: string | null): boolean {
+  const h = hostOf(url);
+  if (!h) return false;
+  return BROKER_DENY_RE.test(h);
+}
+
+function buildQueries(state: string, county: string, recorderUrl: string | null) {
+  const countyClean = county.replace(/\s+county$/i, "").trim();
+  const recorderHost = hostOf(recorderUrl);
+  const queries: string[] = [];
+
+  // Pass 1: recorder-first. If we have a recorder URL, restrict to it.
+  if (recorderHost) {
+    queries.push(
+      `site:${recorderHost} (deed OR "warranty deed" OR "grant deed" OR "special warranty") grantor grantee`,
+    );
+  }
+
+  // Pass 2: government / official records search across .gov / .us domains.
+  queries.push(
+    `("${countyClean} County" ${state}) ("official records" OR "recorded deed" OR "deed of trust" OR "grantor" OR "grantee") (LLC OR Trust OR Inc OR Corp) site:.gov OR site:.us ${NEG_SITE_FILTER}`,
+  );
+
+  // Pass 3: open web fallback — investment/commercial transfers, broker hosts excluded.
+  queries.push(
+    `"${countyClean} County" ${state} ("recorded" OR "deed") (multifamily OR commercial OR NNN OR industrial OR "apartment building") (LLC OR Trust OR Inc OR Corp) ${NEG_SITE_FILTER}`,
+  );
+
+  return queries;
 }
 
 function defaultHint(state: string, county: string) {
-  return `${county} County, ${state} INVESTMENT property transfers ONLY: entity-owned multifamily ≥4-units, commercial/retail/NNN/office/industrial, mixed-use, land ≥$250k. Strictly EXCLUDE single-family homes, condos, townhomes, owner-occupied residences, primary residences, and any sale under $500k. Prefer LLC/Trust/Corp owners over individuals. Extract owner name, address, sale price, sale/deed date.`;
+  return `${county} County, ${state} RECORDED DEED data extraction.
+
+PRIMARY GOAL: extract the GRANTOR (the seller on the recorded deed). The grantor is the actual property seller — the person or entity we want to contact. The grantee is the buyer.
+
+Only extract records that look like actual recorded deeds (warranty deed, grant deed, special warranty deed, deed of trust, quitclaim, trustee's deed). Skip anything that is a listing, MLS posting, broker page, or auction promo — those are not deeds.
+
+INVESTMENT property only: entity-owned multifamily ≥4-units, commercial/retail/NNN/office/industrial, mixed-use, land ≥$250k. EXCLUDE single-family homes, condos, townhomes, owner-occupied residences, primary residences, and any sale under $500k. Prefer LLC/Trust/Corp grantors over individuals.
+
+For each deed, extract: grantor_name (seller), grantee_name (buyer), property address, sale price, sale/deed date, parcel/APN if present.`;
 }
 
 async function firecrawlSearch(
@@ -63,11 +119,14 @@ async function firecrawlSearch(
   if (!r.ok) throw new Error(`Firecrawl ${r.status}: ${(await r.text()).slice(0, 200)}`);
   const data = await r.json();
   const results: any[] = (data?.data?.web as any[]) ?? (Array.isArray(data?.data) ? data.data : []) ?? [];
-  return results.map((x) => ({
-    url: String(x.url ?? ""),
-    title: String(x.title ?? ""),
-    markdown: String(x.markdown ?? x.description ?? ""),
-  }));
+  return results
+    .map((x) => ({
+      url: String(x.url ?? ""),
+      title: String(x.title ?? ""),
+      markdown: String(x.markdown ?? x.description ?? ""),
+    }))
+    // Hard-drop broker/MLS hosts before the AI sees them.
+    .filter((r) => !isBrokerUrl(r.url));
 }
 
 async function aiExtractLeads(
@@ -81,8 +140,8 @@ async function aiExtractLeads(
     body: JSON.stringify({
       model: AI_MODEL,
       messages: [
-        { role: "system", content: "You extract structured property-transfer leads from web content. Return ONLY valid JSON. Skip records without an address or owner name." },
-        { role: "user", content: `${hint}\n\nReturn JSON: { "leads": [ { owner_name, property_address, property_city, property_zip, parcel_number, sale_price (number), sale_date (YYYY-MM-DD), deed_date (YYYY-MM-DD), property_type (one of SFR|Multifamily|Commercial|Land|Industrial|Mixed|Unknown), source_record_url, trigger_event (one of recent_sale|listed_for_sale|long_hold_owner|trust_transfer|off_market_signal) } ] }\n\nWeb content:\n\n${corpus.slice(0, 14000)}` },
+        { role: "system", content: "You extract recorded-deed (grantor → grantee) property-transfer records from web content. Return ONLY valid JSON. Skip anything that is a real-estate listing, broker page, or MLS posting — only true recorded deeds. Skip records without an address AND a grantor name." },
+        { role: "user", content: `${hint}\n\nReturn JSON: { "leads": [ { grantor_name (seller), grantee_name (buyer), owner_name (= grantor_name), property_address, property_city, property_zip, parcel_number, sale_price (number), sale_date (YYYY-MM-DD), deed_date (YYYY-MM-DD), property_type (one of SFR|Multifamily|Commercial|Land|Industrial|Mixed|Unknown), source_record_url, trigger_event (one of recent_sale|listed_for_sale|long_hold_owner|trust_transfer|off_market_signal) } ] }\n\nWeb content:\n\n${corpus.slice(0, 14000)}` },
       ],
       response_format: { type: "json_object" },
     }),
@@ -185,7 +244,7 @@ Deno.serve(async (req) => {
   const start = Date.now();
   const errors: string[] = [];
   const allCandidates: Candidate[] = [];
-  const queries = defaultQueries(county.state, county.county).slice(0, MAX_QUERIES_PER_RUN);
+  const queries = buildQueries(county.state, county.county, county.recorder_index_url);
   const hint = defaultHint(county.state, county.county);
   const tbs = county.last_run_at ? "qdr:w" : "qdr:m";
 
@@ -211,14 +270,20 @@ Deno.serve(async (req) => {
   const seen = new Set<string>();
   const fresh: Candidate[] = [];
   for (const c of allCandidates) {
-    if (!c.property_address && !c.parcel_number) continue;
+    // Reject anything whose source URL is on the broker deny-list.
+    if (isBrokerUrl(c.source_record_url)) continue;
+    // Must have an address (or parcel) AND a grantor/owner name to be useful.
+    const sellerName = c.grantor_name ?? c.owner_name;
+    if ((!c.property_address && !c.parcel_number) || !sellerName) continue;
     const k = `${norm(c.parcel_number)}|${norm(c.property_address)}`;
     if (seen.has(k)) continue;
     seen.add(k);
+    // Normalize: always store grantor as owner_name (the seller).
+    c.owner_name = sellerName;
+    c.grantor_name = sellerName;
     fresh.push(c);
   }
 
-  // Insert raw_candidate leads. verify-property handles dedup vs existing.
   let inserted = 0;
   let enqueued = 0;
   for (const c of fresh) {
@@ -245,7 +310,7 @@ Deno.serve(async (req) => {
         deed_date: cleanDate(c.deed_date) ?? cleanDate(c.sale_date),
         trigger_event: triggerEvent,
         source_record_url: c.source_record_url ?? null,
-        data_sources: ["firecrawl"],
+        data_sources: ["firecrawl:recorder"],
         scout_confidence: 50,
         pipeline_stage: stage,
       })
@@ -261,11 +326,16 @@ Deno.serve(async (req) => {
     await supabase.from("lead_activities").insert({
       lead_id: leadRow.id,
       kind: "scout_found",
-      summary: `Discovered via Firecrawl in ${county.county}, ${county.state}`,
-      payload: { source_url: c.source_record_url ?? null, job_id: jobId },
+      summary: `Discovered via recorder-deed search in ${county.county}, ${county.state}` +
+        (c.grantee_name ? ` (grantee: ${c.grantee_name})` : ""),
+      payload: {
+        source_url: c.source_record_url ?? null,
+        job_id: jobId,
+        grantor_name: c.grantor_name ?? null,
+        grantee_name: c.grantee_name ?? null,
+      },
     });
 
-    // Only enqueue verification for actual sales. Pre-sale prospects stop here.
     if (stage === "raw_candidate") {
       await supabase.from("pipeline_jobs").insert({
         kind: "verify_property",
@@ -281,7 +351,7 @@ Deno.serve(async (req) => {
   await supabase.from("pipeline_jobs").update({
     status: "done",
     finished_at: new Date().toISOString(),
-    result: { found: fresh.length, inserted, enqueued, errors: errors.slice(0, 3) },
+    result: { found: fresh.length, inserted, enqueued, recorder_url: county.recorder_index_url, errors: errors.slice(0, 3) },
   }).eq("id", jobId);
 
   return jsonOk({ ok: true, county: county.county, found: fresh.length, inserted, enqueued, errors });
