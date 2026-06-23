@@ -171,6 +171,8 @@ Deno.serve(async (req) => {
     result: { handed_off: "seller_discovery", linkedin_seeded: !!dmLinkedIn },
   }).eq("id", body.job_id);
 
+  supabase.functions.invoke("job-dispatcher", { body: { trigger: "enrich_contact_followups" } }).catch(() => {});
+
   return jsonOk({ ok: true, linkedin_seeded: !!dmLinkedIn });
 });
 
