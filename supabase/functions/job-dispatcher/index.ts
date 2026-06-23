@@ -14,7 +14,7 @@ const corsHeaders = {
 // by the DB-level fc_reserve gate.
 const KINDS: { kind: string; fn: string; cap: number }[] = [
   { kind: "scan_sources",     fn: "scan-sources",     cap: 10 },
-  { kind: "scan_external",    fn: "scan-external-sources", cap: 32 },
+  { kind: "scan_external",    fn: "scan-external-sources", cap: 5 },
   { kind: "verify_property",  fn: "verify-property",  cap: 10 },
   { kind: "qualify_lead",     fn: "qualify-lead",     cap: 20 },
   { kind: "enrich_contact",   fn: "enrich-contact",   cap: 1 },
