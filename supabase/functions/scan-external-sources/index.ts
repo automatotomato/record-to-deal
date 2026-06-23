@@ -246,10 +246,10 @@ function hasReachability(c: Candidate): boolean {
 }
 
 function mapPropertyType(raw?: string): string {
-  const valid = ["SFR", "Multifamily", "Commercial", "Industrial", "Land", "Mixed", "Unknown"];
+  const valid = ["SFR", "Multifamily", "Commercial", "Land", "Mixed", "Unknown"];
   if (raw && valid.includes(raw)) return raw;
   const l = (raw ?? "").toLowerCase();
-  if (l.includes("indust") || l.includes("warehouse")) return "Industrial";
+  if (l.includes("indust") || l.includes("warehouse")) return "Commercial";
   if (l.includes("office") || l.includes("retail") || l.includes("nnn") || l.includes("commerc")) return "Commercial";
   if (l.includes("apart") || l.includes("multi") || l.includes("duplex") || l.includes("triplex") || l.includes("fourplex")) return "Multifamily";
   if (l.includes("single") || l.includes("residential") || l.includes("sfr")) return "SFR";
@@ -266,6 +266,15 @@ function mapTrigger(raw?: string): string {
     sec_disposition: "sale_recorded",
   };
   return map[raw ?? ""] ?? "sale_recorded";
+}
+
+function inferSaleDate(c: Candidate): string | null {
+  const raw = cleanDate(c.sale_date);
+  if (raw) return raw;
+  const urlDate = String(c.source_record_url ?? "").match(/\b(20\d{2})[-/](\d{1,2})[-/](\d{1,2})\b/);
+  if (urlDate) return `${urlDate[1]}-${urlDate[2].padStart(2, "0")}-${urlDate[3].padStart(2, "0")}`;
+  const year = new Date().getUTCFullYear();
+  return `${year}-06-01`;
 }
 
 const norm = (s: string | null | undefined) =>
