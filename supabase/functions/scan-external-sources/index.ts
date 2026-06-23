@@ -268,6 +268,14 @@ function mapTrigger(raw?: string): string {
   return map[raw ?? ""] ?? "sale_recorded";
 }
 
+function cleanDate(v: unknown): string | null {
+  if (!v) return null;
+  const s = String(v).trim();
+  if (!s || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : s;
+}
+
 function inferSaleDate(c: Candidate): string | null {
   const raw = cleanDate(c.sale_date);
   if (raw) return raw;
