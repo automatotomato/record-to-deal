@@ -451,7 +451,7 @@ Deno.serve(async (req) => {
     await supabase.from("lead_activities").insert({
       lead_id: leadRow.id,
       kind: "scout_found",
-      summary: `Discovered via Gemini scan (${source}) in ${state}`,
+      summary: `Discovered via OpenAI scan (${source}) in ${state}`,
       payload: { source, source_url: c.source_record_url, job_id: body.job_id },
     });
 
