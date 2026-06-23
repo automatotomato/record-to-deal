@@ -41,6 +41,7 @@ const Admin = () => {
         kind: "scan_sources",
         county_id: c.id,
         priority: (rankByState.get(c.state) ?? 99) * 10,
+        payload: {},
       }));
       for (const state of Array.from(new Set((counties ?? []).map((c) => c.state)))) {
         for (const [source, offset] of [["commercial", 0], ["residential", 5], ["court", 10], ["sec", 15]] as const) {
