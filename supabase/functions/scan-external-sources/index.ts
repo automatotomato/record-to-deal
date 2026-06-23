@@ -1,6 +1,6 @@
 // scan-external-sources worker: discovers candidate 1031 leads from sources
-// OUTSIDE the county recorder pipeline. Uses Gemini (Lovable AI Gateway) with
-// Google Search grounding to surface fresh listings + filings, then inserts
+// OUTSIDE the county recorder pipeline. Uses Firecrawl search + the user's
+// OpenAI key to surface fresh listings + filings, then inserts
 // candidate leads that flow through the same verify_property → qualify_lead →
 // enrich_contact chain as county-sourced leads.
 //
@@ -155,7 +155,7 @@ Return ONLY:
       "property_zip": "string|null",
       "sale_price": number|null,
       "sale_date": "YYYY-MM-DD"|null,
-      "property_type": "SFR|Multifamily|Commercial|Industrial|Land|Mixed|Unknown",
+      "property_type": "SFR|Multifamily|Commercial|Land|Mixed|Unknown",
       "trigger_event": "recent_sale|probate|tax_lien|divorce|sec_disposition",
       "source_record_url": "string"
     }
