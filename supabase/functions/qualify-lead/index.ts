@@ -356,6 +356,10 @@ Deno.serve(async (req) => {
     result: { tier: r.tier, score: r.score, stage },
   }).eq("id", body.job_id);
 
+  if (stage === "qualified") {
+    supabase.functions.invoke("job-dispatcher", { body: { trigger: "qualify_lead_followups" } }).catch(() => {});
+  }
+
   return jsonOk({ ok: true, tier: r.tier, score: r.score, stage });
 });
 
