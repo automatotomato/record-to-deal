@@ -155,6 +155,10 @@ Deno.serve(async (req) => {
     result: { stage: newStage, smarty_key: smartyKey },
   }).eq("id", body.job_id);
 
+  if (hasResolvedAddress) {
+    supabase.functions.invoke("job-dispatcher", { body: { trigger: "verify_property_followups" } }).catch(() => {});
+  }
+
   return jsonOk({ ok: true, stage: newStage });
 });
 

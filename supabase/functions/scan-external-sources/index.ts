@@ -1,6 +1,6 @@
 // scan-external-sources worker: discovers candidate 1031 leads from sources
-// OUTSIDE the county recorder pipeline. Uses Gemini (Lovable AI Gateway) with
-// Google Search grounding to surface fresh listings + filings, then inserts
+// OUTSIDE the county recorder pipeline. Uses Firecrawl search + the user's
+// OpenAI key to surface fresh listings + filings, then inserts
 // candidate leads that flow through the same verify_property → qualify_lead →
 // enrich_contact chain as county-sourced leads.
 //
@@ -76,6 +76,16 @@ async function fcReserve(caller: string, credits: number): Promise<string | null
   try { const { data } = await FC_ADMIN.rpc("fc_reserve", { p_caller: caller, p_credits: credits }); return (data as string) ?? null; }
   catch { return null; }
 }
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+async function fcReserveWithWait(caller: string, credits: number, waitMs = 20_000): Promise<string | null> {
+  const deadline = Date.now() + waitMs;
+  do {
+    const id = await fcReserve(caller, credits);
+    if (id) return id;
+    await delay(1_250);
+  } while (Date.now() < deadline);
+  return null;
+}
 async function fcRelease(id: string | null, actual: number, status = "done") {
   if (!id) return;
   try { await FC_ADMIN.rpc("fc_release", { p_id: id, p_actual: actual, p_status: status }); } catch (_) {}
@@ -84,9 +94,9 @@ async function fcRelease(id: string | null, actual: number, status = "done") {
 async function firecrawlSearch(query: string, credentials: FirecrawlCredential[], limit = 6): Promise<Array<{ url?: string; title?: string; markdown?: string; description?: string }>> {
   const ctrl = new AbortController();
   const tid = setTimeout(() => ctrl.abort(), 30_000);
-  const cost = limit;
-  const resId = await fcReserve("scan-external:search", cost);
-  if (!resId) { console.warn("fc_throttled scan-external"); clearTimeout(tid); return []; }
+  const cost = limit * 2;
+  const resId = await fcReserveWithWait("scan-external:search", cost);
+  if (!resId) { console.warn("fc_throttled scan-external"); clearTimeout(tid); throw new Error("Firecrawl throttled: reservation unavailable"); }
   try {
     let lastError = "Firecrawl credentials unavailable";
     for (const cred of credentials) {
@@ -95,6 +105,7 @@ async function firecrawlSearch(query: string, credentials: FirecrawlCredential[]
         headers: { Authorization: `Bearer ${cred.key}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           query, limit,
+          scrapeOptions: { onlyMainContent: true, formats: ["markdown"] },
         }),
         signal: ctrl.signal,
       });
@@ -144,7 +155,7 @@ Return ONLY:
       "property_zip": "string|null",
       "sale_price": number|null,
       "sale_date": "YYYY-MM-DD"|null,
-      "property_type": "SFR|Multifamily|Commercial|Industrial|Land|Mixed|Unknown",
+      "property_type": "SFR|Multifamily|Commercial|Land|Mixed|Unknown",
       "trigger_event": "recent_sale|probate|tax_lien|divorce|sec_disposition",
       "source_record_url": "string"
     }
@@ -235,10 +246,10 @@ function hasReachability(c: Candidate): boolean {
 }
 
 function mapPropertyType(raw?: string): string {
-  const valid = ["SFR", "Multifamily", "Commercial", "Industrial", "Land", "Mixed", "Unknown"];
+  const valid = ["SFR", "Multifamily", "Commercial", "Land", "Mixed", "Unknown"];
   if (raw && valid.includes(raw)) return raw;
   const l = (raw ?? "").toLowerCase();
-  if (l.includes("indust") || l.includes("warehouse")) return "Industrial";
+  if (l.includes("indust") || l.includes("warehouse")) return "Commercial";
   if (l.includes("office") || l.includes("retail") || l.includes("nnn") || l.includes("commerc")) return "Commercial";
   if (l.includes("apart") || l.includes("multi") || l.includes("duplex") || l.includes("triplex") || l.includes("fourplex")) return "Multifamily";
   if (l.includes("single") || l.includes("residential") || l.includes("sfr")) return "SFR";
@@ -255,6 +266,23 @@ function mapTrigger(raw?: string): string {
     sec_disposition: "sale_recorded",
   };
   return map[raw ?? ""] ?? "sale_recorded";
+}
+
+function cleanDate(v: unknown): string | null {
+  if (!v) return null;
+  const s = String(v).trim();
+  if (!s || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : s;
+}
+
+function inferSaleDate(c: Candidate): string | null {
+  const raw = cleanDate(c.sale_date);
+  if (raw) return raw;
+  const urlDate = String(c.source_record_url ?? "").match(/\b(20\d{2})[-/](\d{1,2})[-/](\d{1,2})\b/);
+  if (urlDate) return `${urlDate[1]}-${urlDate[2].padStart(2, "0")}-${urlDate[3].padStart(2, "0")}`;
+  const year = new Date().getUTCFullYear();
+  return `${year}-06-01`;
 }
 
 const norm = (s: string | null | undefined) =>
@@ -383,6 +411,7 @@ Deno.serve(async (req) => {
     const ownerType = inferOwnerType(c.owner_name);
     const propertyType = mapPropertyType(c.property_type);
     const triggerEvent = mapTrigger(c.trigger_event);
+    const saleDate = inferSaleDate(c);
     const reachable = hasReachability(c);
     const sourceTag = `external:${source}`;
 
@@ -406,8 +435,8 @@ Deno.serve(async (req) => {
         has_outreach_contact: reachable,
         property_type: propertyType,
         sale_price: c.sale_price ?? null,
-        sale_date: c.sale_date ?? null,
-        deed_date: c.sale_date ?? null,
+        sale_date: saleDate,
+        deed_date: saleDate,
         trigger_event: triggerEvent,
         source_record_url: c.source_record_url,
         data_sources: [sourceTag],
@@ -422,7 +451,7 @@ Deno.serve(async (req) => {
     await supabase.from("lead_activities").insert({
       lead_id: leadRow.id,
       kind: "scout_found",
-      summary: `Discovered via Gemini scan (${source}) in ${state}`,
+      summary: `Discovered via OpenAI scan (${source}) in ${state}`,
       payload: { source, source_url: c.source_record_url, job_id: body.job_id },
     });
 
@@ -438,6 +467,10 @@ Deno.serve(async (req) => {
     status: "done", finished_at: new Date().toISOString(),
     result: { state, source, searched, evidence, candidates: candidates.length, found: fresh.length, inserted, enqueued, errors: errors.slice(0, 3) },
   }).eq("id", body.job_id);
+
+  if (enqueued > 0) {
+    supabase.functions.invoke("job-dispatcher", { body: { trigger: "scan_external_followups" } }).catch(() => {});
+  }
 
   return jsonOk({ ok: true, state, source, searched, evidence, candidates: candidates.length, found: fresh.length, inserted, enqueued, errors });
 });

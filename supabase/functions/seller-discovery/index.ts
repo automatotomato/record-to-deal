@@ -888,6 +888,8 @@ Deno.serve(async (req) => {
     }).eq("id", jobId);
   }
 
+  supabase.functions.invoke("job-dispatcher", { body: { trigger: "seller_discovery_followups" } }).catch(() => {});
+
   return new Response(JSON.stringify({ ok: true, status, discovery: d, budget_used: budget }), {
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });

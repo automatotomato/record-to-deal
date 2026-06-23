@@ -24,27 +24,37 @@ const Admin = () => {
         supabase.from("state_tax_rates").select("state, priority_rank, is_target"),
         supabase
           .from("pipeline_jobs")
-          .select("county_id")
-          .eq("kind", "scan_sources")
+          .select("kind, county_id, payload")
+          .in("kind", ["scan_sources", "scan_external"])
           .in("status", ["queued", "retry", "running"]),
       ]);
       if (cErr) throw cErr;
       const rankByState = new Map<string, number>();
       for (const r of rates ?? []) rankByState.set(r.state, r.priority_rank ?? 99);
-      const activeCountyIds = new Set((activeJobs ?? []).map((j) => j.county_id).filter(Boolean));
+      const activeCountyIds = new Set((activeJobs ?? []).filter((j: any) => j.kind === "scan_sources").map((j: any) => j.county_id).filter(Boolean));
+      const activeExternal = new Set((activeJobs ?? []).filter((j: any) => j.kind === "scan_external").map((j: any) => `${j.payload?.state}:${j.payload?.source}`));
       const cutoff = Date.now() - 12 * 60 * 60 * 1000;
       const eligible = (counties ?? []).filter((c) => !activeCountyIds.has(c.id))
         .filter((c) => !c.last_run_at || new Date(c.last_run_at).getTime() < cutoff);
       const cooledDown = (counties ?? []).length - eligible.length - activeCountyIds.size;
-      const rows = eligible.map((c) => ({
+      const rows: any[] = eligible.map((c) => ({
         kind: "scan_sources",
         county_id: c.id,
         priority: (rankByState.get(c.state) ?? 99) * 10,
       }));
+      for (const state of Array.from(new Set((counties ?? []).map((c) => c.state)))) {
+        for (const [source, offset] of [["commercial", 0], ["residential", 5], ["court", 10], ["sec", 15]] as const) {
+          if (!activeExternal.has(`${state}:${source}`)) rows.push({
+            kind: "scan_external",
+            payload: { state, source },
+            priority: (rankByState.get(state) ?? 99) * 10 + offset,
+          });
+        }
+      }
       if (!rows.length) {
         toast.info(cooledDown > 0
-          ? `All counties scanned within the last 12h — nothing new to queue.`
-          : `A scan is already queued or running for every enabled county.`);
+          ? `County records are in cooldown and external scans are already queued or running.`
+          : `A scan is already queued or running for every enabled source.`);
         return;
       }
       const { error } = await supabase.from("pipeline_jobs").insert(rows);
