@@ -403,6 +403,7 @@ Deno.serve(async (req) => {
     const ownerType = inferOwnerType(c.owner_name);
     const propertyType = mapPropertyType(c.property_type);
     const triggerEvent = mapTrigger(c.trigger_event);
+    const saleDate = inferSaleDate(c);
     const reachable = hasReachability(c);
     const sourceTag = `external:${source}`;
 
@@ -426,8 +427,8 @@ Deno.serve(async (req) => {
         has_outreach_contact: reachable,
         property_type: propertyType,
         sale_price: c.sale_price ?? null,
-        sale_date: c.sale_date ?? null,
-        deed_date: c.sale_date ?? null,
+        sale_date: saleDate,
+        deed_date: saleDate,
         trigger_event: triggerEvent,
         source_record_url: c.source_record_url,
         data_sources: [sourceTag],
