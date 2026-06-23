@@ -468,6 +468,10 @@ Deno.serve(async (req) => {
     result: { state, source, searched, evidence, candidates: candidates.length, found: fresh.length, inserted, enqueued, errors: errors.slice(0, 3) },
   }).eq("id", body.job_id);
 
+  if (enqueued > 0) {
+    supabase.functions.invoke("job-dispatcher", { body: { trigger: "scan_external_followups" } }).catch(() => {});
+  }
+
   return jsonOk({ ok: true, state, source, searched, evidence, candidates: candidates.length, found: fresh.length, inserted, enqueued, errors });
 });
 
