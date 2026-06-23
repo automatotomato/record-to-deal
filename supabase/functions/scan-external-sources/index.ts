@@ -76,6 +76,16 @@ async function fcReserve(caller: string, credits: number): Promise<string | null
   try { const { data } = await FC_ADMIN.rpc("fc_reserve", { p_caller: caller, p_credits: credits }); return (data as string) ?? null; }
   catch { return null; }
 }
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+async function fcReserveWithWait(caller: string, credits: number, waitMs = 20_000): Promise<string | null> {
+  const deadline = Date.now() + waitMs;
+  do {
+    const id = await fcReserve(caller, credits);
+    if (id) return id;
+    await delay(1_250);
+  } while (Date.now() < deadline);
+  return null;
+}
 async function fcRelease(id: string | null, actual: number, status = "done") {
   if (!id) return;
   try { await FC_ADMIN.rpc("fc_release", { p_id: id, p_actual: actual, p_status: status }); } catch (_) {}
@@ -84,9 +94,9 @@ async function fcRelease(id: string | null, actual: number, status = "done") {
 async function firecrawlSearch(query: string, credentials: FirecrawlCredential[], limit = 6): Promise<Array<{ url?: string; title?: string; markdown?: string; description?: string }>> {
   const ctrl = new AbortController();
   const tid = setTimeout(() => ctrl.abort(), 30_000);
-  const cost = limit;
-  const resId = await fcReserve("scan-external:search", cost);
-  if (!resId) { console.warn("fc_throttled scan-external"); clearTimeout(tid); return []; }
+  const cost = limit * 2;
+  const resId = await fcReserveWithWait("scan-external:search", cost);
+  if (!resId) { console.warn("fc_throttled scan-external"); clearTimeout(tid); throw new Error("Firecrawl throttled: reservation unavailable"); }
   try {
     let lastError = "Firecrawl credentials unavailable";
     for (const cred of credentials) {
@@ -95,6 +105,7 @@ async function firecrawlSearch(query: string, credentials: FirecrawlCredential[]
         headers: { Authorization: `Bearer ${cred.key}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           query, limit,
+          scrapeOptions: { onlyMainContent: true, formats: ["markdown"] },
         }),
         signal: ctrl.signal,
       });
