@@ -21,6 +21,12 @@ import {
   User,
   MessageSquare,
   AlertCircle,
+  Building2,
+  Globe,
+  Sparkles,
+  FileSearch,
+  Database,
+  Workflow,
 } from "lucide-react";
 
 const FEEDBACK_CATEGORIES = [
