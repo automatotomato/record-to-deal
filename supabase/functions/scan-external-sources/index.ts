@@ -387,6 +387,13 @@ Deno.serve(async (req) => {
     await markFailed(supabase, body.job_id, "missing/invalid state or source");
     return jsonOk({ ok: false });
   }
+  if ((source === "pending_sale" || source === "recent_close") && !HIGH_ARBITRAGE_STATES.has(state)) {
+    await supabase.from("pipeline_jobs").update({
+      status: "done", finished_at: new Date().toISOString(),
+      result: { skipped: `${source} restricted to HIGH_ARBITRAGE states` },
+    }).eq("id", body.job_id);
+    return jsonOk({ ok: true, skipped: true });
+  }
 
   const { data: counties } = await supabase
     .from("counties").select("county").eq("state", state).eq("enabled", true);
