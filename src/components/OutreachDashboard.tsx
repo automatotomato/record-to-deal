@@ -964,6 +964,42 @@ const WindowPill = ({ saleDate }: { saleDate?: string | null }) => {
   );
 };
 
+const DeadlineChip = ({ d45, d180 }: { d45?: number | null; d180?: number | null }) => {
+  if (d45 == null && d180 == null) return null;
+  // Prefer the 45-day ID clock while it's open; otherwise show the 180-day close clock.
+  if (d45 != null && d45 > 0) {
+    const tone =
+      d45 <= 7
+        ? "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/20"
+        : d45 <= 21
+        ? "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/20"
+        : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/20";
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Badge variant="outline" className={cn("mt-1 gap-1 font-normal text-[10px]", tone)}>
+            <Clock className="h-2.5 w-2.5" /> {d45}d to ID
+          </Badge>
+        </TooltipTrigger>
+        <TooltipContent>Days until 1031 45-day identification deadline.</TooltipContent>
+      </Tooltip>
+    );
+  }
+  if (d180 != null && d180 > 0) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Badge variant="outline" className="mt-1 gap-1 font-normal text-[10px] bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/20">
+            <Clock className="h-2.5 w-2.5" /> {d180}d to close
+          </Badge>
+        </TooltipTrigger>
+        <TooltipContent>45-day ID window closed; days until 180-day close deadline.</TooltipContent>
+      </Tooltip>
+    );
+  }
+  return null;
+};
+
 const SellerIcons = ({ lead }: { lead: any }) => {
   const items: { icon: React.ReactNode; on: boolean; label: string; value?: string }[] = [
     { icon: <Mail className="h-3 w-3" />, on: !!lead.contact_email, label: "Email", value: lead.contact_email },
