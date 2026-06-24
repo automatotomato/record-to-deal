@@ -4,14 +4,13 @@
 // for the actual contact hunt. Apollo has been removed.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { enqueueOnce } from "../_shared/enqueue.ts";
+import { fcSearch, shouldSkipDiscovery, recordDiscoveryAttempt, parkAbandoned } from "../_shared/firecrawl.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
-
-const FIRECRAWL_V2 = "https://api.firecrawl.dev/v2";
 
 const norm = (s: string | null | undefined) =>
   (s ?? "").toString().trim().toUpperCase().replace(/\s+/g, " ").replace(/[.,]/g, "");
@@ -20,20 +19,6 @@ function isUnlockedEmail(e?: string | null): boolean {
   if (!e) return false;
   if (!/[^@\s]+@[^@\s]+\.[a-z]{2,}/i.test(e)) return false;
   return !/email_not_unlocked|domain\.com$|@apollo-locked/i.test(e);
-}
-
-async function fcSearch(query: string, key: string, limit = 3) {
-  try {
-    const resp = await fetch(`${FIRECRAWL_V2}/search`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ query, limit }),
-    });
-    if (!resp.ok) return [];
-    const data = await resp.json();
-    const arr = data?.data?.web ?? data?.data ?? [];
-    return Array.isArray(arr) ? arr : [];
-  } catch { return []; }
 }
 
 function isOutreachContact(l: any): boolean {
