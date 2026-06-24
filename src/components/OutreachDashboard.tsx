@@ -260,7 +260,6 @@ export const OutreachDashboard = () => {
     return leads.filter((l) => {
       if (tab === "ready" && (isPresale(l) || !isReadyLead(l))) return false;
       if (tab === "review" && (isPresale(l) || !isReviewLead(l))) return false;
-      if (tab === "researching" && (isPresale(l) || !isResearchingLead(l))) return false;
       if (tab === "presale" && !isPresale(l)) return false;
       if (tierFilter !== "all" && priorityOf(l.tier, l.is_urgent) !== tierFilter) return false;
       if (stateFilter !== "all" && l.state !== stateFilter) return false;
