@@ -187,7 +187,7 @@ const LeadStatePill = ({ lead }: { lead: any }) => {
 export const OutreachDashboard = () => {
   const { isAdmin } = useAuth();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<TabKey>("candidates");
+  const [tab, setTab] = useState<TabKey>("ready");
   const [tierFilter, setTierFilter] = useState<string>("all");
   const [stateFilter, setStateFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("active");
