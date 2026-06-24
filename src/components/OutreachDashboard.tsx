@@ -63,12 +63,12 @@ import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
 type Lead = any;
-type TabKey = "ready" | "review" | "researching" | "presale" | "active";
+type TabKey = "ready" | "review" | "presale" | "active";
 
-// Lead-bucket predicates. These mirror the readiness column produced by
-// compute_lead_readiness() but also fall back to raw contact fields so a
-// lead with a phone/email always counts as "ready" even if the trigger
-// hasn't run yet.
+// Lead-bucket predicates. Two buckets only: a lead either has contact info
+// (ready) or it doesn't (needs review). We no longer keep a separate
+// "researching" tab — if the automated discovery pass couldn't find contact
+// details, the lead lands in review for a human to finish.
 const hasOutreachContact = (l: any) =>
   !!(l.decision_maker_email || l.decision_maker_phone || l.contact_phone);
 
@@ -80,17 +80,7 @@ const isReadyLead = (l: any) => {
 
 const isReviewLead = (l: any) => {
   if (l.tier === "DISQUALIFIED" || l.pipeline_stage === "disqualified") return false;
-  if (isReadyLead(l)) return false;
-  const r = l.readiness;
-  if (r === "needs_manual_review" || r === "low_confidence") return true;
-  if ((l.discovery_status === "failed" || l.discovery_status === "partial") && !hasOutreachContact(l)) return true;
-  return false;
-};
-
-const isResearchingLead = (l: any) => {
-  if (l.tier === "DISQUALIFIED" || l.pipeline_stage === "disqualified") return false;
-  if (isReadyLead(l) || isReviewLead(l)) return false;
-  return true;
+  return !isReadyLead(l);
 };
 
 // Human-readable reason a lead is stuck in "Needs review".
