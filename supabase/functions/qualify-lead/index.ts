@@ -388,6 +388,8 @@ Deno.serve(async (req) => {
     actual_capital_gain: r.actual_capital_gain,
     total_tax_exposure: r.total_tax_exposure,
     effective_tax_rate: r.effective_tax_rate,
+    days_until_45_deadline: r.days_until_45_deadline,
+    days_until_180_deadline: r.days_until_180_deadline,
     has_contact: isAnyContact(lead),
     has_outreach_contact: isOutreachContact(lead),
     pipeline_stage: stage,
