@@ -354,9 +354,13 @@ Deno.serve(async (req) => {
     for (const [state] of byState) {
       const rank = rankByState.get(state) ?? 99;
       for (const source of SOURCES) {
-        // Commercial drains first within each state. State priority then sets the
-        // per-state band: CA commercial (10+0) < NY commercial (20+0) < FL court (120+10) < ...
-        const sourceOffset = source === "commercial" ? 0 : source === "residential" ? 5 : 10;
+        // pending_sale + recent_close only matter for HIGH_ARBITRAGE states.
+        if ((source === "pending_sale" || source === "recent_close") && !HIGH_ARBITRAGE_STATES.has(state)) continue;
+        const sourceOffset = source === "commercial" ? 0
+          : source === "pending_sale" ? 2
+          : source === "recent_close" ? 3
+          : source === "residential" ? 5
+          : 10;
         rows.push({
           kind: "scan_external",
           payload: { state, source },
