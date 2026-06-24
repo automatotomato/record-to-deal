@@ -9,17 +9,14 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-// Daily scheduler invokes this once, so each call must dispatch a controlled
-// batch rather than a single job. Firecrawl-heavy workers are still protected
-// by the DB-level fc_reserve gate.
 const KINDS: { kind: string; fn: string; cap: number }[] = [
   { kind: "scan_sources",     fn: "scan-sources",     cap: 2 },
   { kind: "scan_external",    fn: "scan-external-sources", cap: 2 },
   { kind: "verify_property",  fn: "verify-property",  cap: 10 },
   { kind: "qualify_lead",     fn: "qualify-lead",     cap: 20 },
-  { kind: "enrich_contact",   fn: "enrich-contact",   cap: 1 },
-  { kind: "seller_discovery", fn: "seller-discovery", cap: 1 },
-  { kind: "wealth_scan",      fn: "wealth-scan",      cap: 1 },
+  { kind: "enrich_contact",   fn: "enrich-contact",   cap: 5 },
+  { kind: "seller_discovery", fn: "seller-discovery", cap: 3 },
+  { kind: "wealth_scan",      fn: "wealth-scan",      cap: 4 },
   { kind: "profile_seller",   fn: "profile-seller",   cap: 6 },
   { kind: "lead_brief",       fn: "lead-brief",       cap: 8 },
   { kind: "draft_outreach_step", fn: "draft-outreach-step", cap: 5 },

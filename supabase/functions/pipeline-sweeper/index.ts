@@ -46,7 +46,7 @@ Deno.serve(async (req) => {
     .eq("pipeline_stage", "verified")
     .limit(STAGE_CAP);
   for (const r of needQualify ?? []) {
-    await supabase.from("pipeline_jobs").insert({ kind: "qualify_lead", lead_id: r.id, priority: 90, payload: {} });
+    await supabase.from("pipeline_jobs").insert({ kind: "qualify_lead", lead_id: r.id, priority: 90 });
     summary.requalified += 1;
   }
 
@@ -63,7 +63,7 @@ Deno.serve(async (req) => {
       .eq("kind", "enrich_contact")
       .in("status", ["queued", "retry", "running"]);
     if ((count ?? 0) === 0) {
-      await supabase.from("pipeline_jobs").insert({ kind: "enrich_contact", lead_id: r.id, priority: 80, payload: {} });
+      await supabase.from("pipeline_jobs").insert({ kind: "enrich_contact", lead_id: r.id, priority: 80 });
       summary.re_enriched += 1;
     }
   }
@@ -82,7 +82,7 @@ Deno.serve(async (req) => {
       .eq("kind", "draft_outreach_step")
       .in("status", ["queued", "retry", "running"]);
     if ((count ?? 0) === 0) {
-      await supabase.from("pipeline_jobs").insert({ kind: "draft_outreach_step", lead_id: r.id, priority: 70, payload: {} });
+      await supabase.from("pipeline_jobs").insert({ kind: "draft_outreach_step", lead_id: r.id, priority: 70 });
       summary.re_drafted += 1;
     }
   }
@@ -101,7 +101,7 @@ Deno.serve(async (req) => {
       .eq("kind", "seller_discovery")
       .in("status", ["queued", "retry", "running"]);
     if ((count ?? 0) === 0) {
-      await supabase.from("pipeline_jobs").insert({ kind: "seller_discovery", lead_id: r.id, priority: 60, payload: {} });
+      await supabase.from("pipeline_jobs").insert({ kind: "seller_discovery", lead_id: r.id, priority: 60 });
       summary.re_discovered += 1;
     }
   }
@@ -123,7 +123,7 @@ Deno.serve(async (req) => {
       .eq("kind", "lead_brief")
       .in("status", ["queued", "retry", "running"]);
     if ((count ?? 0) === 0) {
-      await supabase.from("pipeline_jobs").insert({ kind: "lead_brief", lead_id: r.id, priority: 75, payload: {} });
+      await supabase.from("pipeline_jobs").insert({ kind: "lead_brief", lead_id: r.id, priority: 75 });
       summary.re_briefed += 1;
     }
   }

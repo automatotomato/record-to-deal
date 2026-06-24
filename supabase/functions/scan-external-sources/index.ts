@@ -1,14 +1,14 @@
 // scan-external-sources worker: discovers candidate 1031 leads from sources
-// OUTSIDE the county recorder pipeline. Uses Firecrawl search + the user's
-// OpenAI key to surface fresh listings + filings, then inserts
+// OUTSIDE the county recorder pipeline. Uses Gemini (Lovable AI Gateway) with
+// Google Search grounding to surface fresh listings + filings, then inserts
 // candidate leads that flow through the same verify_property → qualify_lead →
 // enrich_contact chain as county-sourced leads.
 //
-// Source families (per user-selected scope) — ALL FREE PUBLIC SOURCES:
-//   - commercial : SEC EDGAR + FDIC ORE + GSA/realestatesales.gov + HUD + .gov assessors
-//   - residential: HUD Home Store + Fannie HomePath + Freddie HomeSteps + USDA resales + .gov assessors
-//   - court      : .gov probate/tax-deed notices + state press-association public-notice portals + sheriff sales
-//   - sec        : SEC EDGAR 8-K / 10-Q real-estate dispositions
+// Source families (per user-selected scope):
+//   - commercial : Crexi + LoopNet recently sold
+//   - residential: Redfin recently sold (investment-grade only)
+//   - court      : probate, tax-lien, divorce property dispositions
+//   - sec        : SEC EDGAR 8-K real-estate dispositions by entity sellers
 //
 // Job kind: scan_external. Payload: { state: "TX", source: "commercial" }.
 // Special bootstrap mode: { enqueue: true } — fans out one job per
@@ -27,142 +27,61 @@ const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-4o-mini";
 const FC_V2 = "https://api.firecrawl.dev/v2";
 const HARD_BUDGET_MS = 90_000;
 
-// Commercial-only thesis: residential is dropped. We chase commercial
-// 1031 sellers in non-NV states for Nevada reinvestment. pending_sale +
-// recent_close are HIGH_ARBITRAGE-only buckets that surface listings about
-// to close (still inside 1031 ID window) and closings from the last ~30 days.
-type SourceKind = "commercial" | "residential" | "court" | "sec" | "pending_sale" | "recent_close";
-const SOURCES: SourceKind[] = ["commercial", "pending_sale", "recent_close", "court", "sec"];
-const HIGH_ARBITRAGE_STATES = new Set(["CA", "NY", "NJ", "OR", "HI"]);
-type FirecrawlCredential = { label: string; key: string };
-
-function firecrawlCredentials(): FirecrawlCredential[] {
-  const override = Deno.env.get("FIRECRAWL_API_KEY_OVERRIDE")?.trim();
-  return override ? [{ label: "override", key: override }] : [];
-}
+type SourceKind = "commercial" | "residential" | "court" | "sec";
+const SOURCES: SourceKind[] = ["commercial", "residential", "court", "sec"];
 
 if (!(globalThis as any).__sesLogged) {
   console.log(`[scan-external-sources] OpenAI model: ${AI_MODEL}`);
   (globalThis as any).__sesLogged = true;
 }
 
-// All queries below are biased toward FREE public sources only.
-// Crexi / LoopNet / Redfin (paywalled or anti-bot) were replaced with
-// federal agencies, county assessors, and public legal-notice sites.
 function searchQueriesFor(source: SourceKind, state: string, counties: string[]): string[] {
   const top = counties.slice(0, 3).join(" OR ");
-  const year = new Date().getUTCFullYear();
-  const years = `${year} OR ${year - 1}`;
   switch (source) {
     case "commercial":
-      // Free: SEC EDGAR, FDIC failed-bank asset sales, GSA real-property
-      // disposals, HUD multifamily sales, and ordinary .gov assessor sales.
       return [
-        `site:sec.gov 8-K "disposition" "real property" ${state} (${years})`,
-        `site:fdic.gov "owned real estate" OR "ORE sale" ${state}`,
-        `site:gsa.gov OR site:realestatesales.gov surplus property sale ${state} (${years})`,
-        `site:hud.gov multifamily "sale" OR "disposition" ${state} (${years})`,
-        `site:.gov "commercial" "recently sold" ${state} ${top} (${years})`,
+        `site:crexi.com sold ${state} commercial multifamily 2025 ${top}`,
+        `site:loopnet.com sold ${state} ${top} 2025`,
       ];
     case "residential":
-      // Free: HUD Home Store, Fannie Mae HomePath, Freddie Mac HomeSteps,
-      // USDA homesales, and county-assessor recent-sale rolls.
       return [
-        `site:hudhomestore.gov ${state} (${years})`,
-        `site:homepath.com ${state} sold (${years})`,
-        `site:homesteps.com ${state} ${top}`,
-        `site:resales.usda.gov ${state}`,
-        `site:.gov assessor "recent sales" ${state} ${top} (${years})`,
+        `site:redfin.com sold ${state} ${top} multifamily 2025`,
+        `site:redfin.com sold ${state} duplex triplex 2025`,
       ];
     case "court":
-      // Free: official court calendars, county clerk legal-notice portals,
-      // public-notice aggregators run by state press associations.
       return [
-        `site:.gov probate "notice of sale" ${state} ${top} (${years})`,
-        `site:.gov "tax deed" OR "tax lien" auction ${state} ${top} (${years})`,
-        `site:publicnoticeads.com OR site:publicnotices.com ${state} property sale (${years})`,
-        `site:.us "sheriff sale" OR "foreclosure sale" ${state} ${top} (${years})`,
+        `${state} probate sale notice ${top} 2025`,
+        `${state} tax lien auction property 2025 ${top}`,
       ];
     case "sec":
       return [
-        `site:sec.gov 8-K disposition real estate ${state} ${year}`,
+        `site:sec.gov 8-K disposition real estate ${state} 2025`,
         `site:sec.gov 8-K sold property ${state}`,
-        `site:sec.gov 10-Q "sale of real estate" ${state} ${year}`,
-      ];
-    case "pending_sale":
-      // Commercial deals about to close — sellers still inside the 1031 ID window.
-      return [
-        `site:loopnet.com "under contract" ${state} ${top} (commercial OR multifamily OR retail OR office OR industrial)`,
-        `site:crexi.com "under contract" OR "pending" ${state} ${top}`,
-        `"under contract" commercial real estate ${state} ${top} ${year} -residential -house -home`,
-      ];
-    case "recent_close":
-      // Closings in the last ~30 days from brokerage press releases + listings.
-      return [
-        `site:loopnet.com "sold" ${state} ${top} (commercial OR multifamily OR retail OR office OR industrial) ${year}`,
-        `site:crexi.com "sold" ${state} ${top} ${year}`,
-        `"closed" OR "sold" commercial property ${state} ${top} ${year} (CBRE OR JLL OR "Marcus & Millichap" OR Colliers OR Cushman)`,
-        `"announces sale" OR "completes sale" commercial ${state} ${top} ${year}`,
       ];
   }
 }
 
-const FC_ADMIN = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-async function fcReserve(caller: string, credits: number): Promise<string | null> {
-  try { const { data } = await FC_ADMIN.rpc("fc_reserve", { p_caller: caller, p_credits: credits }); return (data as string) ?? null; }
-  catch { return null; }
-}
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-async function fcReserveWithWait(caller: string, credits: number, waitMs = 20_000): Promise<string | null> {
-  const deadline = Date.now() + waitMs;
-  do {
-    const id = await fcReserve(caller, credits);
-    if (id) return id;
-    await delay(1_250);
-  } while (Date.now() < deadline);
-  return null;
-}
-async function fcRelease(id: string | null, actual: number, status = "done") {
-  if (!id) return;
-  try { await FC_ADMIN.rpc("fc_release", { p_id: id, p_actual: actual, p_status: status }); } catch (_) {}
-}
-
-async function firecrawlSearch(query: string, credentials: FirecrawlCredential[], limit = 6): Promise<Array<{ url?: string; title?: string; markdown?: string; description?: string }>> {
+async function firecrawlSearch(query: string, fcKey: string, limit = 6): Promise<Array<{ url?: string; title?: string; markdown?: string; description?: string }>> {
   const ctrl = new AbortController();
   const tid = setTimeout(() => ctrl.abort(), 30_000);
-  const cost = limit * 2;
-  const resId = await fcReserveWithWait("scan-external:search", cost);
-  if (!resId) { console.warn("fc_throttled scan-external"); clearTimeout(tid); throw new Error("Firecrawl throttled: reservation unavailable"); }
   try {
-    let lastError = "Firecrawl credentials unavailable";
-    for (const cred of credentials) {
-      const r = await fetch(`${FC_V2}/search`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${cred.key}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query, limit,
-          scrapeOptions: { onlyMainContent: true, formats: ["markdown"] },
-        }),
-        signal: ctrl.signal,
-      });
-      if (!r.ok) {
-        lastError = `Firecrawl ${r.status} (${cred.label}): ${(await r.text()).slice(0, 200)}`;
-        console.warn(lastError);
-        if ([401, 402, 403].includes(r.status) && credentials.length > 1) continue;
-        throw new Error(lastError);
-      }
-      const d = await r.json();
-      await fcRelease(resId, cost, "done");
-      const arr = d?.data?.web ?? d?.data ?? d?.web ?? [];
-      return Array.isArray(arr) ? arr : [];
+    const r = await fetch(`${FC_V2}/search`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${fcKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query, limit,
+        scrapeOptions: { formats: ["markdown"], onlyMainContent: true },
+      }),
+      signal: ctrl.signal,
+    });
+    if (!r.ok) {
+      console.warn(`firecrawl ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      return [];
     }
-    throw new Error(lastError);
-  } catch (e) {
-    console.warn("firecrawl threw", e);
-    await fcRelease(resId, cost, "failed");
-    if (e instanceof Error && /Firecrawl\s+(401|402|403)/i.test(e.message)) throw e;
-    return [];
-  }
+    const d = await r.json();
+    const arr = d?.data?.web ?? d?.data ?? d?.web ?? [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { console.warn("firecrawl threw", e); return []; }
   finally { clearTimeout(tid); }
 }
 
@@ -175,7 +94,7 @@ async function extractFromEvidence(
   const sys = `You extract real-estate transactions from scraped web evidence into structured JSON. Use ONLY facts present in the evidence. Never invent emails, phones, or owner names. Return an empty list when nothing usable is present.`;
   const user = `Source family: ${source}. State: ${state}.
 
-Extract up to 12 distinct candidate 1031 leads from the evidence below. Each lead requires owner_name, property_address, and source_record_url. Include contact fields when present, but do not reject otherwise; later workers enrich contacts.
+Extract up to 12 distinct candidate 1031 leads from the evidence below. Each lead requires owner_name, property_address, and source_record_url, plus at least ONE reachability field (owner_contact_email, owner_contact_phone, or owner_website).
 
 Return ONLY:
 {
@@ -191,7 +110,7 @@ Return ONLY:
       "property_zip": "string|null",
       "sale_price": number|null,
       "sale_date": "YYYY-MM-DD"|null,
-      "property_type": "SFR|Multifamily|Commercial|Land|Mixed|Unknown",
+      "property_type": "SFR|Multifamily|Commercial|Industrial|Land|Mixed|Unknown",
       "trigger_event": "recent_sale|probate|tax_lien|divorce|sec_disposition",
       "source_record_url": "string"
     }
@@ -232,21 +151,20 @@ async function webGroundedExtract(
   source: SourceKind,
   state: string,
   counties: string[],
-  fcCreds: FirecrawlCredential[],
+  fcKey: string,
   aiKey: string,
-): Promise<{ candidates: Candidate[]; searched: number; evidence: number }> {
+): Promise<Candidate[]> {
   const queries = searchQueriesFor(source, state, counties);
   const evidenceParts: string[] = [];
   for (const q of queries) {
-    const results = await firecrawlSearch(q, fcCreds, 6);
+    const results = await firecrawlSearch(q, fcKey, 6);
     for (const r of results) {
       const chunk = `URL: ${r.url ?? ""}\nTITLE: ${r.title ?? ""}\n${(r.markdown ?? r.description ?? "").slice(0, 4000)}`;
       evidenceParts.push(chunk);
     }
   }
-  if (!evidenceParts.length) return { candidates: [], searched: queries.length, evidence: 0 };
-  const candidates = await extractFromEvidence(source, state, evidenceParts.join("\n---\n"), aiKey);
-  return { candidates, searched: queries.length, evidence: evidenceParts.length };
+  if (!evidenceParts.length) return [];
+  return extractFromEvidence(source, state, evidenceParts.join("\n---\n"), aiKey);
 }
 
 function inferOwnerType(name?: string | null) {
@@ -282,10 +200,10 @@ function hasReachability(c: Candidate): boolean {
 }
 
 function mapPropertyType(raw?: string): string {
-  const valid = ["SFR", "Multifamily", "Commercial", "Land", "Mixed", "Unknown"];
+  const valid = ["SFR", "Multifamily", "Commercial", "Industrial", "Land", "Mixed", "Unknown"];
   if (raw && valid.includes(raw)) return raw;
   const l = (raw ?? "").toLowerCase();
-  if (l.includes("indust") || l.includes("warehouse")) return "Commercial";
+  if (l.includes("indust") || l.includes("warehouse")) return "Industrial";
   if (l.includes("office") || l.includes("retail") || l.includes("nnn") || l.includes("commerc")) return "Commercial";
   if (l.includes("apart") || l.includes("multi") || l.includes("duplex") || l.includes("triplex") || l.includes("fourplex")) return "Multifamily";
   if (l.includes("single") || l.includes("residential") || l.includes("sfr")) return "SFR";
@@ -304,23 +222,6 @@ function mapTrigger(raw?: string): string {
   return map[raw ?? ""] ?? "sale_recorded";
 }
 
-function cleanDate(v: unknown): string | null {
-  if (!v) return null;
-  const s = String(v).trim();
-  if (!s || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
-  const d = new Date(s);
-  return isNaN(d.getTime()) ? null : s;
-}
-
-function inferSaleDate(c: Candidate): string | null {
-  const raw = cleanDate(c.sale_date);
-  if (raw) return raw;
-  const urlDate = String(c.source_record_url ?? "").match(/\b(20\d{2})[-/](\d{1,2})[-/](\d{1,2})\b/);
-  if (urlDate) return `${urlDate[1]}-${urlDate[2].padStart(2, "0")}-${urlDate[3].padStart(2, "0")}`;
-  const year = new Date().getUTCFullYear();
-  return `${year}-06-01`;
-}
-
 const norm = (s: string | null | undefined) =>
   (s ?? "").toString().trim().toUpperCase().replace(/\s+/g, " ").replace(/[.,]/g, "");
 
@@ -332,7 +233,7 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
   const lovableKey = Deno.env.get("OPENAI_API_KEY");
-  const fcCreds = firecrawlCredentials();
+  const fcKey = Deno.env.get("FIRECRAWL_API_KEY");
 
   let body: { job_id?: string; enqueue?: boolean } = {};
   try { body = await req.json(); } catch (_) {}
@@ -354,13 +255,9 @@ Deno.serve(async (req) => {
     for (const [state] of byState) {
       const rank = rankByState.get(state) ?? 99;
       for (const source of SOURCES) {
-        // pending_sale + recent_close only matter for HIGH_ARBITRAGE states.
-        if ((source === "pending_sale" || source === "recent_close") && !HIGH_ARBITRAGE_STATES.has(state)) continue;
-        const sourceOffset = source === "commercial" ? 0
-          : source === "pending_sale" ? 2
-          : source === "recent_close" ? 3
-          : source === "residential" ? 5
-          : 10;
+        // Commercial drains first within each state. State priority then sets the
+        // per-state band: CA commercial (10+0) < NY commercial (20+0) < FL court (120+10) < ...
+        const sourceOffset = source === "commercial" ? 0 : source === "residential" ? 5 : 10;
         rows.push({
           kind: "scan_external",
           payload: { state, source },
@@ -375,7 +272,7 @@ Deno.serve(async (req) => {
   // ---- Worker mode: process one (state, source) job ----
   if (!body.job_id) return jsonErr("job_id or enqueue required", 400);
   if (!lovableKey) return jsonErr("OPENAI_API_KEY not configured", 500);
-  if (!fcCreds.length) return jsonErr("FIRECRAWL_API_KEY not configured", 500);
+  if (!fcKey) return jsonErr("FIRECRAWL_API_KEY not configured", 500);
 
   const { data: job } = await supabase
     .from("pipeline_jobs").select("*").eq("id", body.job_id).maybeSingle();
@@ -386,13 +283,6 @@ Deno.serve(async (req) => {
   if (!state || !source || !SOURCES.includes(source)) {
     await markFailed(supabase, body.job_id, "missing/invalid state or source");
     return jsonOk({ ok: false });
-  }
-  if ((source === "pending_sale" || source === "recent_close") && !HIGH_ARBITRAGE_STATES.has(state)) {
-    await supabase.from("pipeline_jobs").update({
-      status: "done", finished_at: new Date().toISOString(),
-      result: { skipped: `${source} restricted to HIGH_ARBITRAGE states` },
-    }).eq("id", body.job_id);
-    return jsonOk({ ok: true, skipped: true });
   }
 
   const { data: counties } = await supabase
@@ -409,26 +299,10 @@ Deno.serve(async (req) => {
   const start = Date.now();
   const errors: string[] = [];
   let candidates: Candidate[] = [];
-  let searched = 0;
-  let evidence = 0;
   try {
-    const extracted = await webGroundedExtract(source, state, countyNames, fcCreds, lovableKey);
-    candidates = extracted.candidates;
-    searched = extracted.searched;
-    evidence = extracted.evidence;
+    candidates = await webGroundedExtract(source, state, countyNames, fcKey, lovableKey);
   } catch (e) {
     errors.push(e instanceof Error ? e.message : String(e));
-  }
-
-  const credentialBlocked = errors.some((e) => /Firecrawl\s+(401|402|403)/i.test(e));
-  if (credentialBlocked) {
-    await supabase.from("pipeline_jobs").update({
-      status: "failed",
-      finished_at: new Date().toISOString(),
-      last_error: errors[0] ?? "Firecrawl credential failed",
-      result: { state, source, searched, evidence, candidates: candidates.length, found: 0, inserted: 0, enqueued: 0, errors: errors.slice(0, 3) },
-    }).eq("id", body.job_id);
-    return jsonOk({ ok: false, state, source, found: 0, inserted: 0, enqueued: 0, errors });
   }
 
   // Dedupe + drop incomplete records.
@@ -436,6 +310,7 @@ Deno.serve(async (req) => {
   const fresh: Candidate[] = [];
   for (const c of candidates) {
     if (!c.owner_name || !c.property_address || !c.source_record_url) continue;
+    if (!hasReachability(c)) continue;
     const k = `${norm(c.property_address)}|${norm(c.owner_name)}`;
     if (seen.has(k)) continue;
     seen.add(k);
@@ -458,9 +333,7 @@ Deno.serve(async (req) => {
     const ownerType = inferOwnerType(c.owner_name);
     const propertyType = mapPropertyType(c.property_type);
     const triggerEvent = mapTrigger(c.trigger_event);
-    const saleDate = inferSaleDate(c);
-    const reachable = hasReachability(c);
-    const sourceTag = `external:${source}`;
+    const sourceTag = `gemini:${source}`;
 
     const { data: leadRow, error: insErr } = await supabase
       .from("leads")
@@ -478,17 +351,17 @@ Deno.serve(async (req) => {
         contact_email: isUnlockedEmail(c.owner_contact_email) ? c.owner_contact_email : null,
         contact_phone: hasUsablePhone(c.owner_contact_phone) ? c.owner_contact_phone : null,
         company_website: normalizeWebsite(c.owner_website),
-        has_contact: reachable,
-        has_outreach_contact: reachable,
+        has_contact: true,
+        has_outreach_contact: true,
         property_type: propertyType,
         sale_price: c.sale_price ?? null,
-        sale_date: saleDate,
-        deed_date: saleDate,
+        sale_date: c.sale_date ?? null,
+        deed_date: c.sale_date ?? null,
         trigger_event: triggerEvent,
         source_record_url: c.source_record_url,
         data_sources: [sourceTag],
         scout_confidence: source === "sec" ? 70 : 55,
-        pipeline_stage: reachable ? "enriched" : "raw_candidate",
+        pipeline_stage: "enriched",
       })
       .select("id").single();
 
@@ -498,28 +371,22 @@ Deno.serve(async (req) => {
     await supabase.from("lead_activities").insert({
       lead_id: leadRow.id,
       kind: "scout_found",
-      summary: `Discovered via OpenAI scan (${source}) in ${state}`,
+      summary: `Discovered via Gemini scan (${source}) in ${state}`,
       payload: { source, source_url: c.source_record_url, job_id: body.job_id },
     });
 
-    const followups: Array<{ kind: string; lead_id: string; priority: number; payload: Record<string, never> }> = [
-      { kind: "verify_property", lead_id: leadRow.id, priority: 100, payload: {} },
-    ];
-    if (!reachable) followups.push({ kind: "enrich_contact", lead_id: leadRow.id, priority: 120, payload: {} });
-    await supabase.from("pipeline_jobs").insert(followups);
-    enqueued += followups.length;
+    await supabase.from("pipeline_jobs").insert({
+      kind: "verify_property", lead_id: leadRow.id, priority: 100,
+    });
+    enqueued += 1;
   }
 
   await supabase.from("pipeline_jobs").update({
     status: "done", finished_at: new Date().toISOString(),
-    result: { state, source, searched, evidence, candidates: candidates.length, found: fresh.length, inserted, enqueued, errors: errors.slice(0, 3) },
+    result: { state, source, found: fresh.length, inserted, enqueued, errors: errors.slice(0, 3) },
   }).eq("id", body.job_id);
 
-  if (enqueued > 0) {
-    supabase.functions.invoke("job-dispatcher", { body: { trigger: "scan_external_followups" } }).catch(() => {});
-  }
-
-  return jsonOk({ ok: true, state, source, searched, evidence, candidates: candidates.length, found: fresh.length, inserted, enqueued, errors });
+  return jsonOk({ ok: true, state, source, found: fresh.length, inserted, enqueued, errors });
 });
 
 function jsonOk(b: unknown) {

@@ -95,7 +95,7 @@ Deno.serve(async (req) => {
     });
     // Re-qualify the merged lead
     await supabase.from("pipeline_jobs").insert({
-      kind: "qualify_lead", lead_id: matchedId, priority: 90, payload: {},
+      kind: "qualify_lead", lead_id: matchedId, priority: 90,
     });
     await supabase.from("pipeline_jobs").update({
       status: "done", finished_at: new Date().toISOString(),
@@ -146,7 +146,7 @@ Deno.serve(async (req) => {
 
   if (hasResolvedAddress) {
     await supabase.from("pipeline_jobs").insert({
-      kind: "qualify_lead", lead_id: leadId, priority: 90, payload: {},
+      kind: "qualify_lead", lead_id: leadId, priority: 90,
     });
   }
 
@@ -154,10 +154,6 @@ Deno.serve(async (req) => {
     status: "done", finished_at: new Date().toISOString(),
     result: { stage: newStage, smarty_key: smartyKey },
   }).eq("id", body.job_id);
-
-  if (hasResolvedAddress) {
-    supabase.functions.invoke("job-dispatcher", { body: { trigger: "verify_property_followups" } }).catch(() => {});
-  }
 
   return jsonOk({ ok: true, stage: newStage });
 });

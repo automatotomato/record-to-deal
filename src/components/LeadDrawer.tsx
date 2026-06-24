@@ -107,7 +107,7 @@ export const LeadDrawer = ({ leadId, onClose }: { leadId: string; onClose: () =>
     toast.loading("Queuing draft…", { id: "draft" });
     try {
       const { error } = await supabase.from("pipeline_jobs").insert([
-        { kind: "draft_outreach_step", lead_id: leadId, priority: 30, payload: {} },
+        { kind: "draft_outreach_step", lead_id: leadId, priority: 30 },
       ]);
       if (error) throw error;
       toast.success("Queued — refresh in a minute", { id: "draft" });

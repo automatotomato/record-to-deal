@@ -23,27 +23,6 @@ interface StateRate {
   is_high_tax: boolean;
   is_target: boolean;
   priority_rank: number;
-  city_surcharges?: Record<string, number> | null;
-}
-
-// Match the lead's property_city (and a few address fallbacks) against the
-// state_tax_rates.city_surcharges JSON map. Keys are upper-case city names.
-function cityExtraRate(lead: any, sr: StateRate | null): { city: string | null; rate: number } {
-  if (!sr?.city_surcharges) return { city: null, rate: 0 };
-  const map = sr.city_surcharges;
-  const cands: string[] = [];
-  if (lead.property_city) cands.push(String(lead.property_city));
-  if (lead.property_address) {
-    const m = String(lead.property_address).match(/,\s*([^,]+),\s*[A-Z]{2}\b/);
-    if (m) cands.push(m[1]);
-  }
-  for (const raw of cands) {
-    const key = raw.trim().toUpperCase();
-    if (key in map && typeof map[key] === "number") {
-      return { city: key, rate: map[key] };
-    }
-  }
-  return { city: null, rate: 0 };
 }
 type Tier = "CRITICAL" | "URGENT" | "ACTIVE" | "FOLLOW_UP" | "EXPIRED" | "DISQUALIFIED";
 
@@ -72,15 +51,8 @@ function isAnyContact(l: any): boolean {
 const norm = (s: string | null | undefined) =>
   (s ?? "").toString().trim().toUpperCase().replace(/\s+/g, " ").replace(/[.,]/g, "");
 
-const INVESTMENT_TYPES = new Set(["Multifamily", "Commercial", "Industrial", "Mixed", "Retail", "Office"]);
-const ENTITY_OWNERS = new Set(["LLC", "Corporation", "Trust", "Estate", "LP", "LLP", "Partnership"]);
-
-function looksOwnerOccupied(lead: any, propType: string): boolean {
-  if (lead.owner_type !== "Individual") return false;
-  if (!lead.mailing_address || !lead.property_address) return false;
-  if (propType !== "SFR" && propType !== "Condo" && propType !== "Unknown") return false;
-  return norm(lead.mailing_address) === norm(lead.property_address);
-}
+const INVESTMENT_TYPES = new Set(["Multifamily", "Commercial", "Industrial", "Mixed"]);
+const ENTITY_OWNERS = new Set(["LLC", "Corporation", "Trust", "Estate"]);
 
 interface ScoreOut {
   score: number;
@@ -97,9 +69,6 @@ interface ScoreOut {
   effective_tax_rate: number | null;
   disqualified: boolean;
   needs_review: boolean;
-  city_surcharge_applied: { city: string; rate: number } | null;
-  days_until_45_deadline: number | null;
-  days_until_180_deadline: number | null;
 }
 
 function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
@@ -112,9 +81,6 @@ function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
   const isHighTax = !!stateRate?.is_high_tax;
   const addr = (lead.property_address ?? "").toUpperCase();
   const isCondoApt = /\b(APT|UNIT|#|STE|SUITE)\b/.test(addr);
-  const cityBoost = cityExtraRate(lead, stateRate);
-  const daysTo45 = days != null ? 45 - days : null;
-  const daysTo180 = days != null ? 180 - days : null;
 
   // --- Hard disqualifiers ---
   const trig = lead.trigger_event ?? "";
@@ -127,37 +93,34 @@ function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
   }
   if (sp === 0) return disq("Disqualified: $0 transfer (likely quitclaim or non-arms-length).", days, stateRate);
 
-  // Geography filter: we BROKER sellers from other states INTO Nevada.
-  // Nevada sellers already enjoy a 0% state income tax — there is no
-  // state-tax arbitrage to pitch, so they are out of scope.
-  if (lead.state === "NV") {
-    return disq("Disqualified: Nevada seller — no out-of-state tax arbitrage to pitch.", days, stateRate);
+  // Hard 1031 floor: individual owner of an unclear/SFR property under $750k will
+  // essentially never do a 1031. Drop those before they pollute the pipeline.
+  if (ownerType === "Individual" && (propType === "SFR" || propType === "Unknown") && sp > 0 && sp < 750_000) {
+    return disq("Disqualified: small individual-owned residential sale below 1031 viability threshold.", days, stateRate);
   }
 
-  // Commercial-only thesis: we only chase commercial 1031s. Residential
-  // (SFR, condo, owner-occupied) is dropped at the gate, regardless of
-  // absentee status.
-  if (propType === "SFR" || isCondoApt) {
-    return disq("Disqualified: residential property (SFR/condo) — out of commercial 1031 scope.", days, stateRate);
-  }
-  if (looksOwnerOccupied(lead, propType)) {
-    return disq("Disqualified: owner-occupied property.", days, stateRate);
-  }
-  // Require commercial-class property OR an entity owner with a real-money sale.
-  const commercialClass = INVESTMENT_TYPES.has(propType);
-  const entityWithSize = ENTITY_OWNERS.has(ownerType) && sp >= 750_000;
-  if (!commercialClass && !entityWithSize) {
-    return disq("Disqualified: not a commercial-class asset and not an entity-owned sale ≥ $750k.", days, stateRate);
-  }
-  // Land floor raised from $250k → $1M to keep only investment-grade parcels.
-  if (propType === "Land" && sp < 1_000_000) {
-    return disq("Disqualified: land sale under the $1M investment threshold.", days, stateRate);
-  }
-
-  // Address state must match county state (sanity check on geocoding)
+  // Address state must match county state
   const stateMatch = addr.match(/\b(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)\b/);
   if (stateMatch && stateMatch[1] !== lead.state) {
     return disq(`Disqualified: address state ${stateMatch[1]} does not match county state ${lead.state}.`, days, stateRate);
+  }
+
+  // Owner-occupied / SFR-Individual filters
+  const looksResidential = propType === "SFR" || propType === "Unknown" || isCondoApt;
+  if (looksResidential && ownerType === "Individual" && norm(lead.mailing_address) === norm(lead.property_address)) {
+    return disq("Disqualified: owner-occupied residential property.", days, stateRate);
+  }
+  if (looksResidential && ownerType === "Individual") {
+    // Allow only if absentee (mailing zip != property zip)
+    const absentee = lead.mailing_address && lead.property_zip
+      && !norm(lead.mailing_address).includes(lead.property_zip);
+    if (!absentee) {
+      return disq("Disqualified: SFR/condo owned by an individual without absentee signal.", days, stateRate);
+    }
+  }
+  // Land threshold
+  if (propType === "Land" && sp < 250_000) {
+    return disq("Disqualified: land sale under the $250k investment threshold.", days, stateRate);
   }
 
   // Sale recency window — only leads inside the 90-day actionable window
@@ -166,13 +129,9 @@ function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
       score: 0, tier: "EXPIRED", is_urgent: false,
       reason: `Expired: sale ${days} days ago is outside the 90-day actionable window.`,
       breakdown: {}, days_since_sale: days,
-      state_tax_rate: stateRate ? stateRate.ltcg_rate + stateRate.surcharge + cityBoost.rate : null,
+      state_tax_rate: stateRate ? stateRate.ltcg_rate + stateRate.surcharge : null,
       fed_capital_gains_estimate: null, state_capital_gains_estimate: null,
-      total_tax_exposure: null,
-      actual_capital_gain: null, effective_tax_rate: null,
-      disqualified: true, needs_review: false,
-      city_surcharge_applied: cityBoost.city ? { city: cityBoost.city, rate: cityBoost.rate } : null,
-      days_until_45_deadline: daysTo45, days_until_180_deadline: daysTo180,
+      total_tax_exposure: null, disqualified: true, needs_review: false,
     };
   }
 
@@ -189,12 +148,12 @@ function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
   breakdown.sale_recency = recency;
   if (days != null) reasons.push(`sold ${days} days ago`);
 
-  // Property type (max 25) — commercial-class assets dominate
+  // Property type (max 15)
   let pt = 0;
-  if (propType === "Commercial" || propType === "Multifamily" || propType === "Industrial") pt = 25;
-  else if (propType === "Mixed" || propType === "Retail" || propType === "Office") pt = 20;
-  else if (propType === "Land") pt = 10;
-  else if (ENTITY_OWNERS.has(ownerType)) pt = 12;
+  if (propType === "Commercial" || propType === "Multifamily") pt = 15;
+  else if (propType === "Industrial" || propType === "Mixed") pt = 12;
+  else if (propType === "Land") pt = 8;
+  else if (ENTITY_OWNERS.has(ownerType)) pt = 6;
   breakdown.property_type = pt;
   reasons.push(`property type ${propType.toLowerCase()}`);
 
@@ -218,18 +177,12 @@ function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
   breakdown.sale_price = ps;
   if (sp > 0) reasons.push(`sale price $${Math.round(sp / 1000)}k`);
 
-  // State-tax arbitrage (max 20) — the bigger their home-state tax bill,
-  // the bigger the Nevada (0% state income tax) upside we can pitch.
+  // High-tax state (max 15) — bumped from 10. Federal-only target (FL/TX) gets +8.
   let ht = 0;
-  const HIGH_ARBITRAGE = new Set(["CA", "NY", "NJ", "OR", "HI"]);
-  const LOW_TAX_NO_PITCH = new Set(["TX", "FL", "WA", "TN", "SD", "WY", "AK", "NH"]);
-  if (HIGH_ARBITRAGE.has(lead.state)) ht = 20;
-  else if (isHighTax) ht = 15;
+  if (isHighTax) ht = 15;
   else if (stateRate?.is_target) ht = 8;
-  else if (LOW_TAX_NO_PITCH.has(lead.state)) ht = 3;
-  breakdown.state_arbitrage = ht;
-  if (HIGH_ARBITRAGE.has(lead.state)) reasons.push(`${lead.state} → NV tax arbitrage is huge`);
-  else if (isHighTax) reasons.push(`in ${lead.state} (high state tax)`);
+  breakdown.high_tax_state = ht;
+  if (isHighTax) reasons.push(`in ${lead.state} (high state tax)`);
   else if (stateRate?.is_target) reasons.push(`in ${lead.state} (federal-only target market)`);
 
   // Outreach contactability (max 15)
@@ -272,9 +225,7 @@ function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
   // Tax math — fix: actual_capital_gain is the GAIN (sale - basis), not the tax owed.
   // capital_gains_estimate kept as alias for actual_capital_gain for back-compat.
   // total_tax_exposure stays as fed + state tax owed.
-  // City surcharge (NYC, Portland, etc.) is layered onto the state rate.
-  const stateTotalRate = stateRate ? stateRate.ltcg_rate + stateRate.surcharge + cityBoost.rate : null;
-  if (cityBoost.city) reasons.push(`${cityBoost.city} adds +${(cityBoost.rate * 100).toFixed(2)}% city tax`);
+  const stateTotalRate = stateRate ? stateRate.ltcg_rate + stateRate.surcharge : null;
   const fmv = lead.assessed_value ?? 0;
   let basis = 0;
   if (fmv > 0 && sp > 0 && fmv < sp) basis = fmv;          // assessed value as basis
@@ -294,8 +245,6 @@ function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
     actual_capital_gain: gain || null,
     effective_tax_rate: effectiveRate,
     disqualified: false, needs_review: false,
-    city_surcharge_applied: cityBoost.city ? { city: cityBoost.city, rate: cityBoost.rate } : null,
-    days_until_45_deadline: daysTo45, days_until_180_deadline: daysTo180,
   };
 }
 
@@ -307,9 +256,6 @@ function disq(reason: string, days: number | null, sr: StateRate | null): ScoreO
     fed_capital_gains_estimate: null, state_capital_gains_estimate: null,
     total_tax_exposure: null, actual_capital_gain: null, effective_tax_rate: null,
     disqualified: true, needs_review: false,
-    city_surcharge_applied: null,
-    days_until_45_deadline: days != null ? 45 - days : null,
-    days_until_180_deadline: days != null ? 180 - days : null,
   };
 }
 function needsReview(reason: string, days: number | null, sr: StateRate | null): ScoreOut {
@@ -320,9 +266,6 @@ function needsReview(reason: string, days: number | null, sr: StateRate | null):
     fed_capital_gains_estimate: null, state_capital_gains_estimate: null,
     total_tax_exposure: null, actual_capital_gain: null, effective_tax_rate: null,
     disqualified: false, needs_review: true,
-    city_surcharge_applied: null,
-    days_until_45_deadline: days != null ? 45 - days : null,
-    days_until_180_deadline: days != null ? 180 - days : null,
   };
 }
 
@@ -348,7 +291,7 @@ Deno.serve(async (req) => {
 
   const { data: rate } = await supabase
     .from("state_tax_rates")
-    .select("state, ltcg_rate, surcharge, is_high_tax, is_target, priority_rank, city_surcharges")
+    .select("state, ltcg_rate, surcharge, is_high_tax, is_target, priority_rank")
     .eq("state", lead.state)
     .maybeSingle();
 
@@ -388,8 +331,6 @@ Deno.serve(async (req) => {
     actual_capital_gain: r.actual_capital_gain,
     total_tax_exposure: r.total_tax_exposure,
     effective_tax_rate: r.effective_tax_rate,
-    days_until_45_deadline: r.days_until_45_deadline,
-    days_until_180_deadline: r.days_until_180_deadline,
     has_contact: isAnyContact(lead),
     has_outreach_contact: isOutreachContact(lead),
     pipeline_stage: stage,
@@ -407,7 +348,6 @@ Deno.serve(async (req) => {
     await supabase.from("pipeline_jobs").insert({
       kind: "enrich_contact", lead_id: leadId,
       priority: r.is_urgent ? 50 : 80,
-      payload: {},
     });
   }
 
@@ -415,10 +355,6 @@ Deno.serve(async (req) => {
     status: "done", finished_at: new Date().toISOString(),
     result: { tier: r.tier, score: r.score, stage },
   }).eq("id", body.job_id);
-
-  if (stage === "qualified") {
-    supabase.functions.invoke("job-dispatcher", { body: { trigger: "qualify_lead_followups" } }).catch(() => {});
-  }
 
   return jsonOk({ ok: true, tier: r.tier, score: r.score, stage });
 });

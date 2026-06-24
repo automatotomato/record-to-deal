@@ -1,6 +1,6 @@
 // Seller Discovery agent — dedicated multi-pass contact hunt for one lead.
 // Passes (Apollo removed — Gemini grounded search + Firecrawl scraping only):
-//   1. Entity unmask (state SoS / bizapedia via Firecrawl)
+//   1. Entity unmask (OpenCorporates + state SoS via Firecrawl)
 //   2. Person identity (LinkedIn / RocketReach / ZoomInfo / Bizapedia)
 //   3. Company website discovery + homepage/contact scrape
 //   4. Source record scrape (broker/listing pages)
@@ -21,20 +21,7 @@ const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-4o-mini";
 if (!(globalThis as any).__sdLogged) { console.log(`[seller-discovery] OpenAI model: ${AI_MODEL}`); (globalThis as any).__sdLogged = true; }
 
 // Per-call budget so a single lead can't burn the day's quota
-const BUDGET = { firecrawl: 18, ai: 4 };
-
-// Firecrawl global gate (5 concurrent / 5,000 cr/month enforced in DB).
-const FC_ADMIN = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-async function fcReserve(caller: string, credits: number): Promise<string | null> {
-  try {
-    const { data } = await FC_ADMIN.rpc("fc_reserve", { p_caller: caller, p_credits: credits });
-    return (data as string) ?? null;
-  } catch (e) { console.warn("fc_reserve threw", e); return null; }
-}
-async function fcRelease(id: string | null, actual: number, status = "done") {
-  if (!id) return;
-  try { await FC_ADMIN.rpc("fc_release", { p_id: id, p_actual: actual, p_status: status }); } catch (_) {}
-}
+const BUDGET = { firecrawl: 15, ai: 3 };
 
 const STATE_NAMES: Record<string, string> = {
   AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
@@ -97,9 +84,6 @@ class Budget {
 
 async function fcSearch(query: string, key: string, limit: number, scrape: boolean, budget: Budget) {
   if (!budget.canFc()) return [];
-  const cost = scrape ? limit * 2 : limit;
-  const resId = await fcReserve("seller-discovery:search", cost);
-  if (!resId) { console.warn("fc_throttled search"); return []; }
   budget.fc++;
   try {
     const r = await fetch(`${FC_V2}/search`, {
@@ -112,20 +96,16 @@ async function fcSearch(query: string, key: string, limit: number, scrape: boole
     });
     if (!r.ok) {
       console.warn(`fc ${r.status}: ${(await r.text()).slice(0, 200)}`);
-      await fcRelease(resId, cost, "failed");
       return [];
     }
     const d = await r.json();
     const arr = d?.data?.web ?? d?.data ?? d?.web ?? [];
-    await fcRelease(resId, cost, "done");
     return Array.isArray(arr) ? arr : [];
-  } catch (e) { console.warn("fc threw", e); await fcRelease(resId, cost, "failed"); return []; }
+  } catch (e) { console.warn("fc threw", e); return []; }
 }
 
 async function fcScrape(url: string, key: string, budget: Budget): Promise<string | null> {
   if (!budget.canFc()) return null;
-  const resId = await fcReserve("seller-discovery:scrape", 1);
-  if (!resId) { console.warn("fc_throttled scrape"); return null; }
   budget.fc++;
   try {
     const r = await fetch(`${FC_V2}/scrape`, {
@@ -133,11 +113,10 @@ async function fcScrape(url: string, key: string, budget: Budget): Promise<strin
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({ url, formats: ["markdown"], onlyMainContent: true }),
     });
-    if (!r.ok) { await fcRelease(resId, 1, "failed"); return null; }
+    if (!r.ok) return null;
     const d = await r.json();
-    await fcRelease(resId, 1, "done");
     return d?.data?.markdown ?? d?.markdown ?? null;
-  } catch (_) { await fcRelease(resId, 1, "failed"); return null; }
+  } catch (_) { return null; }
 }
 
 const GATEWAY_HEADERS = (key: string) => ({
@@ -322,7 +301,7 @@ async function geminiPublicContactHunt(lead: any, targetName: string | null, ent
     targetName ? `"${targetName}" ${lead.property_city ?? ""} email contact` : null,
     targetName ? `"${targetName}" linkedin OR rocketreach` : null,
     `"${owner}" contact email phone`,
-    entity ? `"${owner}" site:bizapedia.com` : null,
+    entity ? `"${owner}" site:opencorporates.com OR site:bizapedia.com` : null,
   ].filter(Boolean) as string[];
 
   const evidence: string[] = [];
@@ -422,16 +401,54 @@ ${blob.slice(0, 14000)}` },
   finally { clearTimeout(tid); }
 }
 
-// ====== (OpenCorporates removed — API requires paid key; using SoS/bizapedia via Firecrawl instead) ======
+// ====== OpenCorporates direct API (no key needed for low volume) ======
+// Returns up to 5 candidate companies in the lead's jurisdiction.
+async function ocSearchCompanies(entityName: string, stateCode: string | null): Promise<any[]> {
+  try {
+    const jurisdiction = stateCode ? `us_${stateCode.toLowerCase()}` : "";
+    const url = new URL("https://api.opencorporates.com/v0.4/companies/search");
+    url.searchParams.set("q", entityName);
+    if (jurisdiction) url.searchParams.set("jurisdiction_code", jurisdiction);
+    url.searchParams.set("per_page", "5");
+    url.searchParams.set("order", "score");
+    const r = await fetch(url.toString(), { headers: { "Accept": "application/json" } });
+    if (!r.ok) {
+      console.warn(`opencorporates ${r.status}`);
+      return [];
+    }
+    const d = await r.json();
+    return d?.results?.companies?.map((c: any) => c.company).filter(Boolean) ?? [];
+  } catch (e) {
+    console.warn("opencorporates threw", e);
+    return [];
+  }
+}
 
+// Returns the company's officers list (name, position) from OpenCorporates.
+async function ocGetOfficers(jurisdiction: string, companyNumber: string): Promise<Principal[]> {
+  try {
+    const url = `https://api.opencorporates.com/v0.4/companies/${jurisdiction}/${companyNumber}/officers`;
+    const r = await fetch(url, { headers: { "Accept": "application/json" } });
+    if (!r.ok) return [];
+    const d = await r.json();
+    const arr = d?.results?.officers ?? [];
+    return arr.map((o: any) => o.officer).filter(Boolean).map((o: any) => ({
+      name: String(o.name ?? "").trim(),
+      role: o.position ? String(o.position) : null,
+      source: "opencorporates",
+      source_url: o.opencorporates_url ?? null,
+    })).filter((p: Principal) => looksLikePersonName(p.name));
+  } catch (e) {
+    console.warn("opencorporates officers threw", e);
+    return [];
+  }
+}
 
 // Rank principals: manager > managing member > member > officer > director > registered agent.
 function rankPrincipal(p: Principal): number {
   const r = (p.role ?? "").toLowerCase();
-  if (/managing member|managing partner|\bmanager\b/.test(r)) return 100;
-  if (/founder|co-founder|owner/.test(r)) return 95;
+  if (/managing member|manager/.test(r)) return 100;
   if (/president|ceo|chief executive/.test(r)) return 90;
-  if (/\bcfo|\bcoo|vice president|\bvp\b/.test(r)) return 85;
   if (/\bmember\b/.test(r)) return 80;
   if (/officer|director|principal/.test(r)) return 70;
   if (/registered agent/.test(r)) return 40;
@@ -456,7 +473,7 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const fcKey = Deno.env.get("FIRECRAWL_API_KEY_OVERRIDE");
+  const fcKey = Deno.env.get("FIRECRAWL_API_KEY");
   const lovableKey = Deno.env.get("OPENAI_API_KEY");
 
   if (!fcKey || !lovableKey) {
@@ -498,31 +515,9 @@ Deno.serve(async (req) => {
   // Cache: only skip when we already have a real email/phone. A LinkedIn-only
   // partial needs another pass because Gemini search may now succeed.
   if (!body.force && !body.company_website && lead.discovery_status === "reachable" && (isUnlockedEmail(lead.decision_maker_email) || lead.decision_maker_phone)) {
-    if (jobId) await supabaseEarly.from("pipeline_jobs").update({ status: "done", finished_at: new Date().toISOString(), result: { skipped: "already_reachable" } }).eq("id", jobId);
     return new Response(JSON.stringify({ ok: true, cached: true, status: lead.discovery_status }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
-  }
-
-  // Cooldown: don't re-run seller-discovery for the same lead within 24h
-  // unless explicitly forced. Prevents the dispatcher from re-enqueueing
-  // the same lead over and over and burning Firecrawl credits.
-  if (!body.force && !body.company_website) {
-    const { data: recent } = await supabaseEarly
-      .from("pipeline_jobs")
-      .select("id, finished_at")
-      .eq("kind", "seller_discovery")
-      .eq("lead_id", leadId)
-      .eq("status", "done")
-      .gte("finished_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
-      .limit(1)
-      .maybeSingle();
-    if (recent) {
-      if (jobId) await supabaseEarly.from("pipeline_jobs").update({ status: "done", finished_at: new Date().toISOString(), result: { skipped: "cooldown_24h", prior_job: recent.id } }).eq("id", jobId);
-      return new Response(JSON.stringify({ ok: true, skipped: "cooldown_24h" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
   }
 
   const budget = new Budget();
@@ -551,33 +546,50 @@ Deno.serve(async (req) => {
   if (entity && ownerName) {
     d.passes.entity_unmask = true;
 
-    // 1a. Firecrawl SoS / bizapedia / opencorporates / zoominfo / rocketreach search.
+    // 1a. OpenCorporates direct API (free, no key).
+    const ocCompanies = await ocSearchCompanies(ownerName, state);
+    const top = ocCompanies[0];
+    if (top) {
+      if (top.opencorporates_url && !d.entity_registry_url) {
+        d.entity_registry_url = top.opencorporates_url;
+        d.sources.push("opencorporates.com");
+      }
+      // Try officers endpoint for the best match.
+      if (top.jurisdiction_code && top.company_number) {
+        const officers = await ocGetOfficers(top.jurisdiction_code, top.company_number);
+        if (officers.length) {
+          d.principals.push(...officers);
+          d.sources.push("opencorporates:officers");
+        }
+      }
+    }
+
+    // 1b. Firecrawl SoS / bizapedia search to fill gaps and grab registered agent.
     const queries = [
       `"${ownerName}" ${stateName} secretary of state business entity search`,
       `"${ownerName}" site:bizapedia.com`,
       `"${ownerName}" site:opencorporates.com`,
-      `"${ownerName}" site:zoominfo.com/c OR site:rocketreach.co/company`,
-      `"${ownerName}" "manager" OR "managing member" OR "president" OR "CEO" OR "founder" OR "principal"`,
     ];
     for (const q of queries) {
       const res = await fcSearch(q, fcKey, 3, true, budget);
       for (const r of res) {
         const md = `${r.url ?? ""}\n${r.title ?? ""}\n${r.markdown ?? r.description ?? ""}`;
         evidence.push(md);
+        if (r.url && /opencorporates\.com/.test(r.url) && !d.entity_registry_url) {
+          d.entity_registry_url = r.url;
+          d.sources.push("opencorporates.com");
+        }
         // Pull every (role → name) match, not just the first.
-        const roleRe = /(Manager|Managing Member|Managing Partner|President|CEO|Chief Executive Officer|Founder|Co-Founder|Owner|Principal|Officer|Member|Director|Vice President|VP|CFO|COO|Registered Agent)[\s:|\-–—]+([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)/g;
+        const roleRe = /(Manager|Managing Member|President|CEO|Officer|Member|Director|Registered Agent)[\s:|\-]+([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)/g;
         let mm: RegExpExecArray | null;
         while ((mm = roleRe.exec(md)) !== null) {
           if (looksLikePersonName(mm[2])) {
-            d.principals.push({ name: mm[2], role: mm[1], source: "sos", source_url: r.url ?? null });
-          }
-        }
-        // Inverse pattern: "Jane Doe, Manager" / "John Smith – President"
-        const nameRoleRe = /([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)[\s,|\-–—]+(Manager|Managing Member|Managing Partner|President|CEO|Chief Executive Officer|Founder|Co-Founder|Owner|Principal|Officer|Member|Director|Vice President|VP|CFO|COO)\b/g;
-        let nm: RegExpExecArray | null;
-        while ((nm = nameRoleRe.exec(md)) !== null) {
-          if (looksLikePersonName(nm[1])) {
-            d.principals.push({ name: nm[1], role: nm[2], source: "sos", source_url: r.url ?? null });
+            d.principals.push({
+              name: mm[2],
+              role: mm[1],
+              source: r.url && /opencorporates/.test(r.url) ? "opencorporates" : "sos",
+              source_url: r.url ?? null,
+            });
           }
         }
         // Related entities (other LLCs near this name)
@@ -590,7 +602,6 @@ Deno.serve(async (req) => {
         }
       }
     }
-
 
     // 1c. Pick the best human principal — skip brokers/agents.
     d.principals = dedupePrincipals(d.principals).filter((p) => !isBrokerTitle(p.role));
@@ -606,11 +617,6 @@ Deno.serve(async (req) => {
     setField(d, "name", ownerName, 60, "deed:grantor");
     setField(d, "role", "Owner", 60, "deed:grantor");
   }
-
-  // Soft gate: if SoS unmask returned no human, continue running website +
-  // LinkedIn leadership passes — they're often what actually unmasks the entity.
-  // We re-evaluate "unmask_failed" at the end and mark needs_review then.
-
 
   const targetName = isKnownOwnerName(d.name) ? d.name : (isKnownOwnerName(ownerName) ? ownerName : null);
 
@@ -658,64 +664,12 @@ Deno.serve(async (req) => {
     setField(d, "company_website", normalizeWebsite(domain), body.company_website ? 90 : 60, body.company_website ? "user" : "cached");
   }
 
-  // Confirm/scrape homepage + contact + leadership pages (team/about/leadership).
+  // Confirm/scrape homepage + contact page
   if (domain) {
     const homeMd = await fcScrape(`https://${domain}`, fcKey, budget);
     if (homeMd) evidence.push(`HOMEPAGE ${domain}\n${homeMd.slice(0, 4000)}`);
     const contactMd = await fcScrape(`https://${domain}/contact`, fcKey, budget);
     if (contactMd) evidence.push(`CONTACT ${domain}\n${contactMd.slice(0, 4000)}`);
-
-    // Leadership pages — strongest signal for "who runs this company"
-    for (const path of ["/team", "/about", "/leadership", "/our-team", "/about-us"]) {
-      if (!budget.canFc()) break;
-      const md = await fcScrape(`https://${domain}${path}`, fcKey, budget);
-      if (!md) continue;
-      evidence.push(`LEADERSHIP ${domain}${path}\n${md.slice(0, 5000)}`);
-      // Extract Name + Title pairs from the page
-      const reA = /([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)[\s,|\-–—\n]+(Founder|Co-Founder|Owner|Managing Partner|Managing Member|Manager|President|CEO|Chief Executive Officer|CFO|COO|Principal|Director|Vice President|VP)\b/g;
-      const reB = /(Founder|Co-Founder|Owner|Managing Partner|Managing Member|Manager|President|CEO|Chief Executive Officer|CFO|COO|Principal|Director|Vice President|VP)[\s:|\-–—\n]+([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)/g;
-      let m: RegExpExecArray | null;
-      while ((m = reA.exec(md)) !== null) {
-        if (looksLikePersonName(m[1]) && !isBrokerTitle(m[2])) {
-          d.principals.push({ name: m[1], role: m[2], source: "company_website", source_url: `https://${domain}${path}` });
-        }
-      }
-      while ((m = reB.exec(md)) !== null) {
-        if (looksLikePersonName(m[2]) && !isBrokerTitle(m[1])) {
-          d.principals.push({ name: m[2], role: m[1], source: "company_website", source_url: `https://${domain}${path}` });
-        }
-      }
-    }
-  }
-
-  // Search-based leadership hunt: "[company] CEO/President/founder LinkedIn"
-  if (ownerName && entity && budget.canFc()) {
-    const lq = `"${ownerName}" (CEO OR President OR Founder OR "Managing Partner" OR Owner) site:linkedin.com/in`;
-    const lres = await fcSearch(lq, fcKey, 4, false, budget);
-    for (const r of lres) {
-      const u: string = r.url ?? "";
-      const title: string = r.title ?? "";
-      if (!/linkedin\.com\/in\//i.test(u)) continue;
-      // LinkedIn title typically: "Jane Doe - CEO at Acme LLC | LinkedIn"
-      const tm = title.match(/^([A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+){1,3})\s*[-–—|]\s*([^|]+?)(?:\s+at\s+|\s*\||$)/);
-      if (tm && looksLikePersonName(tm[1]) && !isBrokerTitle(tm[2])) {
-        d.principals.push({ name: tm[1], role: tm[2].trim(), source: "linkedin_search", source_url: u });
-      }
-      evidence.push(`LINKEDIN ${u}\n${title}\n${r.description ?? ""}`);
-    }
-  }
-
-  // Re-rank principals (now includes website + LinkedIn finds) and upgrade if stronger than current name.
-  if (d.principals.length) {
-    d.principals = dedupePrincipals(d.principals).filter((p) => !isBrokerTitle(p.role));
-    const ranked = [...d.principals].sort((a, b) => rankPrincipal(b) - rankPrincipal(a));
-    const best = ranked[0];
-    const curScore = d.confidence_by_field["name"]?.score ?? 0;
-    if (best && rankPrincipal(best) >= 70 && curScore < 70) {
-      setField(d, "name", best.name, 70, `leadership:${best.source}`);
-      if (best.role) setField(d, "role", best.role, 70, `leadership:${best.source}`);
-      d.notes.push(`Identified ${best.name} (${best.role ?? "principal"}) via ${best.source}`);
-    }
   }
 
   // Source records sometimes carry contact info — but ONLY if the host is
@@ -821,120 +775,11 @@ Deno.serve(async (req) => {
     }
   }
 
-  // ============ PASS 6.5 — Second-pass agent (deeper SoS + LinkedIn + PM) ============
-  // Trigger when entity owner AND we still don't have a strong human principal.
-  const bestRankSoFar = d.principals.length
-    ? Math.max(...d.principals.map(rankPrincipal))
-    : 0;
-  const needsSecondPass = entity
-    && !lead.second_pass_ran
-    && (!d.name || bestRankSoFar < 70 || (d.confidence_by_field["name"]?.score ?? 0) < 60);
-
-  if (needsSecondPass && ownerName && budget.canFc()) {
-    d.passes.second_pass = true;
-    const stateSlug = (state ?? "").toLowerCase();
-    const sosQueries = [
-      `"${ownerName}" site:opencorporates.com/companies/us_${stateSlug}`,
-      `"${ownerName}" site:sos.${stateSlug}.gov OR site:sos.state.${stateSlug}.us`,
-      `"${ownerName}" "annual report" filing ${stateName}`,
-      `"${ownerName}" "statement of information" OR "operating agreement"`,
-      `site:linkedin.com/company "${ownerName}"`,
-      lead.property_address
-        ? `"${lead.property_address}" "property manager" OR "managed by" OR "leasing contact"`
-        : null,
-      city ? `"${ownerName}" "${city}" property manager` : null,
-    ].filter(Boolean) as string[];
-
-    for (const q of sosQueries) {
-      if (!budget.canFc()) break;
-      const res = await fcSearch(q, fcKey, 3, true, budget);
-      for (const r of res) {
-        const u: string = r.url ?? "";
-        const md = `${u}\n${r.title ?? ""}\n${r.markdown ?? r.description ?? ""}`;
-        evidence.push(md);
-
-        if (/linkedin\.com\/company/i.test(u) && r.markdown) {
-          const inLinks = Array.from((r.markdown as string).matchAll(/linkedin\.com\/in\/[a-z0-9-]+/gi))
-            .map((m) => `https://www.${m[0]}`)
-            .slice(0, 5);
-          for (const li of inLinks) {
-            const guess = splitLinkedInName(li);
-            if (guess) {
-              d.principals.push({
-                name: `${guess.first} ${guess.last}`,
-                role: "Employee",
-                source: "linkedin_company",
-                source_url: li,
-              });
-            }
-          }
-        }
-
-        const roleRe = /(Manager|Managing Member|Managing Partner|President|CEO|Chief Executive Officer|Founder|Co-Founder|Owner|Principal|Officer|Member|Director|Vice President|VP|CFO|COO|Property Manager|Leasing Manager)[\s:|\-–—]+([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)/g;
-        let mm: RegExpExecArray | null;
-        while ((mm = roleRe.exec(md)) !== null) {
-          if (looksLikePersonName(mm[2]) && !isBrokerTitle(mm[1])) {
-            d.principals.push({ name: mm[2], role: mm[1], source: "second_pass", source_url: u });
-          }
-        }
-        const nameRoleRe = /([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)[\s,|\-–—]+(Manager|Managing Member|Managing Partner|President|CEO|Founder|Co-Founder|Owner|Principal|Officer|Member|Director|Property Manager|Leasing Manager)\b/g;
-        let nm: RegExpExecArray | null;
-        while ((nm = nameRoleRe.exec(md)) !== null) {
-          if (looksLikePersonName(nm[1]) && !isBrokerTitle(nm[2])) {
-            d.principals.push({ name: nm[1], role: nm[2], source: "second_pass", source_url: u });
-          }
-        }
-      }
-    }
-
-    d.principals = dedupePrincipals(d.principals).filter((p) => !isBrokerTitle(p.role));
-    const ranked2 = [...d.principals].sort((a, b) => rankPrincipal(b) - rankPrincipal(a));
-    const best2 = ranked2[0];
-    const curScore = d.confidence_by_field["name"]?.score ?? 0;
-    if (best2 && rankPrincipal(best2) >= 70 && curScore < 75) {
-      setField(d, "name", best2.name, 75, `second_pass:${best2.source}`);
-      if (best2.role) setField(d, "role", best2.role, 75, `second_pass:${best2.source}`);
-      d.notes.push(`Second pass identified ${best2.name} (${best2.role ?? "principal"}) via ${best2.source}`);
-    }
-    d.sources.push("second_pass");
-  }
-
-  // ============ Decision-maker verification against entity principals ============
-  let dmVerified = false;
-  let dmVerificationSource: string | null = null;
-  if (!entity) {
-    if (d.name && ownerName && d.name.toUpperCase().trim() === ownerName.toUpperCase().trim()) {
-      dmVerified = true;
-      dmVerificationSource = "deed:grantor";
-    }
-  } else if (d.name && d.principals.length) {
-    const dmNorm = d.name.toUpperCase().replace(/\s+/g, " ").trim();
-    const match = d.principals.find((p) => {
-      const pn = p.name.toUpperCase().replace(/\s+/g, " ").trim();
-      if (pn === dmNorm) return true;
-      const a = splitName(dmNorm); const b = splitName(pn);
-      return !!(a && b && a.first === b.first && a.last === b.last);
-    });
-    if (match && !/registered agent/i.test(match.role ?? "")) {
-      dmVerified = true;
-      dmVerificationSource = match.source;
-    }
-  }
-  if (!dmVerified && entity && d.name) {
-    d.notes.push(`DM ${d.name} not verified against entity principals — flag for manual review`);
-  }
-
   // ============ Determine status ============
   let status: "none" | "partial" | "reachable" | "failed" = "none";
   if (d.email || d.phone || d.company_website) status = "reachable";
   else if (d.linkedin || d.entity_registry_url) status = "partial";
   else status = "failed";
-
-  // Downgrade unverified entity hits: don't promise "reachable" when we can't
-  // tie the contact back to the SoS principal list.
-  if (entity && status === "reachable" && !dmVerified) {
-    status = "partial";
-  }
 
   // Compute completeness (0-100)
   let completeness = 0;
@@ -976,14 +821,9 @@ Deno.serve(async (req) => {
       Math.round(Object.values(d.confidence_by_field).reduce((a: number, v: any) => a + v.score, 0) / Math.max(1, Object.keys(d.confidence_by_field).length)),
     ),
     contact_completeness: Math.max(lead.contact_completeness ?? 0, completeness),
-    enrichment_payload: { ...(lead.enrichment_payload ?? {}), discovery_v2: { ...d, budget_used: budget, dm_verified: dmVerified, dm_verification_source: dmVerificationSource } },
+    enrichment_payload: { ...(lead.enrichment_payload ?? {}), discovery_v2: { ...d, budget_used: budget } },
     data_sources: Array.from(new Set([...(lead.data_sources ?? []), ...d.sources])),
-    decision_maker_verified: dmVerified,
-    decision_maker_verification_source: dmVerificationSource,
-    second_pass_ran: lead.second_pass_ran || !!d.passes.second_pass,
   };
-
-
 
   // If draft email exists with no recipient, update it
   if (d.email) {
@@ -1004,20 +844,20 @@ Deno.serve(async (req) => {
   await supabase.from("lead_activities").insert({
     lead_id: leadId,
     kind: "seller_discovery",
-    summary: `Discovery: ${status}${d.email ? ` · email ✓` : ""}${d.phone ? " · phone ✓" : ""}${d.linkedin ? " · LinkedIn ✓" : ""}${entity ? (dmVerified ? " · DM verified ✓" : " · DM unverified ⚠") : ""}${d.passes.second_pass ? " · 2nd-pass" : ""} · used ${budget.fc} FC + ${budget.ai} AI`,
-    payload: { discovery: d, budget_used: budget, dm_verified: dmVerified, dm_verification_source: dmVerificationSource },
+    summary: `Discovery: ${status}${d.email ? ` · email ✓` : ""}${d.phone ? " · phone ✓" : ""}${d.linkedin ? " · LinkedIn ✓" : ""} · used ${budget.fc} FC + ${budget.ai} AI`,
+    payload: { discovery: d, budget_used: budget },
   });
 
   // Queue brief refresh now that discovery is done (so the drawer reflects it).
   await supabase.from("pipeline_jobs").insert({
-    kind: "lead_brief", lead_id: leadId, priority: 80, payload: {},
+    kind: "lead_brief", lead_id: leadId, priority: 80,
   });
 
   // Track 3: profile + wealth scan for promising leads (score >= 50)
   if ((lead.score ?? 0) >= 50) {
     await supabase.from("pipeline_jobs").insert([
-      { kind: "wealth_scan", lead_id: leadId, priority: 65, payload: {} },
-      { kind: "profile_seller", lead_id: leadId, priority: 68, payload: {} },
+      { kind: "wealth_scan", lead_id: leadId, priority: 65 },
+      { kind: "profile_seller", lead_id: leadId, priority: 68 },
     ]);
   }
 
@@ -1030,8 +870,6 @@ Deno.serve(async (req) => {
       result: { status, useful: willBeUseful, has_email: !!d.email, has_phone: !!d.phone, has_website: !!d.company_website },
     }).eq("id", jobId);
   }
-
-  supabase.functions.invoke("job-dispatcher", { body: { trigger: "seller_discovery_followups" } }).catch(() => {});
 
   return new Response(JSON.stringify({ ok: true, status, discovery: d, budget_used: budget }), {
     headers: { ...corsHeaders, "Content-Type": "application/json" },

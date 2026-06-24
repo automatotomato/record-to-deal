@@ -66,12 +66,6 @@ type Lead = any;
 type TabKey = "candidates" | "presale" | "active";
 type OwnerRollup = { owner_key: string; property_count: number; total_sale_value: number; total_tax_exposure: number };
 
-const MANUAL_SCAN_LIMIT = 12;
-const MANUAL_COUNTY_SCAN_LIMIT = 4;
-// Commercial-only thesis: residential source removed. NV sellers skipped (no arbitrage to pitch).
-const EXTERNAL_SOURCES = [["commercial", 0], ["court", 5], ["sec", 10]] as const;
-const EXCLUDED_SCAN_STATES = new Set(["NV"]);
-
 
 // Collapsed 3-tier priority system. The DB has CRITICAL/URGENT/ACTIVE/HOT/
 // WARM/FOLLOW_UP/COLD/etc. — too many overlapping labels. We bucket them:
@@ -189,8 +183,8 @@ export const OutreachDashboard = () => {
     queryFn: async () => {
       const { data } = await supabase
         .from("pipeline_jobs")
-        .select("kind, created_at, finished_at, status, result, last_error")
-        .in("kind", ["scan_sources", "scan_external"])
+        .select("created_at, finished_at, status, result")
+        .eq("kind", "scan_sources")
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -332,54 +326,28 @@ export const OutreachDashboard = () => {
     setRunning(true);
     try {
       const [{ data: counties, error: cErr }, { data: rates }, { data: activeJobs }] = await Promise.all([
-        supabase.from("counties").select("id, state, last_run_at").eq("enabled", true),
+        supabase.from("counties").select("id, state").eq("enabled", true),
         supabase.from("state_tax_rates").select("state, priority_rank, is_target"),
         supabase
           .from("pipeline_jobs")
-          .select("kind, county_id, payload")
-          .in("kind", ["scan_sources", "scan_external"])
+          .select("county_id")
+          .eq("kind", "scan_sources")
           .in("status", ["queued", "retry", "running"]),
       ]);
       if (cErr) throw cErr;
       const rankByState = new Map<string, number>();
       for (const r of rates ?? []) rankByState.set(r.state, r.priority_rank ?? 99);
-      const activeCountyIds = new Set((activeJobs ?? []).filter((j: any) => j.kind === "scan_sources").map((j: any) => j.county_id).filter(Boolean));
-      const activeExternal = new Set((activeJobs ?? []).filter((j: any) => j.kind === "scan_external").map((j: any) => `${j.payload?.state}:${j.payload?.source}`));
-      const cutoff = Date.now() - 12 * 60 * 60 * 1000;
-      const countyRows: any[] = (counties ?? [])
-        .filter((c) => !EXCLUDED_SCAN_STATES.has(c.state))
-        .filter((c) => !activeCountyIds.has(c.id))
-        .filter((c) => !c.last_run_at || new Date(c.last_run_at).getTime() < cutoff)
-        .map((c) => ({
+      const activeCountyIds = new Set((activeJobs ?? []).map((j) => j.county_id).filter(Boolean));
+      const rows = (counties ?? []).filter((c) => !activeCountyIds.has(c.id)).map((c) => ({
         kind: "scan_sources",
         county_id: c.id,
         priority: (rankByState.get(c.state) ?? 99) * 10,
-        payload: {},
-      }))
-        .sort((a, b) => a.priority - b.priority)
-        .slice(0, MANUAL_COUNTY_SCAN_LIMIT);
-      const externalRows: any[] = [];
-      for (const state of Array.from(new Set((counties ?? []).map((c) => c.state)))) {
-        if (EXCLUDED_SCAN_STATES.has(state)) continue;
-        for (const [source, offset] of EXTERNAL_SOURCES) {
-          if (!activeExternal.has(`${state}:${source}`)) externalRows.push({
-            kind: "scan_external",
-            payload: { state, source },
-            priority: (rankByState.get(state) ?? 99) * 10 + offset,
-          });
-        }
-      }
-      const rows = [
-        ...countyRows,
-        ...externalRows.sort((a, b) => a.priority - b.priority).slice(0, MANUAL_SCAN_LIMIT - countyRows.length),
-      ];
-      if (!rows.length) { toast.info("A scan is already queued or running for every enabled source."); return; }
+      }));
+      if (!rows.length) { toast.info("A scan is already queued or running for every enabled county."); return; }
       const { error } = await supabase.from("pipeline_jobs").insert(rows);
       if (error) throw error;
       supabase.functions.invoke("job-dispatcher", { body: { trigger: "manual" } });
-      const countiesQueued = rows.filter((r) => r.kind === "scan_sources").length;
-      const externalQueued = rows.length - countiesQueued;
-      toast.success(`Queued ${rows.length} scans (${countiesQueued} county, ${externalQueued} external) — processing now.`);
+      toast.success(`Queued ${rows.length} county scans — processing now.`);
       qc.invalidateQueries({ queryKey: ["leads"] });
       qc.invalidateQueries({ queryKey: ["last-scan-job"] });
     } catch (e: any) {
@@ -419,13 +387,6 @@ export const OutreachDashboard = () => {
   );
 
   const lastRefreshed = lastRun?.finished_at ?? lastRun?.created_at;
-  const lastResult = (lastRun?.result ?? {}) as any;
-  const lastScanIssue = lastRun?.last_error
-    ?? (Array.isArray(lastResult.errors) && lastResult.errors.length ? lastResult.errors[0] : null)
-    ?? (lastResult.skipped ? `Skipped: ${lastResult.skipped}` : null);
-  const lastScanSummary = lastRun
-    ? `${lastRun.kind === "scan_external" ? "External" : "County"} ${lastRun.status}${typeof lastResult.inserted === "number" ? ` · ${lastResult.inserted} new` : ""}${typeof lastResult.found === "number" ? ` · ${lastResult.found} found` : ""}`
-    : null;
 
   return (
     <TooltipProvider delayDuration={150}>
@@ -506,19 +467,11 @@ export const OutreachDashboard = () => {
 
         {/* 1031 Pipeline Health strip — client-facing one-liner */}
         <div className="rounded-lg border bg-card p-4 md:p-5">
-          <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
-            <div className="flex items-center gap-2">
-              <Clock className="h-3.5 w-3.5 text-accent" />
-              <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground">
-                Out-of-State 1031 → Nevada Pipeline
-              </span>
-            </div>
-            {lastScanSummary && (
-              <div className="text-right text-[11px] font-mono text-muted-foreground max-w-md">
-                <div>{lastScanSummary}</div>
-                {lastScanIssue && <div className="text-urgent truncate" title={lastScanIssue}>{lastScanIssue}</div>}
-              </div>
-            )}
+          <div className="flex items-center gap-2 mb-3">
+            <Clock className="h-3.5 w-3.5 text-accent" />
+            <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground">
+              1031 Pipeline Health
+            </span>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <HealthStat label="In 45-day window" value={stats.in45} tone={stats.in45 ? "accent" : "muted"} hint="Sellers still inside the 45-day identification window — the most actionable cohort." />
@@ -796,7 +749,6 @@ export const OutreachDashboard = () => {
                         <TableCell>
                           <div className="text-sm tabular">{fmtDate(l.sale_date)}</div>
                           <div className="text-[11px] text-muted-foreground">{fmtRelative(l.sale_date)}</div>
-                          <DeadlineChip d45={(l as any).days_until_45_deadline} d180={(l as any).days_until_180_deadline} />
                         </TableCell>
                         <TableCell>
                           <LeadStatePill lead={l} />
@@ -962,42 +914,6 @@ const WindowPill = ({ saleDate }: { saleDate?: string | null }) => {
       <TooltipContent>Days left in the 45-day 1031 identification window.</TooltipContent>
     </Tooltip>
   );
-};
-
-const DeadlineChip = ({ d45, d180 }: { d45?: number | null; d180?: number | null }) => {
-  if (d45 == null && d180 == null) return null;
-  // Prefer the 45-day ID clock while it's open; otherwise show the 180-day close clock.
-  if (d45 != null && d45 > 0) {
-    const tone =
-      d45 <= 7
-        ? "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/20"
-        : d45 <= 21
-        ? "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/20"
-        : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/20";
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Badge variant="outline" className={cn("mt-1 gap-1 font-normal text-[10px]", tone)}>
-            <Clock className="h-2.5 w-2.5" /> {d45}d to ID
-          </Badge>
-        </TooltipTrigger>
-        <TooltipContent>Days until 1031 45-day identification deadline.</TooltipContent>
-      </Tooltip>
-    );
-  }
-  if (d180 != null && d180 > 0) {
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Badge variant="outline" className="mt-1 gap-1 font-normal text-[10px] bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/20">
-            <Clock className="h-2.5 w-2.5" /> {d180}d to close
-          </Badge>
-        </TooltipTrigger>
-        <TooltipContent>45-day ID window closed; days until 180-day close deadline.</TooltipContent>
-      </Tooltip>
-    );
-  }
-  return null;
 };
 
 const SellerIcons = ({ lead }: { lead: any }) => {

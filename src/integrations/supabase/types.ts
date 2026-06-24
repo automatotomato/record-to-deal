@@ -92,39 +92,6 @@ export type Database = {
         }
         Relationships: []
       }
-      firecrawl_usage: {
-        Row: {
-          actual_credits: number | null
-          caller: string
-          estimated_credits: number
-          id: string
-          note: string | null
-          released_at: string | null
-          started_at: string
-          status: string
-        }
-        Insert: {
-          actual_credits?: number | null
-          caller: string
-          estimated_credits?: number
-          id?: string
-          note?: string | null
-          released_at?: string | null
-          started_at?: string
-          status?: string
-        }
-        Update: {
-          actual_credits?: number | null
-          caller?: string
-          estimated_credits?: number
-          id?: string
-          note?: string | null
-          released_at?: string | null
-          started_at?: string
-          status?: string
-        }
-        Relationships: []
-      }
       lead_activities: {
         Row: {
           actor_id: string | null
@@ -237,15 +204,11 @@ export type Database = {
           created_at: string
           data_sources: string[] | null
           days_since_sale: number | null
-          days_until_180_deadline: number | null
-          days_until_45_deadline: number | null
           decision_maker_email: string | null
           decision_maker_linkedin: string | null
           decision_maker_name: string | null
           decision_maker_phone: string | null
           decision_maker_role: string | null
-          decision_maker_verification_source: string | null
-          decision_maker_verified: boolean
           deed_date: string | null
           deed_source_url: string | null
           depreciation_recapture_est: number | null
@@ -306,7 +269,6 @@ export type Database = {
           score: number | null
           score_breakdown: Json | null
           scout_confidence: number | null
-          second_pass_ran: boolean
           smarty_key: string | null
           source_record_url: string | null
           state: string
@@ -346,15 +308,11 @@ export type Database = {
           created_at?: string
           data_sources?: string[] | null
           days_since_sale?: number | null
-          days_until_180_deadline?: number | null
-          days_until_45_deadline?: number | null
           decision_maker_email?: string | null
           decision_maker_linkedin?: string | null
           decision_maker_name?: string | null
           decision_maker_phone?: string | null
           decision_maker_role?: string | null
-          decision_maker_verification_source?: string | null
-          decision_maker_verified?: boolean
           deed_date?: string | null
           deed_source_url?: string | null
           depreciation_recapture_est?: number | null
@@ -415,7 +373,6 @@ export type Database = {
           score?: number | null
           score_breakdown?: Json | null
           scout_confidence?: number | null
-          second_pass_ran?: boolean
           smarty_key?: string | null
           source_record_url?: string | null
           state: string
@@ -455,15 +412,11 @@ export type Database = {
           created_at?: string
           data_sources?: string[] | null
           days_since_sale?: number | null
-          days_until_180_deadline?: number | null
-          days_until_45_deadline?: number | null
           decision_maker_email?: string | null
           decision_maker_linkedin?: string | null
           decision_maker_name?: string | null
           decision_maker_phone?: string | null
           decision_maker_role?: string | null
-          decision_maker_verification_source?: string | null
-          decision_maker_verified?: boolean
           deed_date?: string | null
           deed_source_url?: string | null
           depreciation_recapture_est?: number | null
@@ -524,7 +477,6 @@ export type Database = {
           score?: number | null
           score_breakdown?: Json | null
           scout_confidence?: number | null
-          second_pass_ran?: boolean
           smarty_key?: string | null
           source_record_url?: string | null
           state?: string
@@ -875,7 +827,6 @@ export type Database = {
       }
       state_tax_rates: {
         Row: {
-          city_surcharges: Json
           is_high_tax: boolean
           is_target: boolean
           ltcg_rate: number
@@ -887,7 +838,6 @@ export type Database = {
           updated_at: string
         }
         Insert: {
-          city_surcharges?: Json
           is_high_tax?: boolean
           is_target?: boolean
           ltcg_rate?: number
@@ -899,7 +849,6 @@ export type Database = {
           updated_at?: string
         }
         Update: {
-          city_surcharges?: Json
           is_high_tax?: boolean
           is_target?: boolean
           ltcg_rate?: number
@@ -1001,14 +950,6 @@ export type Database = {
           isOneToOne: false
           isSetofReturn: true
         }
-      }
-      fc_release: {
-        Args: { p_actual: number; p_id: string; p_status: string }
-        Returns: undefined
-      }
-      fc_reserve: {
-        Args: { p_caller: string; p_credits: number }
-        Returns: string
       }
       has_role: {
         Args: {

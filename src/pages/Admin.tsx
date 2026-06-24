@@ -11,12 +11,6 @@ import { toast } from "sonner";
 import { Loader2, Play } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 
-const MANUAL_SCAN_LIMIT = 12;
-const MANUAL_COUNTY_SCAN_LIMIT = 4;
-// Commercial-only thesis: residential source removed. NV sellers skipped (no arbitrage to pitch).
-const EXTERNAL_SOURCES = [["commercial", 0], ["court", 5], ["sec", 10]] as const;
-const EXCLUDED_SCAN_STATES = new Set(["NV"]);
-
 const Admin = () => {
   const { isAdmin, loading } = useAuth();
   const qc = useQueryClient();
@@ -26,60 +20,28 @@ const Admin = () => {
     setRunning(true);
     try {
       const [{ data: counties, error: cErr }, { data: rates }, { data: activeJobs }] = await Promise.all([
-        supabase.from("counties").select("id, state, last_run_at").eq("enabled", true),
+        supabase.from("counties").select("id, state").eq("enabled", true),
         supabase.from("state_tax_rates").select("state, priority_rank, is_target"),
         supabase
           .from("pipeline_jobs")
-          .select("kind, county_id, payload")
-          .in("kind", ["scan_sources", "scan_external"])
+          .select("county_id")
+          .eq("kind", "scan_sources")
           .in("status", ["queued", "retry", "running"]),
       ]);
       if (cErr) throw cErr;
       const rankByState = new Map<string, number>();
       for (const r of rates ?? []) rankByState.set(r.state, r.priority_rank ?? 99);
-      const activeCountyIds = new Set((activeJobs ?? []).filter((j: any) => j.kind === "scan_sources").map((j: any) => j.county_id).filter(Boolean));
-      const activeExternal = new Set((activeJobs ?? []).filter((j: any) => j.kind === "scan_external").map((j: any) => `${j.payload?.state}:${j.payload?.source}`));
-      const cutoff = Date.now() - 12 * 60 * 60 * 1000;
-      const eligible = (counties ?? [])
-        .filter((c) => !EXCLUDED_SCAN_STATES.has(c.state))
-        .filter((c) => !activeCountyIds.has(c.id))
-        .filter((c) => !c.last_run_at || new Date(c.last_run_at).getTime() < cutoff);
-      const cooledDown = (counties ?? []).length - eligible.length - activeCountyIds.size;
-      const countyRows: any[] = eligible.map((c) => ({
+      const activeCountyIds = new Set((activeJobs ?? []).map((j) => j.county_id).filter(Boolean));
+      const rows = (counties ?? []).filter((c) => !activeCountyIds.has(c.id)).map((c) => ({
         kind: "scan_sources",
         county_id: c.id,
         priority: (rankByState.get(c.state) ?? 99) * 10,
-        payload: {},
-      }))
-        .sort((a, b) => a.priority - b.priority)
-        .slice(0, MANUAL_COUNTY_SCAN_LIMIT);
-      const externalRows: any[] = [];
-      for (const state of Array.from(new Set((counties ?? []).map((c) => c.state)))) {
-        if (EXCLUDED_SCAN_STATES.has(state)) continue;
-        for (const [source, offset] of EXTERNAL_SOURCES) {
-          if (!activeExternal.has(`${state}:${source}`)) externalRows.push({
-            kind: "scan_external",
-            payload: { state, source },
-            priority: (rankByState.get(state) ?? 99) * 10 + offset,
-          });
-        }
-      }
-      const rows = [
-        ...countyRows,
-        ...externalRows.sort((a, b) => a.priority - b.priority).slice(0, MANUAL_SCAN_LIMIT - countyRows.length),
-      ];
-      if (!rows.length) {
-        toast.info(cooledDown > 0
-          ? `County records are in cooldown and external scans are already queued or running.`
-          : `A scan is already queued or running for every enabled source.`);
-        return;
-      }
+      }));
+      if (!rows.length) { toast.info("A scan is already queued or running for every enabled county."); return; }
       const { error } = await supabase.from("pipeline_jobs").insert(rows);
       if (error) throw error;
       supabase.functions.invoke("job-dispatcher", { body: { trigger: "manual" } });
-      const countiesQueued = rows.filter((r) => r.kind === "scan_sources").length;
-      const externalQueued = rows.length - countiesQueued;
-      toast.success(`Queued ${rows.length} scans (${countiesQueued} county, ${externalQueued} external) — processing now.`);
+      toast.success(`Queued ${rows.length} county scans — processing now.`);
       qc.invalidateQueries({ queryKey: ["counties"] });
       qc.invalidateQueries({ queryKey: ["leads"] });
       qc.invalidateQueries({ queryKey: ["pipeline-job-counts"] });

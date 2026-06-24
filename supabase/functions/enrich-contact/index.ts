@@ -21,31 +21,18 @@ function isUnlockedEmail(e?: string | null): boolean {
   return !/email_not_unlocked|domain\.com$|@apollo-locked/i.test(e);
 }
 
-const FC_ADMIN = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-async function fcReserve(caller: string, credits: number): Promise<string | null> {
-  try { const { data } = await FC_ADMIN.rpc("fc_reserve", { p_caller: caller, p_credits: credits }); return (data as string) ?? null; }
-  catch { return null; }
-}
-async function fcRelease(id: string | null, actual: number, status = "done") {
-  if (!id) return;
-  try { await FC_ADMIN.rpc("fc_release", { p_id: id, p_actual: actual, p_status: status }); } catch (_) {}
-}
-
 async function fcSearch(query: string, key: string, limit = 3) {
-  const resId = await fcReserve("enrich-contact:search", limit);
-  if (!resId) { console.warn("fc_throttled enrich-contact"); return []; }
   try {
     const resp = await fetch(`${FIRECRAWL_V2}/search`, {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({ query, limit }),
     });
-    if (!resp.ok) { await fcRelease(resId, limit, "failed"); return []; }
+    if (!resp.ok) return [];
     const data = await resp.json();
-    await fcRelease(resId, limit, "done");
     const arr = data?.data?.web ?? data?.data ?? [];
     return Array.isArray(arr) ? arr : [];
-  } catch { await fcRelease(resId, limit, "failed"); return []; }
+  } catch { return []; }
 }
 
 function isOutreachContact(l: any): boolean {
@@ -67,7 +54,7 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
-  const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY_OVERRIDE");
+  const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY");
 
   let body: { job_id?: string } = {};
   try { body = await req.json(); } catch (_) {}
@@ -161,18 +148,15 @@ Deno.serve(async (req) => {
   await supabase.from("pipeline_jobs").insert({
     kind: "seller_discovery", lead_id: leadId,
     priority: lead.is_urgent ? 35 : 60,
-    payload: {},
   });
   await supabase.from("pipeline_jobs").insert({
-    kind: "lead_brief", lead_id: leadId, priority: 80, payload: {},
+    kind: "lead_brief", lead_id: leadId, priority: 80,
   });
 
   await supabase.from("pipeline_jobs").update({
     status: "done", finished_at: new Date().toISOString(),
     result: { handed_off: "seller_discovery", linkedin_seeded: !!dmLinkedIn },
   }).eq("id", body.job_id);
-
-  supabase.functions.invoke("job-dispatcher", { body: { trigger: "enrich_contact_followups" } }).catch(() => {});
 
   return jsonOk({ ok: true, linkedin_seeded: !!dmLinkedIn });
 });
