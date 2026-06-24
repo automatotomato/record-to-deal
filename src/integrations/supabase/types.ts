@@ -98,6 +98,48 @@ export type Database = {
         }
         Relationships: []
       }
+      firecrawl_daily_budget: {
+        Row: {
+          caller: string
+          credits_used: number
+          day: string
+          updated_at: string
+        }
+        Insert: {
+          caller: string
+          credits_used?: number
+          day?: string
+          updated_at?: string
+        }
+        Update: {
+          caller?: string
+          credits_used?: number
+          day?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      firecrawl_url_cache: {
+        Row: {
+          caller: string
+          last_fetched_at: string
+          result_kind: string
+          url: string
+        }
+        Insert: {
+          caller: string
+          last_fetched_at?: string
+          result_kind?: string
+          url: string
+        }
+        Update: {
+          caller?: string
+          last_fetched_at?: string
+          result_kind?: string
+          url?: string
+        }
+        Relationships: []
+      }
       firecrawl_usage: {
         Row: {
           actual_credits: number | null
@@ -255,6 +297,7 @@ export type Database = {
           deed_date: string | null
           deed_source_url: string | null
           depreciation_recapture_est: number | null
+          discovery_attempt_count: number
           discovery_confidence_by_field: Json
           discovery_status: string
           document_type: string | null
@@ -269,6 +312,7 @@ export type Database = {
           id: string
           is_urgent: boolean
           last_contacted_at: string | null
+          last_discovery_attempt_at: string | null
           last_touchpoint_at: string | null
           last_touchpoint_kind: string | null
           list_date: string | null
@@ -364,6 +408,7 @@ export type Database = {
           deed_date?: string | null
           deed_source_url?: string | null
           depreciation_recapture_est?: number | null
+          discovery_attempt_count?: number
           discovery_confidence_by_field?: Json
           discovery_status?: string
           document_type?: string | null
@@ -378,6 +423,7 @@ export type Database = {
           id?: string
           is_urgent?: boolean
           last_contacted_at?: string | null
+          last_discovery_attempt_at?: string | null
           last_touchpoint_at?: string | null
           last_touchpoint_kind?: string | null
           list_date?: string | null
@@ -473,6 +519,7 @@ export type Database = {
           deed_date?: string | null
           deed_source_url?: string | null
           depreciation_recapture_est?: number | null
+          discovery_attempt_count?: number
           discovery_confidence_by_field?: Json
           discovery_status?: string
           document_type?: string | null
@@ -487,6 +534,7 @@ export type Database = {
           id?: string
           is_urgent?: boolean
           last_contacted_at?: string | null
+          last_discovery_attempt_at?: string | null
           last_touchpoint_at?: string | null
           last_touchpoint_kind?: string | null
           list_date?: string | null
@@ -1013,6 +1061,10 @@ export type Database = {
         Returns: undefined
       }
       fc_reserve: {
+        Args: { p_caller: string; p_credits: number }
+        Returns: string
+      }
+      fc_reserve_capped: {
         Args: { p_caller: string; p_credits: number }
         Returns: string
       }
