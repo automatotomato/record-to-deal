@@ -347,6 +347,7 @@ export const OutreachDashboard = () => {
       const activeExternal = new Set((activeJobs ?? []).filter((j: any) => j.kind === "scan_external").map((j: any) => `${j.payload?.state}:${j.payload?.source}`));
       const cutoff = Date.now() - 12 * 60 * 60 * 1000;
       const countyRows: any[] = (counties ?? [])
+        .filter((c) => !EXCLUDED_SCAN_STATES.has(c.state))
         .filter((c) => !activeCountyIds.has(c.id))
         .filter((c) => !c.last_run_at || new Date(c.last_run_at).getTime() < cutoff)
         .map((c) => ({
@@ -359,6 +360,7 @@ export const OutreachDashboard = () => {
         .slice(0, MANUAL_COUNTY_SCAN_LIMIT);
       const externalRows: any[] = [];
       for (const state of Array.from(new Set((counties ?? []).map((c) => c.state)))) {
+        if (EXCLUDED_SCAN_STATES.has(state)) continue;
         for (const [source, offset] of EXTERNAL_SOURCES) {
           if (!activeExternal.has(`${state}:${source}`)) externalRows.push({
             kind: "scan_external",
