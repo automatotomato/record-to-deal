@@ -266,8 +266,8 @@ Deno.serve(async (req) => {
   const seen = new Set<string>();
   const fresh: Candidate[] = [];
   for (const c of allCandidates) {
-    // Reject anything whose source URL is on the broker deny-list.
-    if (isBrokerUrl(c.source_record_url)) continue;
+    // Broker-source URLs are kept (LoopNet/Crexi listings often surface the
+    // real owner LLC) — isBrokerUrl is now a soft signal, not a hard filter.
     // Must have an address (or parcel) AND a grantor/owner name to be useful.
     const sellerName = c.grantor_name ?? c.owner_name;
     if ((!c.property_address && !c.parcel_number) || !sellerName) continue;
