@@ -96,19 +96,21 @@ Deno.serve(async (req) => {
     dmName = ownerName; dmRole = "Owner";
   }
 
+  // Record the attempt up front so cooldown tracking works even on early returns.
+  await recordDiscoveryAttempt(leadId);
+
   // Single lightweight pass: try to find a LinkedIn URL via Firecrawl. The
   // heavy lifting (Gemini grounded search, scraping, consolidation) happens
   // in seller-discovery which we always queue below.
-  if (firecrawlKey && (dmName || ownerName)) {
+  if (dmName || ownerName) {
     const target = dmName ?? ownerName!;
-    const liRes = await fcSearch(
+    const liRes = await fcSearch("enrich-contact",
       `"${target}" ${lead.property_city ?? ""} ${lead.state ?? ""} site:linkedin.com/in -realtor -broker -"real estate agent" -"listing agent"`,
-      firecrawlKey, 2,
+      { limit: 2 },
     );
     const liUrl = liRes.find((r: any) => {
       const u = r.url ?? "";
       if (!/linkedin\.com\/in\//.test(u)) return false;
-      // Skip slugs that clearly belong to brokers/agents.
       const slug = u.toLowerCase();
       return !/-realtor|-broker|-real-?estate-?agent|-listing-?agent/.test(slug);
     })?.url;
