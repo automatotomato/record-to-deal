@@ -428,8 +428,10 @@ ${blob.slice(0, 14000)}` },
 // Rank principals: manager > managing member > member > officer > director > registered agent.
 function rankPrincipal(p: Principal): number {
   const r = (p.role ?? "").toLowerCase();
-  if (/managing member|manager/.test(r)) return 100;
+  if (/managing member|managing partner|\bmanager\b/.test(r)) return 100;
+  if (/founder|co-founder|owner/.test(r)) return 95;
   if (/president|ceo|chief executive/.test(r)) return 90;
+  if (/\bcfo|\bcoo|vice president|\bvp\b/.test(r)) return 85;
   if (/\bmember\b/.test(r)) return 80;
   if (/officer|director|principal/.test(r)) return 70;
   if (/registered agent/.test(r)) return 40;
