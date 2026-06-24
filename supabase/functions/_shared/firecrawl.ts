@@ -10,7 +10,7 @@ import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-
 
 const FC_V2 = "https://api.firecrawl.dev/v2";
 const CACHE_DAYS = 14;
-const REQ_TIMEOUT_MS = 30_000;
+const REQ_TIMEOUT_MS = 60_000;
 
 export type FcCaller =
   | "seller-discovery"
