@@ -1,65 +1,74 @@
-# Refocus: Out-of-State Commercial 1031 Sellers → Nevada Reinvestment
+## Goal
 
-The thesis: hunt commercial property sellers in **other states** (especially high-tax ones like CA, NY, OR, NJ, MA, IL) and pitch them on rolling proceeds into **Nevada** to escape state income tax on the deferred gain. NV sellers are *not* the target — they already live in a 0-tax state and have no reason to switch jurisdictions.
+Most parked counties were disabled because they have no free **image** recorder portal. We don't need images — text deed-index search is enough for scout. Seed the known free text index URL for each non-NV parked county, re-enable them, and slightly broaden scan-sources so government text indexes count as valid sources.
 
-## 1. Target geography: out-of-state, high-tax-first
+## Counties to re-enable (text recorder URLs)
 
-In `qualify-lead`:
-- Add a hard disqualifier: drop any lead where `state = 'NV'`. Nevada sellers don't benefit from the pitch.
-- Pull `is_high_tax` + `ltcg_rate` from `state_tax_rates` (already wired) and add a **state-tax-arbitrage score** (max 20): CA/NY/NJ/OR/HI = 20, other high-tax = 15, mid-tax = 8, low-tax (TX/FL/WA/TN/SD/WY) = 3. The bigger their home-state tax bill, the bigger the NV upside.
-- Surface this in `breakdown.state_arbitrage` so the dashboard can sort by it.
+Non-NV parked counties + the URL to seed. All are free public text/deed-index search portals (no paywall, no login):
 
-In `scan-sources` + cron (`run_scout_cron`):
-- Keep all enabled non-NV counties active.
-- Park the two NV counties (Clark, Washoe) as `enabled = false` for *seller discovery*. (They stay available as replacement-property research targets later — separate scope.)
-- Bump priority on CA/NY/NJ/OR/MA/IL/HI counties so they get scanned first when manual "Find new leads" runs.
+| State | County | Text recorder URL |
+|---|---|---|
+| CA | Alameda | https://rechart1.acgov.org/ |
+| CA | Los Angeles | https://www.lavote.gov/home/recorder/grantor-grantee-index |
+| CA | Orange | https://cr.ocgov.com/grantorgranteesearch/ |
+| CA | Riverside | https://riverside.asrclkrec.com/grantorgranteesearch/ |
+| CA | Sacramento | https://eros.saccounty.gov/ |
+| CA | San Diego | https://arcc-acclaim.sandiegocounty.gov/AcclaimWeb/ |
+| CA | San Francisco | https://recorder.sfgov.org/web/login.aspx (public guest search) |
+| CA | San Mateo | https://crwebpub.smcacre.org/CRSearch/ |
+| CA | Santa Clara | https://crsearch.sccgov.org/ |
+| CO | Arapahoe | https://recording.arapahoegov.com/RecordingSearch/ |
+| CO | Denver | https://recordingsearch.denvergov.org/ |
+| HI | Honolulu | https://boc.ehawaii.gov/docsearch/nameSearch.html |
+| IL | Cook | https://crs.cookcountyclerkil.gov/Search |
+| IL | DuPage | https://recorder.dupageco.org/RecorderEsearch/ |
+| IL | Lake | https://lcrod.lakecountyil.gov/ |
+| MA | Middlesex | https://www.masslandrecords.com/MiddlesexSouth/ |
+| MA | Norfolk | https://www.norfolkdeeds.org/ |
+| MA | Suffolk | https://www.masslandrecords.com/Suffolk/ |
+| MN | Ramsey | https://rrinfo.co.ramsey.mn.us/ |
+| NJ | Bergen | https://oprs.co.bergen.nj.us/Or_Web1/ |
+| NJ | Essex | https://acclaim.essexregister.com/AcclaimWeb/ |
+| NJ | Hudson | https://acclaim.hcnj.us/AcclaimWeb/ |
+| NJ | Middlesex | https://clerk.middlesexcountynj.gov/Public/ |
+| NJ | Monmouth | https://oprs.co.monmouth.nj.us/oprs/ |
+| NY | Bronx / Kings / NY / Queens | https://a836-acris.nyc.gov/CP/ (ACRIS — covers all 4 NYC boroughs) |
+| NY | Nassau | https://i2f.uslandrecords.com/NY/Nassau/ |
+| NY | Suffolk | https://suffolkcountyny.gov/Departments/County-Clerk/Online-Records |
+| NY | Westchester | https://wro.westchesterclerk.com/ |
+| OR | Clackamas | https://recordings.clackamas.us/recordings/ |
+| OR | Washington | https://recordings.co.washington.or.us/Recordings/ |
+| TX | Bexar | https://apps.bexar.org/countyclerk/officialpublicrecords/ |
+| TX | Dallas | https://www.dallascounty.org/government/county-clerk/recording/ |
+| TX | Harris | https://www.cclerk.hctx.net/Applications/WebSearch/RP_R.aspx |
+| WA | King | https://recordsearch.kingcounty.gov/LandmarkWeb/ |
 
-## 2. Commercial-only filter (unchanged from prior plan)
+Already-enabled MN Hennepin: just flip `enabled = true`.
 
-In `qualify-lead`:
-- Hard-drop SFR, condo, owner-occupied, and Land < $1M.
-- Require `property_type ∈ {Commercial, Multifamily, Industrial, Mixed, Retail, Office}` OR entity owner with `sale_price ≥ $750k`.
-- Property-type score weights commercial/multifamily/industrial highest.
+## What stays parked
+- **All NV counties** (Clark, Washoe, Carson City, Douglas, Elko, Lyon, Nye) — per current strategy, we don't source from Nevada (no tax arbitrage to pitch).
 
-In `scan-external-sources`:
-- Drop the `residential` source from manual + cron fan-out.
-- Bias `commercial` and `court` queries toward entity sellers and 6–7-figure transactions in non-NV states.
+## Code change (scan-sources)
 
-## 3. Nevada pitch in profiling
+`buildQueries` currently emits one query. Expand it to two so text-only indexes (which often hide deed language inside a search-results page) still surface:
 
-In `profile-seller`:
-- System prompt: every output ties the seller's **home-state tax exposure** to a **Nevada reinvestment** angle — no NV state income tax on the deferred gain, plus a concrete NV asset class match (LV/Henderson multifamily, Reno industrial, NNN retail along the I-15 corridor).
-- Required JSON fields:
-  - `nv_replacement_thesis` — one sentence naming a NV asset class + sub-market matched to what they sold (e.g., "Sold Bay Area garden multifamily → North Las Vegas Class B value-add").
-  - `tax_savings_headline` — dollar figure = (federal LTCG + their home state's rate) × estimated gain. For CA/NY sellers this is the headline number that makes the pitch land.
-  - `home_state_pain_point` — the specific state-tax fact we're rescuing them from.
+```ts
+return [
+  `site:${recorderHost} (deed OR "warranty deed" OR "grant deed" OR "special warranty" OR "deed of trust") grantor grantee`,
+  `site:${recorderHost} grantor grantee ${(_county || "").toLowerCase()}`,
+];
+```
 
-## 4. Outreach copy
+No other code changes — pipeline already filters for commercial / price floor / confidence, so re-enabling won't introduce residential noise.
 
-In `outreach-cadence-tick` draft templates:
-- Subject leads with the deferral dollar amount + "Nevada" (e.g., "Defer $412k of California tax by reinvesting in Las Vegas").
-- Step 1: their sale → home-state tax exposure → one NV replacement idea → 15-min call CTA.
-- Step 2: case study of a same-state seller who closed in NV recently.
-- Step 3: 45-day identification deadline pressure.
+## Steps
 
-## 5. Dashboard reframing
-
-In `OutreachDashboard.tsx`:
-- Rename hero to "Out-of-State 1031 → Nevada Pipeline".
-- New stat: **NV-bound tax deferral** = sum of `tax_savings_headline` across ready leads.
-- New stat: **High-tax-state leads** = count where home state is CA/NY/NJ/OR/MA/IL/HI.
-- Hide any NV-sourced leads (should be zero after step 1) and add a small banner explaining the out-of-state thesis.
-
-## 6. Validation
-
-- `curl_edge_functions` on `qualify-lead` against ~10 recent leads; confirm any NV lead disqualifies, CA/NY commercial leads score highest.
-- Spot-check 3 profiled leads — `nv_replacement_thesis`, `tax_savings_headline`, `home_state_pain_point` all populated.
-- Trigger one manual scan; verify the queue is dominated by high-tax-state counties and no NV counties are enqueued.
+1. Migration: `UPDATE counties SET recorder_index_url = '<url>', enabled = true WHERE state = '<s>' AND county = '<c>'` for every row in the table above. Hennepin gets only `enabled = true`.
+2. Edit `supabase/functions/scan-sources/index.ts` `buildQueries` to return the 2-query variant above.
+3. Deploy `scan-sources`.
+4. Trigger `run_scout_cron()` and watch `pipeline_jobs` + `leads` for a few minutes to confirm new counties produce candidates (and that confidence/price filters still drop residential).
 
 ## Out of scope
-
-- Building a NV replacement-property inventory (separate feature; would need a data source and a new table).
-- SMS/voice outreach (email-only today).
-- Recorder source coverage changes (handled in prior thread).
-
-Approve and I'll implement 1–6 in order.
+- Re-enabling NV counties.
+- Writing new per-county scrapers (Travis-style adapters).
+- Changing scan-external rotation.

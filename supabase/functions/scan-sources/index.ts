@@ -85,8 +85,10 @@ function buildQueries(_state: string, _county: string, recorderUrl: string | nul
   // pulling noise from listings/news/aggregators.
   const recorderHost = hostOf(recorderUrl);
   if (!recorderHost) return [];
+  const countyLc = (_county || "").toLowerCase();
   return [
     `site:${recorderHost} (deed OR "warranty deed" OR "grant deed" OR "special warranty" OR "deed of trust") grantor grantee`,
+    `site:${recorderHost} grantor grantee ${countyLc}`,
   ];
 }
 
