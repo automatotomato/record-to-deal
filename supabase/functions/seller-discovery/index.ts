@@ -549,10 +549,13 @@ Deno.serve(async (req) => {
   if (entity && ownerName) {
     d.passes.entity_unmask = true;
 
-    // 1a. Firecrawl SoS / bizapedia search to find principals and registered agent.
+    // 1a. Firecrawl SoS / bizapedia / opencorporates / zoominfo / rocketreach search.
     const queries = [
       `"${ownerName}" ${stateName} secretary of state business entity search`,
       `"${ownerName}" site:bizapedia.com`,
+      `"${ownerName}" site:opencorporates.com`,
+      `"${ownerName}" site:zoominfo.com/c OR site:rocketreach.co/company`,
+      `"${ownerName}" "manager" OR "managing member" OR "president" OR "CEO" OR "founder" OR "principal"`,
     ];
     for (const q of queries) {
       const res = await fcSearch(q, fcKey, 3, true, budget);
