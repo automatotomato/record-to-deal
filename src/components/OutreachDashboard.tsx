@@ -796,6 +796,7 @@ export const OutreachDashboard = () => {
                         <TableCell>
                           <div className="text-sm tabular">{fmtDate(l.sale_date)}</div>
                           <div className="text-[11px] text-muted-foreground">{fmtRelative(l.sale_date)}</div>
+                          <DeadlineChip d45={(l as any).days_until_45_deadline} d180={(l as any).days_until_180_deadline} />
                         </TableCell>
                         <TableCell>
                           <LeadStatePill lead={l} />
