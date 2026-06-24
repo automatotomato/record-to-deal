@@ -51,8 +51,15 @@ function isAnyContact(l: any): boolean {
 const norm = (s: string | null | undefined) =>
   (s ?? "").toString().trim().toUpperCase().replace(/\s+/g, " ").replace(/[.,]/g, "");
 
-const INVESTMENT_TYPES = new Set(["Multifamily", "Commercial", "Industrial", "Mixed"]);
-const ENTITY_OWNERS = new Set(["LLC", "Corporation", "Trust", "Estate"]);
+const INVESTMENT_TYPES = new Set(["Multifamily", "Commercial", "Industrial", "Mixed", "Retail", "Office"]);
+const ENTITY_OWNERS = new Set(["LLC", "Corporation", "Trust", "Estate", "LP", "LLP", "Partnership"]);
+
+function looksOwnerOccupied(lead: any, propType: string): boolean {
+  if (lead.owner_type !== "Individual") return false;
+  if (!lead.mailing_address || !lead.property_address) return false;
+  if (propType !== "SFR" && propType !== "Condo" && propType !== "Unknown") return false;
+  return norm(lead.mailing_address) === norm(lead.property_address);
+}
 
 interface ScoreOut {
   score: number;
