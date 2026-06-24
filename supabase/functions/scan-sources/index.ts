@@ -83,9 +83,11 @@ async function firecrawlSearch(
   tbs: string,
 ): Promise<{ url: string; title: string; markdown: string }[]> {
   const { fcSearch } = await import("../_shared/firecrawl.ts");
-  // Snippets only — drops per-query cost from ~5 credits to 1.
+  // Scrape full markdown — the AI extractor needs page body, not just snippets,
+  // to reliably surface grantor/owner + price + address. Cost is bounded by
+  // the daily per-caller cap and 14-day URL cache.
   const results = await fcSearch("scan-sources", query, {
-    limit: MAX_RESULTS_PER_QUERY, scrape: false, tbs,
+    limit: MAX_RESULTS_PER_QUERY, scrape: true, tbs,
   });
   return (results as any[])
     .map((x) => ({
