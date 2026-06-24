@@ -63,7 +63,47 @@ import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
 type Lead = any;
-type TabKey = "candidates" | "presale" | "active";
+type TabKey = "ready" | "review" | "researching" | "presale" | "active";
+
+// Lead-bucket predicates. These mirror the readiness column produced by
+// compute_lead_readiness() but also fall back to raw contact fields so a
+// lead with a phone/email always counts as "ready" even if the trigger
+// hasn't run yet.
+const hasOutreachContact = (l: any) =>
+  !!(l.decision_maker_email || l.decision_maker_phone || l.contact_phone);
+
+const isReadyLead = (l: any) => {
+  if (l.tier === "DISQUALIFIED" || l.pipeline_stage === "disqualified") return false;
+  const r = l.readiness;
+  return r === "ready_for_outreach" || r === "contact_found" || hasOutreachContact(l);
+};
+
+const isReviewLead = (l: any) => {
+  if (l.tier === "DISQUALIFIED" || l.pipeline_stage === "disqualified") return false;
+  if (isReadyLead(l)) return false;
+  const r = l.readiness;
+  if (r === "needs_manual_review" || r === "low_confidence") return true;
+  if ((l.discovery_status === "failed" || l.discovery_status === "partial") && !hasOutreachContact(l)) return true;
+  return false;
+};
+
+const isResearchingLead = (l: any) => {
+  if (l.tier === "DISQUALIFIED" || l.pipeline_stage === "disqualified") return false;
+  if (isReadyLead(l) || isReviewLead(l)) return false;
+  return true;
+};
+
+// Human-readable reason a lead is stuck in "Needs review".
+const reviewReason = (l: any): string => {
+  const missing: string[] = [];
+  if (!hasOutreachContact(l)) missing.push("contact info");
+  if (!l.decision_maker_name) missing.push("decision-maker name");
+  if (!l.decision_maker_role) missing.push("verified role");
+  if (l.discovery_status === "failed") return "Automated discovery failed — needs manual lookup.";
+  if (l.discovery_status === "partial") return `Discovery partial — missing ${missing.join(", ") || "details"}.`;
+  if (missing.length) return `Missing ${missing.join(", ")}.`;
+  return "Low confidence — review and confirm.";
+};
 type OwnerRollup = { owner_key: string; property_count: number; total_sale_value: number; total_tax_exposure: number };
 
 
@@ -147,7 +187,7 @@ const LeadStatePill = ({ lead }: { lead: any }) => {
 export const OutreachDashboard = () => {
   const { isAdmin } = useAuth();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<TabKey>("candidates");
+  const [tab, setTab] = useState<TabKey>("ready");
   const [tierFilter, setTierFilter] = useState<string>("all");
   const [stateFilter, setStateFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("active");
@@ -225,20 +265,12 @@ export const OutreachDashboard = () => {
 
   const isPresale = (l: Lead) => l.pipeline_stage === "pre_sale_prospect";
 
-  const isCandidate = (l: Lead) => {
-    if (isPresale(l)) return false; // presale has its own tab
-    if (l.tier === "COLD" || l.tier === "DISQUALIFIED" || l.tier === "UNSCORED") return false;
-    if (l.readiness === "low_confidence" || l.readiness === "researching") return false;
-    const trig = (l.trigger_event ?? "").toLowerCase();
-    if (!trig.includes("sale") && trig !== "probate") return false;
-    const otype = (l.owner_type ?? "").toLowerCase();
-    return otype !== "individual" && otype !== "unknown" && otype !== "";
-  };
-
   const filtered = useMemo(() => {
     if (!leads) return [];
     return leads.filter((l) => {
-      if (tab === "candidates" && !isCandidate(l)) return false;
+      if (tab === "ready" && (isPresale(l) || !isReadyLead(l))) return false;
+      if (tab === "review" && (isPresale(l) || !isReviewLead(l))) return false;
+      if (tab === "researching" && (isPresale(l) || !isResearchingLead(l))) return false;
       if (tab === "presale" && !isPresale(l)) return false;
       if (tierFilter !== "all" && priorityOf(l.tier, l.is_urgent) !== tierFilter) return false;
       if (stateFilter !== "all" && l.state !== stateFilter) return false;
@@ -272,11 +304,13 @@ export const OutreachDashboard = () => {
   }, [filtered]);
 
   const tabCounts = useMemo(() => {
-    const c = { candidates: 0, presale: 0, active: 0 };
+    const c = { ready: 0, review: 0, researching: 0, presale: 0, active: 0 };
     for (const l of leads ?? []) {
       c.active += 1;
-      if (isPresale(l)) c.presale += 1;
-      else if (isCandidate(l)) c.candidates += 1;
+      if (isPresale(l)) { c.presale += 1; continue; }
+      if (isReadyLead(l)) c.ready += 1;
+      else if (isReviewLead(l)) c.review += 1;
+      else c.researching += 1;
     }
     return c;
   }, [leads]);
@@ -524,9 +558,17 @@ export const OutreachDashboard = () => {
               </div>
               <Tabs value={tab} onValueChange={(v) => { setTab(v as TabKey); setTierFilter("all"); }}>
                 <TabsList>
-                  <TabsTrigger value="candidates" className="gap-2">
-                    1031 Candidates
-                    <Badge variant="secondary" className="tabular">{tabCounts.candidates}</Badge>
+                  <TabsTrigger value="ready" className="gap-2">
+                    Ready to contact
+                    <Badge variant="secondary" className="tabular">{tabCounts.ready}</Badge>
+                  </TabsTrigger>
+                  <TabsTrigger value="review" className="gap-2">
+                    Needs review
+                    <Badge variant="secondary" className="tabular">{tabCounts.review}</Badge>
+                  </TabsTrigger>
+                  <TabsTrigger value="researching" className="gap-2">
+                    Researching
+                    <Badge variant="secondary" className="tabular">{tabCounts.researching}</Badge>
                   </TabsTrigger>
                   <TabsTrigger value="presale" className="gap-2">
                     Pre-sale
@@ -631,30 +673,6 @@ export const OutreachDashboard = () => {
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-muted-foreground mr-1">
-                Quick view
-              </span>
-              {[
-                { v: "all", l: "All" },
-                { v: "ready", l: "Ready" },
-                { v: "researching", l: "Researching" },
-                { v: "review", l: "Needs review" },
-              ].map((opt) => (
-                <button
-                  key={opt.v}
-                  onClick={() => setReadinessFilter(opt.v)}
-                  className={cn(
-                    "px-2.5 py-1 rounded-full border text-[11px] font-medium transition-colors",
-                    readinessFilter === opt.v
-                      ? "bg-foreground text-background border-foreground"
-                      : "bg-background text-muted-foreground border-border hover:border-foreground/40 hover:text-foreground",
-                  )}
-                >
-                  {opt.l}
-                </button>
-              ))}
-            </div>
 
             {activeFilterCount > 0 && (
               <div className="flex flex-wrap gap-1.5">
@@ -752,6 +770,11 @@ export const OutreachDashboard = () => {
                         </TableCell>
                         <TableCell>
                           <LeadStatePill lead={l} />
+                          {tab === "review" && (
+                            <div className="text-[11px] text-muted-foreground mt-1 max-w-[220px] leading-tight">
+                              {reviewReason(l)}
+                            </div>
+                          )}
                         </TableCell>
 
                         <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
@@ -1003,7 +1026,9 @@ const EmptyState = ({
     );
   }
   const tabCopy: Record<TabKey, string> = {
-    candidates: "No active 1031 candidates yet. Click 'Find new leads' or check the Pre-sale tab.",
+    ready: "No leads ready for outreach yet — check back as discovery finishes.",
+    review: "Nothing waiting on you. The pipeline is keeping up.",
+    researching: "Discovery is idle — run a scan to find new leads.",
     presale: "No pre-sale prospects yet — these are listed-but-not-yet-sold investment properties.",
     active: "No leads match your current filters. Try clearing them or switching tabs.",
   };
