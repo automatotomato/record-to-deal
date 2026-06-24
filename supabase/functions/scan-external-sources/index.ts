@@ -61,12 +61,28 @@ function searchQueriesFor(source: SourceKind, state: string, counties: string[])
   }
 }
 
-async function firecrawlSearch(query: string, _fcKey: string, limit = 6): Promise<Array<{ url?: string; title?: string; markdown?: string; description?: string }>> {
-  const { fcSearch } = await import("../_shared/firecrawl.ts");
-  // Use snippets only (no per-result scrape) to keep cost at ~1 credit/query.
-  // Most public listing/SEC/court pages don't expose owner contact info in their markdown anyway.
-  const results = await fcSearch("scan-external-sources", query, { limit, scrape: false });
-  return results as Array<{ url?: string; title?: string; markdown?: string; description?: string }>;
+async function firecrawlSearch(query: string, fcKey: string, limit = 6): Promise<Array<{ url?: string; title?: string; markdown?: string; description?: string }>> {
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), 30_000);
+  try {
+    const r = await fetch(`${FC_V2}/search`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${fcKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query, limit,
+        scrapeOptions: { formats: ["markdown"], onlyMainContent: true },
+      }),
+      signal: ctrl.signal,
+    });
+    if (!r.ok) {
+      console.warn(`firecrawl ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      return [];
+    }
+    const d = await r.json();
+    const arr = d?.data?.web ?? d?.data ?? d?.web ?? [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { console.warn("firecrawl threw", e); return []; }
+  finally { clearTimeout(tid); }
 }
 
 async function extractFromEvidence(
@@ -217,7 +233,7 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
   const lovableKey = Deno.env.get("OPENAI_API_KEY");
-  const fcKey = (Deno.env.get("FIRECRAWL_API_KEY_OVERRIDE") ?? Deno.env.get("FIRECRAWL_API_KEY"));
+  const fcKey = Deno.env.get("FIRECRAWL_API_KEY");
 
   let body: { job_id?: string; enqueue?: boolean } = {};
   try { body = await req.json(); } catch (_) {}
@@ -289,17 +305,14 @@ Deno.serve(async (req) => {
     errors.push(e instanceof Error ? e.message : String(e));
   }
 
-  // Dedupe + drop incomplete records. Contact info (reachability) is NOT
-  // required for intake — enrichment finds contacts later. Blocking inserts
-  // on missing contacts hides real properties from the dashboard.
+  // Dedupe + drop incomplete records.
   const seen = new Set<string>();
   const fresh: Candidate[] = [];
-  let droppedNoOwner = 0, droppedNoAddress = 0, droppedDup = 0;
   for (const c of candidates) {
-    if (!c.property_address || !c.source_record_url) { droppedNoAddress++; continue; }
-    if (!c.owner_name) { droppedNoOwner++; continue; }
+    if (!c.owner_name || !c.property_address || !c.source_record_url) continue;
+    if (!hasReachability(c)) continue;
     const k = `${norm(c.property_address)}|${norm(c.owner_name)}`;
-    if (seen.has(k)) { droppedDup++; continue; }
+    if (seen.has(k)) continue;
     seen.add(k);
     fresh.push(c);
   }
@@ -370,19 +383,10 @@ Deno.serve(async (req) => {
 
   await supabase.from("pipeline_jobs").update({
     status: "done", finished_at: new Date().toISOString(),
-    result: {
-      state, source,
-      raw_candidates: candidates.length,
-      found: fresh.length,
-      inserted, enqueued,
-      dropped_no_address: droppedNoAddress,
-      dropped_no_owner: droppedNoOwner,
-      dropped_duplicate: droppedDup,
-      errors: errors.slice(0, 3),
-    },
+    result: { state, source, found: fresh.length, inserted, enqueued, errors: errors.slice(0, 3) },
   }).eq("id", body.job_id);
 
-  return jsonOk({ ok: true, state, source, raw: candidates.length, found: fresh.length, inserted, enqueued, errors });
+  return jsonOk({ ok: true, state, source, found: fresh.length, inserted, enqueued, errors });
 });
 
 function jsonOk(b: unknown) {

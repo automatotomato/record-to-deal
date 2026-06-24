@@ -21,12 +21,6 @@ import {
   User,
   MessageSquare,
   AlertCircle,
-  Building2,
-  Globe,
-  Sparkles,
-  FileSearch,
-  Database,
-  Workflow,
 } from "lucide-react";
 
 const FEEDBACK_CATEGORIES = [
@@ -99,99 +93,51 @@ export const ProjectGuide = () => {
         </p>
       </div>
 
-      {/* How the agent works — high level */}
+      {/* How it works */}
       <section className="space-y-4">
-        <h2 className="kpi-label">How the agent works</h2>
-        <p className="text-sm text-muted-foreground max-w-3xl leading-relaxed">
-          The system runs as a queue of small, focused workers. A nightly scout finds fresh sales, a qualifier scores them,
-          and a discovery agent tries <span className="font-semibold text-foreground">one</span> hard pass at finding the
-          decision-maker. If contact details surface, the lead lands in <span className="font-semibold text-foreground">Ready to contact</span>.
-          If not, it goes to <span className="font-semibold text-foreground">Needs review</span> — the agent does not loop on dead ends.
-        </p>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <h2 className="kpi-label">How it works</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <StepCard
             icon={<Radar className="h-5 w-5" />}
-            title="1. Scout"
-            description="Daily 8 AM UTC sweep of enabled county recorders. Pulls fresh deeds, grantor/grantee, sale price, and date."
+            title="Daily scan"
+            description="Every morning at 8 AM UTC the system scans enabled county recorder websites for new property sales."
           />
           <StepCard
             icon={<Target className="h-5 w-5" />}
-            title="2. Qualify"
-            description="Scores each sale on price, owner type, state tax exposure, and 1031 fit. Cold leads are dropped."
-          />
-          <StepCard
-            icon={<FileSearch className="h-5 w-5" />}
-            title="3. Discover"
-            description="One multi-source hunt for the decision-maker — entity unmask, person identity, public contact info."
+            title="Smart filtering"
+            description="Sales are matched against our criteria: price threshold, entity type, tax exposure, and 1031 fit."
           />
           <StepCard
             icon={<CheckCircle className="h-5 w-5" />}
-            title="4. Brief"
-            description="Generates the AI brief, outreach angles, and personalized email / phone / LinkedIn scripts."
+            title="Ready for outreach"
+            description="Qualified leads land in your pipeline with contact angles, priority scores, and talking points."
           />
         </div>
       </section>
 
-      {/* Where the agent looks */}
+      {/* Pipeline stages */}
       <section className="space-y-4">
-        <h2 className="kpi-label">Where the agent looks</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <SourceCard
-            icon={<Building2 className="h-4 w-4" />}
-            title="County recorders"
-            description="Primary source of truth. Enabled counties across CA, NY, NJ, FL, TX, OR, MA, IL, HI, NV and more. Pulls the raw deed record."
-          />
-          <SourceCard
-            icon={<Database className="h-4 w-4" />}
-            title="Entity registries"
-            description="OpenCorporates + state Secretary of State filings to unmask the humans behind LLCs and trusts (officers, managers, registered agents)."
-          />
-          <SourceCard
-            icon={<User className="h-4 w-4" />}
-            title="Identity sources"
-            description="LinkedIn, RocketReach, ZoomInfo, Bizapedia — used to match an owner name to a real person and verified role."
-          />
-          <SourceCard
-            icon={<Globe className="h-4 w-4" />}
-            title="Company sites & listings"
-            description="Owner's homepage / contact page, plus the original broker or listing page that referenced the property."
-          />
-          <SourceCard
-            icon={<Sparkles className="h-4 w-4" />}
-            title="AI grounded search"
-            description="Gemini + Google Search to surface public contact info the scrapers missed. Strictly grounded — no invented emails or phones."
-          />
-          <SourceCard
-            icon={<Workflow className="h-4 w-4" />}
-            title="Filters & guardrails"
-            description="Broker / MLS / listing-agent deny-list (Compass, KW, CBRE, Zillow, LoopNet…) so the agent never returns the listing agent as the seller."
-          />
-        </div>
-      </section>
-
-      {/* Pipeline buckets — match the actual tabs */}
-      <section className="space-y-4">
-        <h2 className="kpi-label">Pipeline buckets</h2>
+        <h2 className="kpi-label">Pipeline stages</h2>
         <div className="border border-border bg-card divide-y divide-border">
           <StageRow
-            stage="Ready to contact"
-            badge={<Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 font-mono text-[10px]">Ready</Badge>}
-            description="Verified email, phone, or decision-maker contact found. These are the rows you can act on right now."
+            stage="Researching"
+            badge={<Badge variant="secondary" className="font-mono text-[10px]">Researching</Badge>}
+            description="Lead was found but is still being enriched. Contact info, entity links, and tax estimates are being gathered."
           />
           <StageRow
-            stage="Needs review"
-            badge={<Badge className="bg-urgent text-urgent-foreground font-mono text-[10px]">Review</Badge>}
-            description="Discovery couldn't surface contact info on its own. A human takes one look — the agent will not retry."
+            stage="Candidate"
+            badge={<Badge className="bg-urgent text-urgent-foreground font-mono text-[10px]">Candidate</Badge>}
+            description="Strong 1031 fit with verified sale date and estimated tax exposure. Ready for priority review."
           />
           <StageRow
-            stage="Pre-sale"
-            badge={<Badge className="bg-warm text-warm-foreground font-mono text-[10px]">Pre-sale</Badge>}
-            description="Listed but not yet sold. Engage BEFORE the 1031 clock starts."
+            stage="Presale"
+            badge={<Badge className="bg-warm text-warm-foreground font-mono text-[10px]">Presale</Badge>}
+            description="Contacted or in early conversation. Track follow-ups and next actions here."
           />
           <StageRow
-            stage="All active"
+            stage="Active"
             badge={<Badge className="bg-accent text-accent-foreground font-mono text-[10px]">Active</Badge>}
-            description="Every worth-pursuing lead in your pipeline — the catch-all view."
+            description="Engaged lead moving toward an exchange agreement."
           />
         </div>
       </section>
@@ -388,25 +334,6 @@ const StepCard = ({
     </CardContent>
   </Card>
 );
-
-const SourceCard = ({
-  icon,
-  title,
-  description,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  description: string;
-}) => (
-  <div className="border border-border bg-card p-4 space-y-2">
-    <div className="flex items-center gap-2 text-accent">
-      {icon}
-      <span className="font-semibold text-sm">{title}</span>
-    </div>
-    <p className="text-sm text-muted-foreground leading-relaxed">{description}</p>
-  </div>
-);
-
 
 const StageRow = ({
   stage,

@@ -12,13 +12,12 @@ const corsHeaders = {
 const KINDS: { kind: string; fn: string; cap: number }[] = [
   { kind: "scan_sources",     fn: "scan-sources",     cap: 2 },
   { kind: "scan_external",    fn: "scan-external-sources", cap: 2 },
-  { kind: "scan_presale",     fn: "scan-presale",     cap: 2 },
   { kind: "verify_property",  fn: "verify-property",  cap: 10 },
   { kind: "qualify_lead",     fn: "qualify-lead",     cap: 20 },
   { kind: "enrich_contact",   fn: "enrich-contact",   cap: 5 },
   { kind: "seller_discovery", fn: "seller-discovery", cap: 3 },
   { kind: "wealth_scan",      fn: "wealth-scan",      cap: 4 },
-  { kind: "profile_seller",   fn: "profile-seller",   cap: 2 },
+  { kind: "profile_seller",   fn: "profile-seller",   cap: 6 },
   { kind: "lead_brief",       fn: "lead-brief",       cap: 8 },
   { kind: "draft_outreach_step", fn: "draft-outreach-step", cap: 5 },
 ];

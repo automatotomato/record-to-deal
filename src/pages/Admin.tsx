@@ -116,51 +116,28 @@ const Admin = () => {
                 <tr className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
                   <th className="text-left px-4 py-2">State</th>
                   <th className="text-left px-4 py-2">County</th>
-                  <th className="text-left px-4 py-2">Recorder source</th>
+                  <th className="text-left px-4 py-2">Parser</th>
                   <th className="text-left px-4 py-2">Last run</th>
                   <th className="text-right px-4 py-2">Enabled</th>
                 </tr>
               </thead>
               <tbody>
-                {counties?.map((c) => {
-                  const parked = !c.enabled && !c.recorder_index_url;
-                  return (
-                    <tr key={c.id} className="border-b border-border align-top">
-                      <td className="px-4 py-3 font-mono text-sm">{c.state}</td>
-                      <td className="px-4 py-3 text-sm">
-                        {c.county}
-                        {parked && (
-                          <div className="font-mono text-[10px] uppercase tracking-wider text-urgent mt-0.5">
-                            Parked — no free recorder source
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 font-mono text-xs">
-                        {c.recorder_index_url ? (
-                          <a
-                            href={c.recorder_index_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-accent hover:underline break-all"
-                          >
-                            {new URL(c.recorder_index_url).hostname}
-                          </a>
-                        ) : (
-                          <span className="text-muted-foreground italic">none</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{fmtRelative(c.last_run_at)}</td>
-                      <td className="px-4 py-3 text-right">
-                        <Switch checked={c.enabled} onCheckedChange={(v) => toggle(c.id, v)} disabled={parked} />
-                      </td>
-                    </tr>
-                  );
-                })}
+                {counties?.map((c) => (
+                  <tr key={c.id} className="border-b border-border">
+                    <td className="px-4 py-3 font-mono text-sm">{c.state}</td>
+                    <td className="px-4 py-3 text-sm">{c.county}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{c.parser_key}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{fmtRelative(c.last_run_at)}</td>
+                    <td className="px-4 py-3 text-right">
+                      <Switch checked={c.enabled} onCheckedChange={(v) => toggle(c.id, v)} />
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
           <p className="mt-3 text-xs text-muted-foreground italic">
-            Scout pulls from the county recorder's deed index first. Counties without a free public recorder URL are parked until one is wired in.
+            Toggle counties on/off to control which markets the scout scans on each run.
           </p>
         </section>
 

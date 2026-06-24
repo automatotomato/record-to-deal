@@ -4,7 +4,6 @@
 // 3) Move sales > 180 days old to EXPIRED.
 // 4) Clean up done jobs older than 7 days.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { enqueueOnce } from "../_shared/enqueue.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -40,39 +39,33 @@ Deno.serve(async (req) => {
     .select("id");
   summary.stuck_reset = stuck?.length ?? 0;
 
-  // Only re-touch leads that haven't been updated in the last 24h — anything
-  // newer is either in flight or just finished and doesn't need another pass.
-  const staleCutoff = new Date(Date.now() - 24 * 3_600_000).toISOString();
-
   // 2) Heal stragglers — verified but not qualified
   const { data: needQualify } = await supabase
     .from("leads")
     .select("id")
     .eq("pipeline_stage", "verified")
-    .lt("updated_at", staleCutoff)
     .limit(STAGE_CAP);
   for (const r of needQualify ?? []) {
-    const res = await enqueueOnce(supabase, "qualify_lead", r.id, { priority: 90, cooldownHours: 24 });
-    if (res.enqueued) summary.requalified += 1;
+    await supabase.from("pipeline_jobs").insert({ kind: "qualify_lead", lead_id: r.id, priority: 90 });
+    summary.requalified += 1;
   }
 
-  // 2b) Qualified but no enrichment job in flight.
-  // Skip leads parked after exhausting attempts, or still in cooldown after a partial/failed pass.
-  const cooldownCutoff = new Date(Date.now() - 72 * 3_600_000).toISOString();
+  // 2b) Qualified but no enrichment job in flight
   const { data: needEnrich } = await supabase
     .from("leads")
-    .select("id,discovery_attempt_count,last_discovery_attempt_at,discovery_status")
+    .select("id")
     .eq("pipeline_stage", "qualified")
-    .lt("updated_at", staleCutoff)
-    .lt("discovery_attempt_count", 4)
     .limit(STAGE_CAP);
   for (const r of needEnrich ?? []) {
-    const inCooldown = r.last_discovery_attempt_at
-      && (r.discovery_status === "partial" || r.discovery_status === "failed")
-      && r.last_discovery_attempt_at > cooldownCutoff;
-    if (inCooldown) continue;
-    const res = await enqueueOnce(supabase, "enrich_contact", r.id, { priority: 80, cooldownHours: 24 });
-    if (res.enqueued) summary.re_enriched += 1;
+    const { count } = await supabase.from("pipeline_jobs")
+      .select("id", { count: "exact", head: true })
+      .eq("lead_id", r.id)
+      .eq("kind", "enrich_contact")
+      .in("status", ["queued", "retry", "running"]);
+    if ((count ?? 0) === 0) {
+      await supabase.from("pipeline_jobs").insert({ kind: "enrich_contact", lead_id: r.id, priority: 80 });
+      summary.re_enriched += 1;
+    }
   }
 
   // 2c) Enriched but no draft job in flight
@@ -81,45 +74,67 @@ Deno.serve(async (req) => {
     .select("id")
     .eq("pipeline_stage", "enriched")
     .eq("has_outreach_contact", true)
-    .lt("updated_at", staleCutoff)
     .limit(STAGE_CAP);
   for (const r of needDraft ?? []) {
-    const res = await enqueueOnce(supabase, "draft_outreach_step", r.id, { priority: 70, cooldownHours: 24 });
-    if (res.enqueued) summary.re_drafted += 1;
+    const { count } = await supabase.from("pipeline_jobs")
+      .select("id", { count: "exact", head: true })
+      .eq("lead_id", r.id)
+      .eq("kind", "draft_outreach_step")
+      .in("status", ["queued", "retry", "running"]);
+    if ((count ?? 0) === 0) {
+      await supabase.from("pipeline_jobs").insert({ kind: "draft_outreach_step", lead_id: r.id, priority: 70 });
+      summary.re_drafted += 1;
+    }
   }
 
-  // 2d) DISABLED: we no longer re-run seller_discovery on leads stuck in
-  // needs_review. If the first discovery pass couldn't surface contact info,
-  // the lead stays in "Needs review" for a human — pipeline focus stays on
-  // finding new opportunities instead of grinding on the same dead ends.
+  // 2d) Leads in seller-discovery limbo (needs_review, no recent discovery job)
+  const { data: needDiscovery } = await supabase
+    .from("leads")
+    .select("id")
+    .eq("pipeline_stage", "needs_review")
+    .in("tier", ["URGENT", "CRITICAL", "ACTIVE", "HOT", "WARM"])
+    .limit(STAGE_CAP);
+  for (const r of needDiscovery ?? []) {
+    const { count } = await supabase.from("pipeline_jobs")
+      .select("id", { count: "exact", head: true })
+      .eq("lead_id", r.id)
+      .eq("kind", "seller_discovery")
+      .in("status", ["queued", "retry", "running"]);
+    if ((count ?? 0) === 0) {
+      await supabase.from("pipeline_jobs").insert({ kind: "seller_discovery", lead_id: r.id, priority: 60 });
+      summary.re_discovered += 1;
+    }
+  }
 
-  // 2e) Qualified leads still missing AI brief
+  // 2e) Qualified leads missing AI brief — re-enqueue regardless of contact info
+  const briefStaleCutoff = new Date(Date.now() - BRIEF_STALE_MIN * 60_000).toISOString();
   const { data: needBrief } = await supabase
     .from("leads")
     .select("id")
     .is("ai_brief", null)
     .in("tier", ["URGENT", "CRITICAL", "ACTIVE", "HOT", "WARM"])
     .not("pipeline_stage", "in", "(discovered,scoring,disqualified,expired)")
-    .lt("updated_at", staleCutoff)
+    .lt("updated_at", briefStaleCutoff)
     .limit(STAGE_CAP);
   for (const r of needBrief ?? []) {
-    const res = await enqueueOnce(supabase, "lead_brief", r.id, {
-      priority: 75, cooldownHours: 24,
-      unlessLeadHas: [{ column: "ai_brief", op: "not_null" }],
-    });
-    if (res.enqueued) summary.re_briefed += 1;
+    const { count } = await supabase.from("pipeline_jobs")
+      .select("id", { count: "exact", head: true })
+      .eq("lead_id", r.id)
+      .eq("kind", "lead_brief")
+      .in("status", ["queued", "retry", "running"]);
+    if ((count ?? 0) === 0) {
+      await supabase.from("pipeline_jobs").insert({ kind: "lead_brief", lead_id: r.id, priority: 75 });
+      summary.re_briefed += 1;
+    }
   }
 
-  // 3) Purge ONLY very old leads (sale_date > 120 days). Pre-sale prospects
-  //    (no sale_date) and disqualified/expired leads are PRESERVED so found
-  //    properties stay visible for audit. The dashboard filters them from the
-  //    active opportunity list via tier/stage rules.
-  const purgeCutoff = new Date(Date.now() - 120 * 86_400_000).toISOString().slice(0, 10);
+  // 3) Purge leads outside the 90-day actionable window (and any already disqualified/expired).
+  //    Pre-sale prospects have no sale_date and are preserved.
+  const purgeCutoff = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10);
   const { data: toPurge } = await supabase
     .from("leads")
     .select("id")
-    .lt("sale_date", purgeCutoff)
-    .neq("pipeline_stage", "pre_sale_prospect");
+    .or(`sale_date.lt.${purgeCutoff},pipeline_stage.eq.disqualified,pipeline_stage.eq.expired,tier.eq.EXPIRED,tier.eq.DISQUALIFIED`);
   const purgeIds = (toPurge ?? []).map((r: any) => r.id);
   if (purgeIds.length) {
     await supabase.from("lead_activities").delete().in("lead_id", purgeIds);

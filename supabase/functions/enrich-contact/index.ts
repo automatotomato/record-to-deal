@@ -3,14 +3,14 @@
 // can find one, then ALWAYS hands off to seller_discovery (Gemini-driven)
 // for the actual contact hunt. Apollo has been removed.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { enqueueOnce } from "../_shared/enqueue.ts";
-import { fcSearch, shouldSkipDiscovery, recordDiscoveryAttempt, parkAbandoned } from "../_shared/firecrawl.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
+
+const FIRECRAWL_V2 = "https://api.firecrawl.dev/v2";
 
 const norm = (s: string | null | undefined) =>
   (s ?? "").toString().trim().toUpperCase().replace(/\s+/g, " ").replace(/[.,]/g, "");
@@ -19,6 +19,20 @@ function isUnlockedEmail(e?: string | null): boolean {
   if (!e) return false;
   if (!/[^@\s]+@[^@\s]+\.[a-z]{2,}/i.test(e)) return false;
   return !/email_not_unlocked|domain\.com$|@apollo-locked/i.test(e);
+}
+
+async function fcSearch(query: string, key: string, limit = 3) {
+  try {
+    const resp = await fetch(`${FIRECRAWL_V2}/search`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ query, limit }),
+    });
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    const arr = data?.data?.web ?? data?.data ?? [];
+    return Array.isArray(arr) ? arr : [];
+  } catch { return []; }
 }
 
 function isOutreachContact(l: any): boolean {
@@ -40,6 +54,7 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
+  const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY");
 
   let body: { job_id?: string } = {};
   try { body = await req.json(); } catch (_) {}
@@ -61,28 +76,6 @@ Deno.serve(async (req) => {
     return jsonOk({ ok: true, skipped: "disqualified" });
   }
 
-  // Pre-sale prospects are NOT eligible for contact-hunt enrichment until a
-  // human moves them forward (avoids burning credits on listings that may
-  // never close).
-  if (lead.pipeline_stage === "pre_sale_prospect") {
-    await supabase.from("pipeline_jobs").update({
-      status: "done", finished_at: new Date().toISOString(),
-      result: { skipped: "pre_sale_prospect" },
-    }).eq("id", body.job_id);
-    return jsonOk({ ok: true, skipped: "pre_sale_prospect" });
-  }
-
-  // Cooldown / abandon check — stops re-running on the same dead-end leads.
-  const cd = await shouldSkipDiscovery(leadId, { coolHours: 72, maxAttempts: 4 });
-  if (cd.skip) {
-    if (cd.reason === "abandoned") await parkAbandoned(leadId);
-    await supabase.from("pipeline_jobs").update({
-      status: "done", finished_at: new Date().toISOString(),
-      result: { skipped: cd.reason, attempts: cd.attempts },
-    }).eq("id", body.job_id);
-    return jsonOk({ ok: true, skipped: cd.reason });
-  }
-
   const ownerName = lead.owner_name as string | null;
   const isEntity = lead.owner_type !== "Individual" && lead.owner_type !== "Unknown";
   let dmName: string | null = lead.decision_maker_name ?? null;
@@ -96,24 +89,16 @@ Deno.serve(async (req) => {
     dmName = ownerName; dmRole = "Owner";
   }
 
-  // Record the attempt up front so cooldown tracking works even on early returns.
-  await recordDiscoveryAttempt(leadId);
-
   // Single lightweight pass: try to find a LinkedIn URL via Firecrawl. The
   // heavy lifting (Gemini grounded search, scraping, consolidation) happens
   // in seller-discovery which we always queue below.
-  if (dmName || ownerName) {
+  if (firecrawlKey && (dmName || ownerName)) {
     const target = dmName ?? ownerName!;
-    const liRes = await fcSearch("enrich-contact",
-      `"${target}" ${lead.property_city ?? ""} ${lead.state ?? ""} site:linkedin.com/in -realtor -broker -"real estate agent" -"listing agent"`,
-      { limit: 2 },
+    const liRes = await fcSearch(
+      `"${target}" ${lead.property_city ?? ""} ${lead.state ?? ""} site:linkedin.com/in`,
+      firecrawlKey, 2,
     );
-    const liUrl = liRes.find((r: any) => {
-      const u = r.url ?? "";
-      if (!/linkedin\.com\/in\//.test(u)) return false;
-      const slug = u.toLowerCase();
-      return !/-realtor|-broker|-real-?estate-?agent|-listing-?agent/.test(slug);
-    })?.url;
+    const liUrl = liRes.find((r: any) => /linkedin\.com\/in\//.test(r.url ?? ""))?.url;
     if (liUrl && !dmLinkedIn) {
       dmLinkedIn = liUrl;
       confidence += 10;
@@ -153,17 +138,13 @@ Deno.serve(async (req) => {
     payload: updated,
   });
 
-  // Only queue the deeper hunt when we still need contact info,
-  // and only refresh the brief if we don't already have one (24h cooldown applies either way).
-  await enqueueOnce(supabase, "seller_discovery", leadId, {
+  // Always queue the deeper hunt and a brief refresh.
+  await supabase.from("pipeline_jobs").insert({
+    kind: "seller_discovery", lead_id: leadId,
     priority: lead.is_urgent ? 35 : 60,
-    cooldownHours: 24,
-    unlessLeadHas: [{ column: "decision_maker_email", op: "not_null" }],
   });
-  await enqueueOnce(supabase, "lead_brief", leadId, {
-    priority: 80,
-    cooldownHours: 24,
-    unlessLeadHas: [{ column: "ai_brief", op: "not_null" }],
+  await supabase.from("pipeline_jobs").insert({
+    kind: "lead_brief", lead_id: leadId, priority: 80,
   });
 
   await supabase.from("pipeline_jobs").update({

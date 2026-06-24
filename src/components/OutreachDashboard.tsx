@@ -63,39 +63,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
 type Lead = any;
-type TabKey = "ready" | "review" | "presale" | "active";
-
-// Lead-bucket predicates. Two buckets only: a lead either has contact info
-// (ready) or it doesn't (needs review). We no longer keep a separate
-// "researching" tab — if the automated discovery pass couldn't find contact
-// details, the lead lands in review for a human to finish.
-const hasOutreachContact = (l: any) =>
-  !!(l.decision_maker_email || l.decision_maker_phone || l.contact_phone);
-
-const isReadyLead = (l: any) => {
-  if (l.tier === "DISQUALIFIED" || l.pipeline_stage === "disqualified") return false;
-  const r = l.readiness;
-  return r === "ready_for_outreach" || r === "contact_found" || hasOutreachContact(l);
-};
-
-const isReviewLead = (l: any) => {
-  if (l.tier === "DISQUALIFIED" || l.pipeline_stage === "disqualified") return false;
-  return !isReadyLead(l);
-};
-
-// Human-readable reason a lead is stuck in "Needs review".
-const reviewReason = (l: any): string => {
-  const missing: string[] = [];
-  if (!hasOutreachContact(l)) missing.push("contact info");
-  if (!l.decision_maker_name) missing.push("decision-maker name");
-  if (!l.decision_maker_role) missing.push("verified role");
-  const attempts = l.discovery_attempt_count ?? 0;
-  if (attempts >= 4) return `Parked after ${attempts} automated discovery attempts — needs a human lookup.`;
-  if (l.discovery_status === "failed") return `Automated discovery failed (attempt ${attempts}) — needs manual lookup.`;
-  if (l.discovery_status === "partial") return `Discovery partial after ${attempts} attempts — missing ${missing.join(", ") || "details"}.`;
-  if (missing.length) return `Missing ${missing.join(", ")}.`;
-  return "Low confidence — review and confirm.";
-};
+type TabKey = "candidates" | "presale" | "active";
 type OwnerRollup = { owner_key: string; property_count: number; total_sale_value: number; total_tax_exposure: number };
 
 
@@ -173,13 +141,13 @@ const LeadStatePill = ({ lead }: { lead: any }) => {
   if (readiness === "needs_manual_review" || readiness === "low_confidence") {
     return <StateChip label="Needs review" tone="bg-urgent/15 text-urgent border-urgent/40" title="Automated search exhausted — needs a human." />;
   }
-  return <StateChip label="Needs review" tone="bg-urgent/15 text-urgent border-urgent/40" title="No contact details found — needs a manual lookup." />;
+  return <StateChip label="Finding contact…" tone="bg-muted text-muted-foreground border-border" title="Pipeline is still searching for the seller's contact info." pulse />;
 };
 
 export const OutreachDashboard = () => {
   const { isAdmin } = useAuth();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<TabKey>("active");
+  const [tab, setTab] = useState<TabKey>("candidates");
   const [tierFilter, setTierFilter] = useState<string>("all");
   const [stateFilter, setStateFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("active");
@@ -199,8 +167,7 @@ export const OutreachDashboard = () => {
       const { data, error } = await supabase
         .from("leads")
         .select("*")
-        .not("tier", "in", "(DISQUALIFIED,EXPIRED)")
-        .not("pipeline_stage", "in", "(disqualified,expired)")
+        .neq("tier", "DISQUALIFIED")
         .or(`sale_date.gte.${cutoffDate},and(sale_date.is.null,created_at.gte.${cutoffIso})`)
         .order("is_urgent", { ascending: false })
         .order("created_at", { ascending: false })
@@ -258,11 +225,20 @@ export const OutreachDashboard = () => {
 
   const isPresale = (l: Lead) => l.pipeline_stage === "pre_sale_prospect";
 
+  const isCandidate = (l: Lead) => {
+    if (isPresale(l)) return false; // presale has its own tab
+    if (l.tier === "COLD" || l.tier === "DISQUALIFIED" || l.tier === "UNSCORED") return false;
+    if (l.readiness === "low_confidence" || l.readiness === "researching") return false;
+    const trig = (l.trigger_event ?? "").toLowerCase();
+    if (!trig.includes("sale") && trig !== "probate") return false;
+    const otype = (l.owner_type ?? "").toLowerCase();
+    return otype !== "individual" && otype !== "unknown" && otype !== "";
+  };
+
   const filtered = useMemo(() => {
     if (!leads) return [];
     return leads.filter((l) => {
-      if (tab === "ready" && (isPresale(l) || !isReadyLead(l))) return false;
-      if (tab === "review" && (isPresale(l) || !isReviewLead(l))) return false;
+      if (tab === "candidates" && !isCandidate(l)) return false;
       if (tab === "presale" && !isPresale(l)) return false;
       if (tierFilter !== "all" && priorityOf(l.tier, l.is_urgent) !== tierFilter) return false;
       if (stateFilter !== "all" && l.state !== stateFilter) return false;
@@ -296,12 +272,11 @@ export const OutreachDashboard = () => {
   }, [filtered]);
 
   const tabCounts = useMemo(() => {
-    const c = { ready: 0, review: 0, presale: 0, active: 0 };
+    const c = { candidates: 0, presale: 0, active: 0 };
     for (const l of leads ?? []) {
       c.active += 1;
-      if (isPresale(l)) { c.presale += 1; continue; }
-      if (isReadyLead(l)) c.ready += 1;
-      else c.review += 1;
+      if (isPresale(l)) c.presale += 1;
+      else if (isCandidate(l)) c.candidates += 1;
     }
     return c;
   }, [leads]);
@@ -441,7 +416,7 @@ export const OutreachDashboard = () => {
                   The Desk
                 </h1>
                 <p className="text-sm text-primary-foreground/70 mt-2 max-w-xl">
-                  Pre-sale listings and fresh closings (last 30 days) — surfaced, scored, and routed before the 45-day 1031 identification window closes.
+                  Intelligence on every fresh investment-property sale — surfaced, scored, and routed for the 180-day 1031 window.
                 </p>
               </div>
             </div>
@@ -549,13 +524,9 @@ export const OutreachDashboard = () => {
               </div>
               <Tabs value={tab} onValueChange={(v) => { setTab(v as TabKey); setTierFilter("all"); }}>
                 <TabsList>
-                  <TabsTrigger value="ready" className="gap-2">
-                    Ready to contact
-                    <Badge variant="secondary" className="tabular">{tabCounts.ready}</Badge>
-                  </TabsTrigger>
-                  <TabsTrigger value="review" className="gap-2">
-                    Needs review
-                    <Badge variant="secondary" className="tabular">{tabCounts.review}</Badge>
+                  <TabsTrigger value="candidates" className="gap-2">
+                    1031 Candidates
+                    <Badge variant="secondary" className="tabular">{tabCounts.candidates}</Badge>
                   </TabsTrigger>
                   <TabsTrigger value="presale" className="gap-2">
                     Pre-sale
@@ -660,6 +631,30 @@ export const OutreachDashboard = () => {
               </div>
             </div>
 
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-muted-foreground mr-1">
+                Quick view
+              </span>
+              {[
+                { v: "all", l: "All" },
+                { v: "ready", l: "Ready" },
+                { v: "researching", l: "Researching" },
+                { v: "review", l: "Needs review" },
+              ].map((opt) => (
+                <button
+                  key={opt.v}
+                  onClick={() => setReadinessFilter(opt.v)}
+                  className={cn(
+                    "px-2.5 py-1 rounded-full border text-[11px] font-medium transition-colors",
+                    readinessFilter === opt.v
+                      ? "bg-foreground text-background border-foreground"
+                      : "bg-background text-muted-foreground border-border hover:border-foreground/40 hover:text-foreground",
+                  )}
+                >
+                  {opt.l}
+                </button>
+              ))}
+            </div>
 
             {activeFilterCount > 0 && (
               <div className="flex flex-wrap gap-1.5">
@@ -757,11 +752,6 @@ export const OutreachDashboard = () => {
                         </TableCell>
                         <TableCell>
                           <LeadStatePill lead={l} />
-                          {tab === "review" && (
-                            <div className="text-[11px] text-muted-foreground mt-1 max-w-[220px] leading-tight">
-                              {reviewReason(l)}
-                            </div>
-                          )}
                         </TableCell>
 
                         <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
@@ -1013,9 +1003,7 @@ const EmptyState = ({
     );
   }
   const tabCopy: Record<TabKey, string> = {
-    ready: "No leads ready for outreach yet — check back as discovery finishes.",
-    review: "Nothing waiting on you. The pipeline is keeping up.",
-    
+    candidates: "No active 1031 candidates yet. Click 'Find new leads' or check the Pre-sale tab.",
     presale: "No pre-sale prospects yet — these are listed-but-not-yet-sold investment properties.",
     active: "No leads match your current filters. Try clearing them or switching tabs.",
   };

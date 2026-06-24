@@ -14,7 +14,7 @@ const corsHeaders = {
 };
 
 const FEC_KEY = Deno.env.get("FEC_API_KEY") || "DEMO_KEY";
-const FC_KEY = (Deno.env.get("FIRECRAWL_API_KEY_OVERRIDE") ?? Deno.env.get("FIRECRAWL_API_KEY"));
+const FC_KEY = Deno.env.get("FIRECRAWL_API_KEY");
 
 type Signal = { source: string; kind: string; value: string; url?: string; confidence: number };
 
@@ -105,17 +105,25 @@ Deno.serve(async (req) => {
     if (FC_KEY) {
       try {
         const url = `https://registry.faa.gov/AircraftInquiry/Search/NameInquiry?nametxt=${encodeURIComponent(subjectName)}&sort_option=2&PageNo=1`;
-        const { fcScrape } = await import("../_shared/firecrawl.ts");
-        const md = await fcScrape("wealth-scan", url);
-        if (md && /N\d{2,5}[A-Z]{0,2}/.test(md) && /aircraft/i.test(md)) {
-          const tail = md.match(/N\d{2,5}[A-Z]{0,2}/g)?.[0];
-          signals.push({
-            source: "FAA",
-            kind: "aircraft_owner",
-            value: tail ? `Aircraft tail ${tail}` : "Aircraft registration found",
-            url,
-            confidence: 0.65,
-          });
+        const r = await fetch("https://api.firecrawl.dev/v2/scrape", {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${FC_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ url, formats: ["markdown"], onlyMainContent: true }),
+          signal: AbortSignal.timeout(20_000),
+        });
+        if (r.ok) {
+          const j = await r.json();
+          const md: string = j?.markdown ?? j?.data?.markdown ?? "";
+          if (md && /N\d{2,5}[A-Z]{0,2}/.test(md) && /aircraft/i.test(md)) {
+            const tail = md.match(/N\d{2,5}[A-Z]{0,2}/g)?.[0];
+            signals.push({
+              source: "FAA",
+              kind: "aircraft_owner",
+              value: tail ? `Aircraft tail ${tail}` : "Aircraft registration found",
+              url,
+              confidence: 0.65,
+            });
+          }
         }
       } catch (e) { console.warn("FAA failed", e); }
     }
