@@ -1004,8 +1004,8 @@ Deno.serve(async (req) => {
   await supabase.from("lead_activities").insert({
     lead_id: leadId,
     kind: "seller_discovery",
-    summary: `Discovery: ${status}${d.email ? ` · email ✓` : ""}${d.phone ? " · phone ✓" : ""}${d.linkedin ? " · LinkedIn ✓" : ""} · used ${budget.fc} FC + ${budget.ai} AI`,
-    payload: { discovery: d, budget_used: budget },
+    summary: `Discovery: ${status}${d.email ? ` · email ✓` : ""}${d.phone ? " · phone ✓" : ""}${d.linkedin ? " · LinkedIn ✓" : ""}${entity ? (dmVerified ? " · DM verified ✓" : " · DM unverified ⚠") : ""}${d.passes.second_pass ? " · 2nd-pass" : ""} · used ${budget.fc} FC + ${budget.ai} AI`,
+    payload: { discovery: d, budget_used: budget, dm_verified: dmVerified, dm_verification_source: dmVerificationSource },
   });
 
   // Queue brief refresh now that discovery is done (so the drawer reflects it).
