@@ -31,65 +31,6 @@ async function fcRelease(id: string | null, actual: number, status = "done") {
   try { await FC_ADMIN.rpc("fc_release", { p_id: id, p_actual: actual, p_status: status }); } catch (_) {}
 }
 
-const APOLLO_BASE = "https://api.apollo.io/api/v1";
-const SENIOR_TITLES = [
-  "owner","founder","co-founder","ceo","president","principal","managing member","managing partner",
-  "partner","manager","trustee","officer","director","vp","vice president","chief",
-];
-
-async function apolloOrgEnrich(domain: string, key: string) {
-  try {
-    const r = await fetch(`${APOLLO_BASE}/organizations/enrich?domain=${encodeURIComponent(domain)}`, {
-      method: "GET",
-      headers: { "X-Api-Key": key, "Cache-Control": "no-cache", "Content-Type": "application/json" },
-    });
-    if (!r.ok) { console.warn(`apollo org enrich ${r.status}`); return null; }
-    const d = await r.json();
-    return d?.organization ?? null;
-  } catch (e) { console.warn("apollo org enrich threw", e); return null; }
-}
-
-async function apolloPeopleSearch(params: Record<string, any>, key: string) {
-  try {
-    const r = await fetch(`${APOLLO_BASE}/mixed_people/search`, {
-      method: "POST",
-      headers: { "X-Api-Key": key, "Cache-Control": "no-cache", "Content-Type": "application/json" },
-      body: JSON.stringify({ page: 1, per_page: 5, ...params }),
-    });
-    if (!r.ok) { console.warn(`apollo people search ${r.status}: ${(await r.text()).slice(0,200)}`); return []; }
-    const d = await r.json();
-    return (d?.people ?? d?.contacts ?? []) as any[];
-  } catch (e) { console.warn("apollo people search threw", e); return []; }
-}
-
-async function apolloPeopleMatch(params: Record<string, any>, key: string) {
-  try {
-    const r = await fetch(`${APOLLO_BASE}/people/match`, {
-      method: "POST",
-      headers: { "X-Api-Key": key, "Cache-Control": "no-cache", "Content-Type": "application/json" },
-      body: JSON.stringify({ reveal_personal_emails: false, ...params }),
-    });
-    if (!r.ok) { console.warn(`apollo people match ${r.status}`); return null; }
-    const d = await r.json();
-    return d?.person ?? null;
-  } catch (e) { console.warn("apollo people match threw", e); return null; }
-}
-
-function scoreApolloPerson(p: any): number {
-  const title = String(p?.title ?? "").toLowerCase();
-  let s = 0;
-  for (const t of SENIOR_TITLES) if (title.includes(t)) { s += 40; break; }
-  if (isUnlockedEmail(p?.email)) s += 30;
-  if (p?.phone_numbers?.length || p?.sanitized_phone) s += 20;
-  if (p?.linkedin_url) s += 10;
-  return s;
-}
-
-function pickHost(url?: string | null): string | null {
-  if (!url) return null;
-  try { return new URL(url.startsWith("http") ? url : `https://${url}`).hostname.replace(/^www\./, ""); } catch { return null; }
-}
-
 async function fcSearch(query: string, key: string, limit = 3) {
   const resId = await fcReserve("enrich-contact:search", limit);
   if (!resId) { console.warn("fc_throttled enrich-contact"); return []; }
@@ -127,7 +68,6 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
   const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY_OVERRIDE");
-  const apolloKey = Deno.env.get("APOLLO_API_KEY");
 
   let body: { job_id?: string } = {};
   try { body = await req.json(); } catch (_) {}
@@ -154,9 +94,6 @@ Deno.serve(async (req) => {
   let dmName: string | null = lead.decision_maker_name ?? null;
   let dmRole: string | null = lead.decision_maker_role ?? null;
   let dmLinkedIn: string | null = lead.decision_maker_linkedin ?? null;
-  let dmEmail: string | null = lead.decision_maker_email ?? null;
-  let dmPhone: string | null = lead.decision_maker_phone ?? null;
-  let companyWebsite: string | null = lead.company_website ?? null;
   const sources: string[] = [...(lead.data_sources ?? [])];
   let confidence = lead.enrichment_confidence ?? 0;
 
@@ -165,66 +102,10 @@ Deno.serve(async (req) => {
     dmName = ownerName; dmRole = "Owner";
   }
 
-  // Apollo pass — find a senior decision-maker at the owning company,
-  // or match the individual owner. Apollo gives us name/title/LinkedIn
-  // plus (when unlocked) email & phone in one call.
-  let apolloHit = false;
-  if (apolloKey) {
-    try {
-      // Entity path: enrich org by domain, then search senior people there.
-      let orgId: string | null = null;
-      const domain = pickHost(companyWebsite);
-      if (isEntity && domain) {
-        const org = await apolloOrgEnrich(domain, apolloKey);
-        orgId = org?.id ?? null;
-        if (org?.website_url && !companyWebsite) companyWebsite = org.website_url;
-      }
-
-      let candidates: any[] = [];
-      if (orgId) {
-        candidates = await apolloPeopleSearch(
-          { organization_ids: [orgId], person_titles: SENIOR_TITLES },
-          apolloKey,
-        );
-      } else if (isEntity && ownerName) {
-        // No domain yet — search by company name.
-        candidates = await apolloPeopleSearch(
-          { q_organization_name: ownerName, person_titles: SENIOR_TITLES },
-          apolloKey,
-        );
-      } else if (!isEntity && ownerName) {
-        // Individual owner — try people/match first.
-        const parts = ownerName.trim().split(/\s+/);
-        const matched = parts.length >= 2
-          ? await apolloPeopleMatch(
-              { first_name: parts[0], last_name: parts[parts.length - 1] },
-              apolloKey,
-            )
-          : null;
-        if (matched) candidates = [matched];
-      }
-
-      if (candidates.length) {
-        candidates.sort((a, b) => scoreApolloPerson(b) - scoreApolloPerson(a));
-        const top = candidates[0];
-        const fullName = [top?.first_name, top?.last_name].filter(Boolean).join(" ").trim() || top?.name || null;
-        if (fullName && !dmName) { dmName = fullName; confidence += 25; }
-        if (top?.title && !dmRole) { dmRole = top.title; confidence += 15; }
-        if (top?.linkedin_url && !dmLinkedIn) { dmLinkedIn = top.linkedin_url; confidence += 10; }
-        const email = isUnlockedEmail(top?.email) ? top.email : null;
-        if (email && !dmEmail) { dmEmail = email; confidence += 25; }
-        const phone = top?.sanitized_phone || top?.phone_numbers?.[0]?.sanitized_number || top?.phone_numbers?.[0]?.raw_number || null;
-        if (phone && !dmPhone) { dmPhone = phone; confidence += 20; }
-        const orgSite = top?.organization?.website_url ?? null;
-        if (orgSite && !companyWebsite) companyWebsite = orgSite;
-        apolloHit = !!(fullName || email || phone || top?.linkedin_url);
-        if (apolloHit) sources.push("apollo");
-      }
-    } catch (e) { console.warn("apollo pass threw", e); }
-  }
-
-  // Firecrawl LinkedIn fallback when Apollo didn't return one.
-  if (firecrawlKey && !dmLinkedIn && (dmName || ownerName)) {
+  // Single lightweight pass: try to find a LinkedIn URL via Firecrawl. The
+  // heavy lifting (Gemini grounded search, scraping, consolidation) happens
+  // in seller-discovery which we always queue below.
+  if (firecrawlKey && (dmName || ownerName)) {
     const target = dmName ?? ownerName!;
     const liRes = await fcSearch(
       `"${target}" ${lead.property_city ?? ""} ${lead.state ?? ""} site:linkedin.com/in -realtor -broker -"real estate agent" -"listing agent"`,
@@ -233,24 +114,22 @@ Deno.serve(async (req) => {
     const liUrl = liRes.find((r: any) => {
       const u = r.url ?? "";
       if (!/linkedin\.com\/in\//.test(u)) return false;
+      // Skip slugs that clearly belong to brokers/agents.
       const slug = u.toLowerCase();
       return !/-realtor|-broker|-real-?estate-?agent|-listing-?agent/.test(slug);
     })?.url;
-    if (liUrl) {
+    if (liUrl && !dmLinkedIn) {
       dmLinkedIn = liUrl;
       confidence += 10;
       sources.push("firecrawl:linkedin");
     }
   }
 
-  const updated: Record<string, any> = {
+  const updated = {
     decision_maker_name: dmName,
     decision_maker_role: dmRole,
     decision_maker_linkedin: dmLinkedIn,
-    decision_maker_email: dmEmail,
-    decision_maker_phone: dmPhone,
     contact_linkedin: dmLinkedIn ?? lead.contact_linkedin,
-    company_website: companyWebsite,
     enrichment_confidence: Math.min(100, confidence),
     data_sources: Array.from(new Set(sources)),
   };
@@ -259,6 +138,8 @@ Deno.serve(async (req) => {
   const hasContact = isAnyContact(merged);
   const hasOutreach = isOutreachContact(merged);
 
+  // Always route through seller_discovery — it's where the real contact
+  // hunting lives. enrich-contact just primes name/LinkedIn metadata.
   await supabase.from("leads").update({
     ...updated,
     has_contact: hasContact,
@@ -267,15 +148,12 @@ Deno.serve(async (req) => {
     updated_at: new Date().toISOString(),
   }).eq("id", leadId);
 
-  const summaryBits: string[] = [];
-  if (apolloHit) summaryBits.push(`Apollo: ${dmName ?? "contact"}${dmRole ? ` (${dmRole})` : ""}`);
-  if (dmLinkedIn && !apolloHit) summaryBits.push("Seeded LinkedIn");
-  if (!summaryBits.length) summaryBits.push("No contact match");
-
   await supabase.from("lead_activities").insert({
     lead_id: leadId,
     kind: "enriched",
-    summary: `${summaryBits.join(" · ")} — handing off to seller-discovery`,
+    summary: dmLinkedIn
+      ? `Seeded LinkedIn — handing off to seller-discovery for contact hunt`
+      : `No LinkedIn match — handing off to seller-discovery for contact hunt`,
     payload: updated,
   });
 
