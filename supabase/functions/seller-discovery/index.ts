@@ -9,6 +9,13 @@
 //   7. AI consolidation (Gemini picks best per field with confidence)
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { enqueueOnce } from "../_shared/enqueue.ts";
+import {
+  fcSearch as sharedFcSearch,
+  fcScrape as sharedFcScrape,
+  shouldSkipDiscovery,
+  recordDiscoveryAttempt,
+  parkAbandoned,
+} from "../_shared/firecrawl.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
