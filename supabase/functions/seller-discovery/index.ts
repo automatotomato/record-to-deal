@@ -861,11 +861,11 @@ Deno.serve(async (req) => {
   if ((lead.score ?? 0) >= 50) {
     await enqueueOnce(supabase, "wealth_scan", leadId, {
       priority: 65, cooldownHours: 72,
-      unlessLeadHas: [{ column: "wealth_estimate", op: "not_null" }],
+      unlessLeadHas: [{ column: "wealth_tier", op: "not_null" }],
     });
     await enqueueOnce(supabase, "profile_seller", leadId, {
       priority: 68, cooldownHours: 72,
-      unlessLeadHas: [{ column: "seller_profile", op: "not_null" }],
+      unlessLeadHas: [{ column: "profiler_summary", op: "not_null" }],
     });
   }
 
