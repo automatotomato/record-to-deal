@@ -209,3 +209,9 @@ function jsonErr(msg: string, status: number) {
     status, headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 }
+async function getAttempts(supabase: any, jobId: string | undefined): Promise<number> {
+  if (!jobId) return 0;
+  const { data } = await supabase.from("pipeline_jobs").select("attempts").eq("id", jobId).maybeSingle();
+  return data?.attempts ?? 0;
+}
+
