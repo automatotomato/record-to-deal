@@ -102,7 +102,8 @@ async function fcScrape(url: string, _key: string, budget: Budget): Promise<stri
   budget.fc++;
   return await sharedFcScrape("seller-discovery", url);
 }
-}
+
+
 
 const GATEWAY_HEADERS = (key: string) => ({
   "Authorization": `Bearer ${key}`,
