@@ -52,6 +52,8 @@ export type Database = {
           enabled: boolean
           id: string
           last_run_at: string | null
+          last_scanned_at: string | null
+          last_seen_source_urls: Json
           notes: string | null
           parser_key: string
           priority: string
@@ -67,6 +69,8 @@ export type Database = {
           enabled?: boolean
           id?: string
           last_run_at?: string | null
+          last_scanned_at?: string | null
+          last_seen_source_urls?: Json
           notes?: string | null
           parser_key: string
           priority?: string
@@ -82,6 +86,8 @@ export type Database = {
           enabled?: boolean
           id?: string
           last_run_at?: string | null
+          last_scanned_at?: string | null
+          last_seen_source_urls?: Json
           notes?: string | null
           parser_key?: string
           priority?: string

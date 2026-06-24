@@ -1,60 +1,74 @@
-## Goal
+## What I found
 
-Stop pulling "seller" info from Zillow / LoopNet / MLS / broker pages. Treat the **county recorder's recorded deed** as the source of truth, take the **grantor** as the real seller, and unmask LLC grantors to a human via free public sources (OpenCorporates + state Secretary of State filings).
+Yes — the pipeline is re-doing the same work many times per lead. Three concrete leaks:
 
-## Why the current pipeline misses contacts
+**1. Daily scans don't know what's already been seen.**
+`scan-sources` Firecrawls every enabled county and runs GPT extraction on every result, even when the deeds returned are ones we already have. Within-batch dedup happens *after* the AI pass; the DB unique-conflict happens *after* that. The Firecrawl + OpenAI tokens are already spent. Counties like Multnomah/Hillsborough/Maricopa have been scanned 6-14× in the last 2 days re-extracting mostly the same deeds.
 
-- `scan-sources` queries the open web with broad keywords. Top results are broker/listing pages (LoopNet, Crexi, brokerages), so the "owner" we extract is often the listing agent, not the grantor on the deed.
-- `seller-discovery` has an OpenCorporates / SoS pass, but it runs *after* a Firecrawl / LinkedIn pass that locks in whatever name `scan-sources` saved first. If that name is a broker, every downstream pass enriches the wrong person.
-- Counties have a generic `source_url` field, but it isn't consistently a recorder/clerk deed index URL and `scan-sources` doesn't prioritize that domain.
+**2. `lead_brief` is enqueued by three different places per lead.**
+- `enrich-contact` always queues a brief.
+- `seller-discovery` always queues a brief.
+- `pipeline-sweeper` re-queues a brief if `ai_brief` is null.
 
-## Plan
+Same lead has been briefed 100-150× in 3 days. Same pattern for `draft_outreach_step` (top lead: 469 jobs in 3 days), `wealth_scan`, `profile_seller` (3047 failures — retried in a loop).
 
-### 1. Make the county recorder the primary source
+**3. Two overlapping daily crons.**
+`run-scan-daily-7am` (queues `scan_sources`) and `daily-scan-8am` (fires `job-dispatcher`) run separately. There's no idempotency window — if either is triggered manually, the chain restarts and every downstream worker re-fires.
 
-- Add a `recorder_index_url` column to `counties` (separate from `source_url`).
-- Rewrite `scan-sources` query strategy:
-  - Pass 1 — **recorder-first**: query restricted to `site:<recorder_index_url host>` plus a generic `"<county> county recorder" OR "official records" OR "recorded deed" grantor grantee` query.
-  - Pass 2 — **government aggregators**: `site:*.gov` and known recorder aggregator domains for that state.
-  - Hard-exclude broker/MLS hosts (LoopNet, Crexi, Zillow, Realtor, Redfin, Trulia, Auction.com, Movoto, Homes.com, brokerage domains) from every query, in every state — not just NV.
-- Update the AI extraction prompt to require `grantor_name` (seller) and `grantee_name` (buyer); save `grantor_name` into `leads.owner_name`.
-- Reject any record whose source URL is on the broker/MLS deny-list, even if the model fills fields.
+## Changes
 
-### 2. Disable counties without a free recorder source
+### A. Run once daily, behind a guard
 
-- Counties whose recorder requires login or charges per record (several CA counties, etc.) get `enabled = false` and a `notes` value explaining "awaiting paid bulk source". They stay off the cron until we wire a paid provider.
-- Counties with a free public deed search (Miami-Dade, Maricopa, Travis, etc.) get a `recorder_index_url` seeded and stay enabled.
-- Surface the locked-out counties in the Sources page so it's obvious which ones are parked.
+- Delete `daily-scan-8am` and `run-scan-daily-7am`. Replace with a single `scout-daily-8am` cron that calls a new `scout-daily` edge function.
+- `scout-daily` first checks a `scout_runs` row for today (UTC) — if one exists with `status in ('running','done')`, it exits with `skipped:'already_ran_today'`. Otherwise it inserts the daily `scan_sources` / `scan_external` jobs, then fires `job-dispatcher` once.
+- Manual "Run scan now" buttons in Admin go through the same guard (24h cooldown per county, overridable with a confirm dialog).
 
-### 3. Unmask the LLC first, before any LinkedIn / web pass
+### B. Skip already-seen deeds before the AI pass (the big token saver)
 
-In `seller-discovery`:
+In `scan-sources`:
+1. Before Firecrawling, load the county's existing `(parcel_number, property_address, source_record_url)` set from `leads` (last 60 days).
+2. After Firecrawl returns search results, drop any result whose `url` is already in `leads.source_record_url`. If nothing remains, skip the GPT call entirely.
+3. Persist a `counties.last_seen_source_urls` (jsonb, ring-buffer of last ~500 URLs) so we can short-circuit even before the DB lookup on the next run.
+4. Keep `tbs=qdr:d` once a county has been run; `qdr:w` only on first run.
 
-- Reorder passes so **Pass 1 (Entity Unmask via OpenCorporates + state SoS)** must run and complete for any `owner_type` in `LLC | Trust | Corporation | Estate` before later passes.
-- OpenCorporates: hit the public JSON API (`https://api.opencorporates.com/v0.4/companies/search`) filtered by jurisdiction = the lead's state. No key needed at low volume.
-- State SoS: Firecrawl-scrape the state's business entity search; tighten query to `"<entity name>" site:<state SoS host>` and parse registered agent + officers/members.
-- Persist findings to the lead: `entity_registry_url`, registered agent, officers/members list in a new `leads.entity_principals jsonb` column.
-- Promote the best human principal (manager → member → officer → registered agent) to `decision_maker_name` with role.
-- Only then does Pass 2 (LinkedIn / personal contact hunt) run, against the unmasked human, not the LLC string.
+Expected impact: counties with no fresh deeds skip both Firecrawl scrape-options and the GPT extraction call.
 
-### 4. Guardrails so brokers can't sneak back in
+### C. Idempotency guards in every worker (stop the re-enqueue loop)
 
-- In `enrich-contact` and `seller-discovery`, add a broker/agent deny-list check on any candidate name/email/phone (domains like `@compass.com`, `@kw.com`, `@cbre.com`, etc., and titles like "Realtor", "Listing Agent", "Broker Associate") — reject and try the next candidate.
-- In the lead drawer, surface the unmask trail: "Grantor on deed: ACME HOLDINGS LLC → SoS principal: Jane Doe (Manager) → contact found via …".
+Add a small helper `enqueueOnce(kind, lead_id, { unless })` used everywhere:
+- Skip if a job of the same `kind+lead_id` is already `queued|retry|running`.
+- Skip if a `done` job of the same kind finished in the last 24h.
+- Skip if the lead already satisfies the "unless" predicate (e.g. `ai_brief IS NOT NULL` for `lead_brief`, `decision_maker_email IS NOT NULL` for `seller_discovery`).
 
-### 5. Backfill
+Apply at every enqueue site:
+- `enrich-contact` → only queue `seller_discovery` if no email/phone yet; only queue `lead_brief` if `ai_brief` null.
+- `seller-discovery` → only queue `lead_brief` if `ai_brief` null or older than 7 days; only queue `wealth_scan`/`profile_seller` if those fields are empty.
+- `pipeline-sweeper` → same predicate checks (already partially there; tighten to also skip leads updated in the last 24h).
 
-- Re-queue `seller_discovery` for existing leads whose `owner_type` is LLC/Trust/Corp and whose `decision_maker_name` is empty or matches the broker deny-list, so we recover leads already in the DB.
+### D. Stop the `profile_seller` retry storm
+
+3047 failures in 3 days. Cap `attempts` at 2 in `claim_jobs` (move to `status='failed'` with `last_error='attempts exhausted'` instead of `retry`). Add an early-exit in `profile-seller` when the lead lacks the inputs it needs (no decision_maker_name yet) — return `done` with `result:{skipped:'no_dm'}` instead of failing.
+
+### E. Tighten the sweeper
+
+- Run weekly, not on demand.
+- Add `WHERE updated_at < now() - interval '24 hours'` to every re-enqueue query so we don't re-touch leads that were just worked.
 
 ## Technical details
 
-Files touched:
+Files:
+- `supabase/migrations/<new>.sql` — add `counties.last_seen_source_urls jsonb`, `counties.last_scanned_at timestamptz`; create cron `scout-daily-8am`; drop the two old crons.
+- `supabase/functions/scout-daily/index.ts` — new, replaces the two SQL crons.
+- `supabase/functions/scan-sources/index.ts` — pre-filter URLs against existing leads + `last_seen_source_urls`; short-circuit when nothing new.
+- `supabase/functions/enrich-contact/index.ts`, `seller-discovery/index.ts`, `pipeline-sweeper/index.ts` — route every enqueue through `enqueueOnce()` with predicates.
+- `supabase/functions/_shared/enqueue.ts` — new helper.
+- `supabase/functions/profile-seller/index.ts` — early-exit when inputs missing; never throw on missing DM.
+- `supabase/functions/job-dispatcher/index.ts` — claim_jobs honors a 2-attempt cap.
 
-- `supabase/migrations/<new>.sql` — add `counties.recorder_index_url text`, add `leads.entity_principals jsonb`, set `enabled = false` + note on counties with no free recorder source, seed `recorder_index_url` on counties that do.
-- `supabase/functions/scan-sources/index.ts` — recorder-first query builder, universal broker deny-list, grantor/grantee extraction, `owner_name = grantor`.
-- `supabase/functions/seller-discovery/index.ts` — mandatory OpenCorporates + SoS Pass 1 for entity owners, OpenCorporates JSON API call, persist principals, deny-list filter on later passes.
-- `supabase/functions/enrich-contact/index.ts` — apply the broker deny-list before seeding LinkedIn.
-- `src/components/LeadDrawer.tsx` — show the unmask trail.
-- `src/pages/Admin.tsx` — display each county's `recorder_index_url` and parked-with-reason status; let admins paste a URL to re-enable.
+Out of scope: changing the AI model, changing Firecrawl plan, changing outreach cadence behavior.
 
-Out of scope (will ask before doing): paid data providers (DataTree, PropertyRadar, TitlePro), building per-county recorder scrapers beyond Travis, and any change to outreach / Touchpoints UI.
+## Expected outcome
+
+- Daily Firecrawl + OpenAI cost driven primarily by *new* deeds, not by re-extracting old ones.
+- Each lead's downstream chain (brief / wealth / profile / draft) runs once per phase, not 100+ times.
+- Manual or accidental re-triggers are no-ops within the same day.
