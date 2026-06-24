@@ -28,9 +28,12 @@ const FC_V2 = "https://api.firecrawl.dev/v2";
 const HARD_BUDGET_MS = 90_000;
 
 // Commercial-only thesis: residential is dropped. We chase commercial
-// 1031 sellers in non-NV states for Nevada reinvestment.
-type SourceKind = "commercial" | "residential" | "court" | "sec";
-const SOURCES: SourceKind[] = ["commercial", "court", "sec"];
+// 1031 sellers in non-NV states for Nevada reinvestment. pending_sale +
+// recent_close are HIGH_ARBITRAGE-only buckets that surface listings about
+// to close (still inside 1031 ID window) and closings from the last ~30 days.
+type SourceKind = "commercial" | "residential" | "court" | "sec" | "pending_sale" | "recent_close";
+const SOURCES: SourceKind[] = ["commercial", "pending_sale", "recent_close", "court", "sec"];
+const HIGH_ARBITRAGE_STATES = new Set(["CA", "NY", "NJ", "OR", "HI"]);
 type FirecrawlCredential = { label: string; key: string };
 
 function firecrawlCredentials(): FirecrawlCredential[] {
