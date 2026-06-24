@@ -27,8 +27,10 @@ const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-4o-mini";
 const FC_V2 = "https://api.firecrawl.dev/v2";
 const HARD_BUDGET_MS = 90_000;
 
+// Commercial-only thesis: residential is dropped. We chase commercial
+// 1031 sellers in non-NV states for Nevada reinvestment.
 type SourceKind = "commercial" | "residential" | "court" | "sec";
-const SOURCES: SourceKind[] = ["commercial", "residential", "court", "sec"];
+const SOURCES: SourceKind[] = ["commercial", "court", "sec"];
 type FirecrawlCredential = { label: string; key: string };
 
 function firecrawlCredentials(): FirecrawlCredential[] {
