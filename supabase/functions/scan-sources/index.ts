@@ -246,19 +246,49 @@ Deno.serve(async (req) => {
   const allCandidates: Candidate[] = [];
   const queries = buildQueries(county.state, county.county, county.recorder_index_url);
   const hint = defaultHint(county.state, county.county);
-  const tbs = county.last_run_at ? "qdr:w" : "qdr:m";
+  // qdr:d once we've scanned before — we only care about *new* deeds.
+  const tbs = county.last_run_at ? "qdr:d" : "qdr:m";
+
+  // Build a set of URLs we've already extracted from (last ~500 per county +
+  // any existing lead source URLs from the past 60 days). Used to short-circuit
+  // the AI extraction when Firecrawl returns nothing new.
+  const knownUrls = new Set<string>();
+  const lastSeen = Array.isArray(county.last_seen_source_urls) ? county.last_seen_source_urls : [];
+  for (const u of lastSeen) if (typeof u === "string") knownUrls.add(u);
+  const since = new Date(Date.now() - 60 * 86_400_000).toISOString();
+  const { data: priorLeads } = await supabase
+    .from("leads")
+    .select("source_record_url")
+    .eq("county_id", county.id)
+    .gte("created_at", since)
+    .not("source_record_url", "is", null)
+    .limit(2000);
+  for (const r of priorLeads ?? []) if (r.source_record_url) knownUrls.add(r.source_record_url);
+
+  const newlySeenUrls: string[] = [];
+  let skippedNoNewResults = 0;
 
   for (const q of queries) {
     if (Date.now() - start > HARD_BUDGET_MS) { errors.push("time budget hit"); break; }
     try {
       const results = await firecrawlSearch(q, firecrawlKey, tbs);
-      const corpus = results
+      // Drop results we've already extracted from. If nothing's left, skip GPT.
+      const novel = results.filter((r) => r.url && !knownUrls.has(r.url));
+      if (novel.length === 0) {
+        skippedNoNewResults += 1;
+        continue;
+      }
+      for (const r of novel) {
+        knownUrls.add(r.url);
+        newlySeenUrls.push(r.url);
+      }
+      const corpus = novel
         .map((r) => `### ${r.title}\nURL: ${r.url}\n\n${r.markdown.slice(0, 3500)}`)
         .join("\n\n---\n\n");
       if (!corpus) continue;
       const leads = await aiExtractLeads(corpus, hint, openaiKey);
       for (const l of leads) {
-        if (!l.source_record_url && results[0]) l.source_record_url = results[0].url;
+        if (!l.source_record_url && novel[0]) l.source_record_url = novel[0].url;
         allCandidates.push(l);
       }
     } catch (e) {
