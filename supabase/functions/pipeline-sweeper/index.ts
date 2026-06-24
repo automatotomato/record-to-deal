@@ -56,14 +56,21 @@ Deno.serve(async (req) => {
     if (res.enqueued) summary.requalified += 1;
   }
 
-  // 2b) Qualified but no enrichment job in flight
+  // 2b) Qualified but no enrichment job in flight.
+  // Skip leads parked after exhausting attempts, or still in cooldown after a partial/failed pass.
+  const cooldownCutoff = new Date(Date.now() - 72 * 3_600_000).toISOString();
   const { data: needEnrich } = await supabase
     .from("leads")
-    .select("id")
+    .select("id,discovery_attempt_count,last_discovery_attempt_at,discovery_status")
     .eq("pipeline_stage", "qualified")
     .lt("updated_at", staleCutoff)
+    .lt("discovery_attempt_count", 4)
     .limit(STAGE_CAP);
   for (const r of needEnrich ?? []) {
+    const inCooldown = r.last_discovery_attempt_at
+      && (r.discovery_status === "partial" || r.discovery_status === "failed")
+      && r.last_discovery_attempt_at > cooldownCutoff;
+    if (inCooldown) continue;
     const res = await enqueueOnce(supabase, "enrich_contact", r.id, { priority: 80, cooldownHours: 24 });
     if (res.enqueued) summary.re_enriched += 1;
   }
