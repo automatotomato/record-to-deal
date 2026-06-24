@@ -558,9 +558,17 @@ export const OutreachDashboard = () => {
               </div>
               <Tabs value={tab} onValueChange={(v) => { setTab(v as TabKey); setTierFilter("all"); }}>
                 <TabsList>
-                  <TabsTrigger value="candidates" className="gap-2">
-                    1031 Candidates
-                    <Badge variant="secondary" className="tabular">{tabCounts.candidates}</Badge>
+                  <TabsTrigger value="ready" className="gap-2">
+                    Ready to contact
+                    <Badge variant="secondary" className="tabular">{tabCounts.ready}</Badge>
+                  </TabsTrigger>
+                  <TabsTrigger value="review" className="gap-2">
+                    Needs review
+                    <Badge variant="secondary" className="tabular">{tabCounts.review}</Badge>
+                  </TabsTrigger>
+                  <TabsTrigger value="researching" className="gap-2">
+                    Researching
+                    <Badge variant="secondary" className="tabular">{tabCounts.researching}</Badge>
                   </TabsTrigger>
                   <TabsTrigger value="presale" className="gap-2">
                     Pre-sale
