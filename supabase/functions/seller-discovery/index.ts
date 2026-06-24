@@ -506,6 +506,39 @@ Deno.serve(async (req) => {
     });
   }
 
+  // Pre-sale prospects are NOT eligible for contact-hunt until a human moves them forward.
+  if (lead.pipeline_stage === "pre_sale_prospect" && !body.force) {
+    if (jobId) {
+      await supabase.from("pipeline_jobs").update({
+        status: "done", finished_at: new Date().toISOString(),
+        result: { skipped: "pre_sale_prospect" },
+      }).eq("id", jobId);
+    }
+    return new Response(JSON.stringify({ ok: true, skipped: "pre_sale_prospect" }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  // Cooldown / abandon check — stops re-running on dead-end leads day after day.
+  if (!body.force) {
+    const cd = await shouldSkipDiscovery(leadId, { coolHours: 72, maxAttempts: 4 });
+    if (cd.skip) {
+      if (cd.reason === "abandoned") await parkAbandoned(leadId);
+      if (jobId) {
+        await supabase.from("pipeline_jobs").update({
+          status: "done", finished_at: new Date().toISOString(),
+          result: { skipped: cd.reason, attempts: cd.attempts },
+        }).eq("id", jobId);
+      }
+      return new Response(JSON.stringify({ ok: true, skipped: cd.reason, attempts: cd.attempts }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+  }
+
+  await recordDiscoveryAttempt(leadId);
+
+
   const budget = new Budget();
   const d = empty();
   const ownerName: string | null = lead.owner_name ?? null;
