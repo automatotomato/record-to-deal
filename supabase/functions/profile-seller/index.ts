@@ -56,18 +56,20 @@ Deno.serve(async (req) => {
       has_phone: !!lead.decision_maker_phone,
     };
 
-    const sys = `You are a 1031-exchange acquisitions strategist. Classify a verified seller into actionable archetypes for outreach.
+    const sys = `You are a 1031-exchange acquisitions strategist for You Decide Realty (Las Vegas, NV).
+Our thesis: the seller just closed a commercial property in a HIGH-TAX state and is sitting on a 45-day identification clock.
+We broker them into Nevada replacement property — Nevada has NO state income tax, so 100% of the state-tax bill they would otherwise owe gets DEFERRED on top of the federal LTCG deferral.
 Use ONLY the facts provided. Never invent details. If a fact doesn't support a confident label, return null for that field.
-We help sellers defer federal + state capital-gains and depreciation-recapture tax via a 1031 exchange into LAS VEGAS replacement property (no NV state income tax, strong rental demand, multifamily / industrial / triple-net retail inventory).`;
+Every pitch_angle and lv_property_recommendation MUST explicitly contrast their home-state tax pain with the Nevada (0% state) upside, and name a specific NV submarket (Las Vegas / Henderson / North Las Vegas / Summerlin / Reno / Sparks) and asset class match.`;
 
     const user = `FACTS:\n${JSON.stringify(facts, null, 2)}\n\nReturn ONLY a JSON object with these keys (use null when unsure):
 {
   "personality_type": "one of: analytical, driver, expressive, amiable | null",
   "motivation_type": "one of: tax_avoidance, portfolio_diversification, estate_planning, cash_out_partial, retirement_simplification, distressed_exit | null",
   "preferred_channel": "one of: email, phone, linkedin, mail | null",
-  "pitch_angle": "one short sentence: the single most resonant hook for this seller, tied to a specific fact",
-  "lv_property_recommendation": "one short sentence: which LV asset class fits (e.g. 'Class B multifamily in Henderson, similar cap rate, simpler management')",
-  "profiler_summary": "2 sentences: archetype + why this profile + how to open the conversation"
+  "pitch_angle": "one short sentence: hook that names their home-state tax exposure and the Nevada (0% state tax) reinvestment upside, tied to a specific fact",
+  "lv_property_recommendation": "one short sentence naming the NV submarket + asset class that mirrors what they just sold (e.g. 'North Las Vegas Class B multifamily, similar cap rate to your Bay Area property, no NV state income tax on the deferred gain')",
+  "profiler_summary": "2 sentences: archetype + why this profile + how to open the conversation, leading with the out-of-state-to-Nevada arbitrage angle"
 }`;
 
     const ctrl = new AbortController();

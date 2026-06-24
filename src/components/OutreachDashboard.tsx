@@ -68,7 +68,9 @@ type OwnerRollup = { owner_key: string; property_count: number; total_sale_value
 
 const MANUAL_SCAN_LIMIT = 12;
 const MANUAL_COUNTY_SCAN_LIMIT = 4;
-const EXTERNAL_SOURCES = [["commercial", 0], ["residential", 5], ["court", 10], ["sec", 15]] as const;
+// Commercial-only thesis: residential source removed. NV sellers skipped (no arbitrage to pitch).
+const EXTERNAL_SOURCES = [["commercial", 0], ["court", 5], ["sec", 10]] as const;
+const EXCLUDED_SCAN_STATES = new Set(["NV"]);
 
 
 // Collapsed 3-tier priority system. The DB has CRITICAL/URGENT/ACTIVE/HOT/
@@ -345,6 +347,7 @@ export const OutreachDashboard = () => {
       const activeExternal = new Set((activeJobs ?? []).filter((j: any) => j.kind === "scan_external").map((j: any) => `${j.payload?.state}:${j.payload?.source}`));
       const cutoff = Date.now() - 12 * 60 * 60 * 1000;
       const countyRows: any[] = (counties ?? [])
+        .filter((c) => !EXCLUDED_SCAN_STATES.has(c.state))
         .filter((c) => !activeCountyIds.has(c.id))
         .filter((c) => !c.last_run_at || new Date(c.last_run_at).getTime() < cutoff)
         .map((c) => ({
@@ -357,6 +360,7 @@ export const OutreachDashboard = () => {
         .slice(0, MANUAL_COUNTY_SCAN_LIMIT);
       const externalRows: any[] = [];
       for (const state of Array.from(new Set((counties ?? []).map((c) => c.state)))) {
+        if (EXCLUDED_SCAN_STATES.has(state)) continue;
         for (const [source, offset] of EXTERNAL_SOURCES) {
           if (!activeExternal.has(`${state}:${source}`)) externalRows.push({
             kind: "scan_external",
@@ -506,7 +510,7 @@ export const OutreachDashboard = () => {
             <div className="flex items-center gap-2">
               <Clock className="h-3.5 w-3.5 text-accent" />
               <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground">
-                1031 Pipeline Health
+                Out-of-State 1031 → Nevada Pipeline
               </span>
             </div>
             {lastScanSummary && (

@@ -104,10 +104,10 @@ Deno.serve(async (req) => {
     };
 
     const channelInstructions: Record<string, string> = {
-      email: `Return JSON: { "subject": "<60 char personalized subject", "body": "120-180 word email, plain text, signed: -The team / 1031 Exchange Elite" }. Lead with the pitch_angle if present, otherwise tax_exposure + Las Vegas replacement angle. Step ${currentStep.step_index} of the sequence — vary tone from prior steps.`,
-      linkedin: `Return JSON: { "body": "280 char LinkedIn connection-request blurb, no subject line" }. Reference the recent sale + 1031/Las Vegas angle in plain conversational tone.`,
-      phone_task: `Return JSON: { "subject": "Phone talking points for ${firstName}", "body": "5–7 short bullet talking points an agent will read on a cold call. Open, anchor on the tax_exposure and pitch_angle, anticipate one objection, close with a calendar ask. Plain text, dashes for bullets." }`,
-      email_advisor: `Return JSON: { "subject": "<60 char subject for the seller's attorney/CPA", "body": "120-180 word email addressed to a tax professional, framing the 1031 opportunity for their client without naming the client. Sign as -The team / 1031 Exchange Elite." }`,
+      email: `Return JSON: { "subject": "<60 char personalized subject — MUST mention the dollar deferral and 'Nevada' or 'Las Vegas'", "body": "120-180 word email, plain text, signed: -The team / You Decide Realty" }. The thesis: they just sold a commercial property in a HIGH-TAX state (${ctx.state ?? 'their state'}); a 1031 into Nevada defers federal LTCG AND escapes their home-state tax (NV has 0% state income tax). Lead with the pitch_angle if present. Step ${currentStep.step_index} of the sequence — vary tone from prior steps.`,
+      linkedin: `Return JSON: { "body": "280 char LinkedIn connection-request blurb, no subject line" }. Reference the recent sale + 1031 into Nevada (0% state tax) angle in plain conversational tone.`,
+      phone_task: `Return JSON: { "subject": "Phone talking points for ${firstName}", "body": "5–7 short bullet talking points an agent will read on a cold call. Open by naming their state + tax_exposure, anchor on the out-of-state-into-Nevada arbitrage and pitch_angle, anticipate one objection (often: 'why Nevada?'), close with a calendar ask. Plain text, dashes for bullets." }`,
+      email_advisor: `Return JSON: { "subject": "<60 char subject for the seller's attorney/CPA", "body": "120-180 word email addressed to a tax professional, framing the 1031-into-Nevada opportunity for their client without naming the client. Emphasize state-tax arbitrage (their home state vs. NV 0%). Sign as -The team / You Decide Realty." }`,
     };
 
     let subject = "";
@@ -122,7 +122,7 @@ Deno.serve(async (req) => {
           body: JSON.stringify({
             model: AI_MODEL,
             messages: [
-              { role: "system", content: "You are a 1031-exchange acquisitions analyst writing one touch in a multi-step outreach sequence. Use ONLY the verified facts. Never invent details. Output JSON only." },
+              { role: "system", content: "You are a 1031-exchange acquisitions analyst for You Decide Realty (Las Vegas, NV). You broker out-of-state commercial sellers into Nevada replacement property to escape their home-state capital-gains tax. Use ONLY the verified facts. Never invent details. Output JSON only." },
               { role: "user", content: `${JSON.stringify(ctx, null, 2)}\n\n${channelInstructions[currentStep.channel] ?? channelInstructions.email}` },
             ],
             response_format: { type: "json_object" },
@@ -144,7 +144,7 @@ Deno.serve(async (req) => {
     if (!bodyText) {
       // Fallback templates
       subject = `Step ${currentStep.step_index} · ${currentStep.template_key}`;
-      bodyText = `Hi ${firstName},\n\nFollowing up on ${ctx.property}. ${lead.pitch_angle ?? `A 1031 exchange into Las Vegas could defer ~${ctx.tax_exposure} in tax.`}\n\n– The team\n1031 Exchange Elite`;
+      bodyText = `Hi ${firstName},\n\nFollowing up on ${ctx.property}. ${lead.pitch_angle ?? `A 1031 exchange into Nevada could defer ~${ctx.tax_exposure} in federal + ${ctx.state ?? "home-state"} tax — Nevada has no state income tax on the deferred gain.`}\n\n– The team\nYou Decide Realty`;
     }
 
     // Persist touch

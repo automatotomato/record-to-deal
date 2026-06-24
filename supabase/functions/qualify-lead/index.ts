@@ -51,8 +51,15 @@ function isAnyContact(l: any): boolean {
 const norm = (s: string | null | undefined) =>
   (s ?? "").toString().trim().toUpperCase().replace(/\s+/g, " ").replace(/[.,]/g, "");
 
-const INVESTMENT_TYPES = new Set(["Multifamily", "Commercial", "Industrial", "Mixed"]);
-const ENTITY_OWNERS = new Set(["LLC", "Corporation", "Trust", "Estate"]);
+const INVESTMENT_TYPES = new Set(["Multifamily", "Commercial", "Industrial", "Mixed", "Retail", "Office"]);
+const ENTITY_OWNERS = new Set(["LLC", "Corporation", "Trust", "Estate", "LP", "LLP", "Partnership"]);
+
+function looksOwnerOccupied(lead: any, propType: string): boolean {
+  if (lead.owner_type !== "Individual") return false;
+  if (!lead.mailing_address || !lead.property_address) return false;
+  if (propType !== "SFR" && propType !== "Condo" && propType !== "Unknown") return false;
+  return norm(lead.mailing_address) === norm(lead.property_address);
+}
 
 interface ScoreOut {
   score: number;
@@ -93,34 +100,37 @@ function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
   }
   if (sp === 0) return disq("Disqualified: $0 transfer (likely quitclaim or non-arms-length).", days, stateRate);
 
-  // Hard 1031 floor: individual owner of an unclear/SFR property under $750k will
-  // essentially never do a 1031. Drop those before they pollute the pipeline.
-  if (ownerType === "Individual" && (propType === "SFR" || propType === "Unknown") && sp > 0 && sp < 750_000) {
-    return disq("Disqualified: small individual-owned residential sale below 1031 viability threshold.", days, stateRate);
+  // Geography filter: we BROKER sellers from other states INTO Nevada.
+  // Nevada sellers already enjoy a 0% state income tax — there is no
+  // state-tax arbitrage to pitch, so they are out of scope.
+  if (lead.state === "NV") {
+    return disq("Disqualified: Nevada seller — no out-of-state tax arbitrage to pitch.", days, stateRate);
   }
 
-  // Address state must match county state
+  // Commercial-only thesis: we only chase commercial 1031s. Residential
+  // (SFR, condo, owner-occupied) is dropped at the gate, regardless of
+  // absentee status.
+  if (propType === "SFR" || isCondoApt) {
+    return disq("Disqualified: residential property (SFR/condo) — out of commercial 1031 scope.", days, stateRate);
+  }
+  if (looksOwnerOccupied(lead, propType)) {
+    return disq("Disqualified: owner-occupied property.", days, stateRate);
+  }
+  // Require commercial-class property OR an entity owner with a real-money sale.
+  const commercialClass = INVESTMENT_TYPES.has(propType);
+  const entityWithSize = ENTITY_OWNERS.has(ownerType) && sp >= 750_000;
+  if (!commercialClass && !entityWithSize) {
+    return disq("Disqualified: not a commercial-class asset and not an entity-owned sale ≥ $750k.", days, stateRate);
+  }
+  // Land floor raised from $250k → $1M to keep only investment-grade parcels.
+  if (propType === "Land" && sp < 1_000_000) {
+    return disq("Disqualified: land sale under the $1M investment threshold.", days, stateRate);
+  }
+
+  // Address state must match county state (sanity check on geocoding)
   const stateMatch = addr.match(/\b(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)\b/);
   if (stateMatch && stateMatch[1] !== lead.state) {
     return disq(`Disqualified: address state ${stateMatch[1]} does not match county state ${lead.state}.`, days, stateRate);
-  }
-
-  // Owner-occupied / SFR-Individual filters
-  const looksResidential = propType === "SFR" || propType === "Unknown" || isCondoApt;
-  if (looksResidential && ownerType === "Individual" && norm(lead.mailing_address) === norm(lead.property_address)) {
-    return disq("Disqualified: owner-occupied residential property.", days, stateRate);
-  }
-  if (looksResidential && ownerType === "Individual") {
-    // Allow only if absentee (mailing zip != property zip)
-    const absentee = lead.mailing_address && lead.property_zip
-      && !norm(lead.mailing_address).includes(lead.property_zip);
-    if (!absentee) {
-      return disq("Disqualified: SFR/condo owned by an individual without absentee signal.", days, stateRate);
-    }
-  }
-  // Land threshold
-  if (propType === "Land" && sp < 250_000) {
-    return disq("Disqualified: land sale under the $250k investment threshold.", days, stateRate);
   }
 
   // Sale recency window — only leads inside the 90-day actionable window
@@ -148,12 +158,12 @@ function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
   breakdown.sale_recency = recency;
   if (days != null) reasons.push(`sold ${days} days ago`);
 
-  // Property type (max 15)
+  // Property type (max 25) — commercial-class assets dominate
   let pt = 0;
-  if (propType === "Commercial" || propType === "Multifamily") pt = 15;
-  else if (propType === "Industrial" || propType === "Mixed") pt = 12;
-  else if (propType === "Land") pt = 8;
-  else if (ENTITY_OWNERS.has(ownerType)) pt = 6;
+  if (propType === "Commercial" || propType === "Multifamily" || propType === "Industrial") pt = 25;
+  else if (propType === "Mixed" || propType === "Retail" || propType === "Office") pt = 20;
+  else if (propType === "Land") pt = 10;
+  else if (ENTITY_OWNERS.has(ownerType)) pt = 12;
   breakdown.property_type = pt;
   reasons.push(`property type ${propType.toLowerCase()}`);
 
@@ -177,12 +187,18 @@ function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
   breakdown.sale_price = ps;
   if (sp > 0) reasons.push(`sale price $${Math.round(sp / 1000)}k`);
 
-  // High-tax state (max 15) — bumped from 10. Federal-only target (FL/TX) gets +8.
+  // State-tax arbitrage (max 20) — the bigger their home-state tax bill,
+  // the bigger the Nevada (0% state income tax) upside we can pitch.
   let ht = 0;
-  if (isHighTax) ht = 15;
+  const HIGH_ARBITRAGE = new Set(["CA", "NY", "NJ", "OR", "HI"]);
+  const LOW_TAX_NO_PITCH = new Set(["TX", "FL", "WA", "TN", "SD", "WY", "AK", "NH"]);
+  if (HIGH_ARBITRAGE.has(lead.state)) ht = 20;
+  else if (isHighTax) ht = 15;
   else if (stateRate?.is_target) ht = 8;
-  breakdown.high_tax_state = ht;
-  if (isHighTax) reasons.push(`in ${lead.state} (high state tax)`);
+  else if (LOW_TAX_NO_PITCH.has(lead.state)) ht = 3;
+  breakdown.state_arbitrage = ht;
+  if (HIGH_ARBITRAGE.has(lead.state)) reasons.push(`${lead.state} → NV tax arbitrage is huge`);
+  else if (isHighTax) reasons.push(`in ${lead.state} (high state tax)`);
   else if (stateRate?.is_target) reasons.push(`in ${lead.state} (federal-only target market)`);
 
   // Outreach contactability (max 15)
