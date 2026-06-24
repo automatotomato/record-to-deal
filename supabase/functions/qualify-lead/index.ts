@@ -166,9 +166,13 @@ function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
       score: 0, tier: "EXPIRED", is_urgent: false,
       reason: `Expired: sale ${days} days ago is outside the 90-day actionable window.`,
       breakdown: {}, days_since_sale: days,
-      state_tax_rate: stateRate ? stateRate.ltcg_rate + stateRate.surcharge : null,
+      state_tax_rate: stateRate ? stateRate.ltcg_rate + stateRate.surcharge + cityBoost.rate : null,
       fed_capital_gains_estimate: null, state_capital_gains_estimate: null,
-      total_tax_exposure: null, disqualified: true, needs_review: false,
+      total_tax_exposure: null,
+      actual_capital_gain: null, effective_tax_rate: null,
+      disqualified: true, needs_review: false,
+      city_surcharge_applied: cityBoost.city ? { city: cityBoost.city, rate: cityBoost.rate } : null,
+      days_until_45_deadline: daysTo45, days_until_180_deadline: daysTo180,
     };
   }
 
