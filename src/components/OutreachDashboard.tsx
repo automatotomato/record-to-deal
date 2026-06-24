@@ -63,12 +63,12 @@ import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
 type Lead = any;
-type TabKey = "ready" | "review" | "researching" | "presale" | "active";
+type TabKey = "ready" | "review" | "presale" | "active";
 
-// Lead-bucket predicates. These mirror the readiness column produced by
-// compute_lead_readiness() but also fall back to raw contact fields so a
-// lead with a phone/email always counts as "ready" even if the trigger
-// hasn't run yet.
+// Lead-bucket predicates. Two buckets only: a lead either has contact info
+// (ready) or it doesn't (needs review). We no longer keep a separate
+// "researching" tab — if the automated discovery pass couldn't find contact
+// details, the lead lands in review for a human to finish.
 const hasOutreachContact = (l: any) =>
   !!(l.decision_maker_email || l.decision_maker_phone || l.contact_phone);
 
@@ -80,17 +80,7 @@ const isReadyLead = (l: any) => {
 
 const isReviewLead = (l: any) => {
   if (l.tier === "DISQUALIFIED" || l.pipeline_stage === "disqualified") return false;
-  if (isReadyLead(l)) return false;
-  const r = l.readiness;
-  if (r === "needs_manual_review" || r === "low_confidence") return true;
-  if ((l.discovery_status === "failed" || l.discovery_status === "partial") && !hasOutreachContact(l)) return true;
-  return false;
-};
-
-const isResearchingLead = (l: any) => {
-  if (l.tier === "DISQUALIFIED" || l.pipeline_stage === "disqualified") return false;
-  if (isReadyLead(l) || isReviewLead(l)) return false;
-  return true;
+  return !isReadyLead(l);
 };
 
 // Human-readable reason a lead is stuck in "Needs review".
@@ -181,7 +171,7 @@ const LeadStatePill = ({ lead }: { lead: any }) => {
   if (readiness === "needs_manual_review" || readiness === "low_confidence") {
     return <StateChip label="Needs review" tone="bg-urgent/15 text-urgent border-urgent/40" title="Automated search exhausted — needs a human." />;
   }
-  return <StateChip label="Finding contact…" tone="bg-muted text-muted-foreground border-border" title="Pipeline is still searching for the seller's contact info." pulse />;
+  return <StateChip label="Needs review" tone="bg-urgent/15 text-urgent border-urgent/40" title="No contact details found — needs a manual lookup." />;
 };
 
 export const OutreachDashboard = () => {
@@ -270,7 +260,6 @@ export const OutreachDashboard = () => {
     return leads.filter((l) => {
       if (tab === "ready" && (isPresale(l) || !isReadyLead(l))) return false;
       if (tab === "review" && (isPresale(l) || !isReviewLead(l))) return false;
-      if (tab === "researching" && (isPresale(l) || !isResearchingLead(l))) return false;
       if (tab === "presale" && !isPresale(l)) return false;
       if (tierFilter !== "all" && priorityOf(l.tier, l.is_urgent) !== tierFilter) return false;
       if (stateFilter !== "all" && l.state !== stateFilter) return false;
@@ -304,13 +293,12 @@ export const OutreachDashboard = () => {
   }, [filtered]);
 
   const tabCounts = useMemo(() => {
-    const c = { ready: 0, review: 0, researching: 0, presale: 0, active: 0 };
+    const c = { ready: 0, review: 0, presale: 0, active: 0 };
     for (const l of leads ?? []) {
       c.active += 1;
       if (isPresale(l)) { c.presale += 1; continue; }
       if (isReadyLead(l)) c.ready += 1;
-      else if (isReviewLead(l)) c.review += 1;
-      else c.researching += 1;
+      else c.review += 1;
     }
     return c;
   }, [leads]);
@@ -565,10 +553,6 @@ export const OutreachDashboard = () => {
                   <TabsTrigger value="review" className="gap-2">
                     Needs review
                     <Badge variant="secondary" className="tabular">{tabCounts.review}</Badge>
-                  </TabsTrigger>
-                  <TabsTrigger value="researching" className="gap-2">
-                    Researching
-                    <Badge variant="secondary" className="tabular">{tabCounts.researching}</Badge>
                   </TabsTrigger>
                   <TabsTrigger value="presale" className="gap-2">
                     Pre-sale
@@ -1028,7 +1012,7 @@ const EmptyState = ({
   const tabCopy: Record<TabKey, string> = {
     ready: "No leads ready for outreach yet — check back as discovery finishes.",
     review: "Nothing waiting on you. The pipeline is keeping up.",
-    researching: "Discovery is idle — run a scan to find new leads.",
+    
     presale: "No pre-sale prospects yet — these are listed-but-not-yet-sold investment properties.",
     active: "No leads match your current filters. Try clearing them or switching tabs.",
   };
