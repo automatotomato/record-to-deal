@@ -97,6 +97,9 @@ interface ScoreOut {
   effective_tax_rate: number | null;
   disqualified: boolean;
   needs_review: boolean;
+  city_surcharge_applied: { city: string; rate: number } | null;
+  days_until_45_deadline: number | null;
+  days_until_180_deadline: number | null;
 }
 
 function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
@@ -109,6 +112,9 @@ function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
   const isHighTax = !!stateRate?.is_high_tax;
   const addr = (lead.property_address ?? "").toUpperCase();
   const isCondoApt = /\b(APT|UNIT|#|STE|SUITE)\b/.test(addr);
+  const cityBoost = cityExtraRate(lead, stateRate);
+  const daysTo45 = days != null ? 45 - days : null;
+  const daysTo180 = days != null ? 180 - days : null;
 
   // --- Hard disqualifiers ---
   const trig = lead.trigger_event ?? "";
