@@ -165,10 +165,66 @@ Deno.serve(async (req) => {
     dmName = ownerName; dmRole = "Owner";
   }
 
-  // Single lightweight pass: try to find a LinkedIn URL via Firecrawl. The
-  // heavy lifting (Gemini grounded search, scraping, consolidation) happens
-  // in seller-discovery which we always queue below.
-  if (firecrawlKey && (dmName || ownerName)) {
+  // Apollo pass — find a senior decision-maker at the owning company,
+  // or match the individual owner. Apollo gives us name/title/LinkedIn
+  // plus (when unlocked) email & phone in one call.
+  let apolloHit = false;
+  if (apolloKey) {
+    try {
+      // Entity path: enrich org by domain, then search senior people there.
+      let orgId: string | null = null;
+      const domain = pickHost(companyWebsite);
+      if (isEntity && domain) {
+        const org = await apolloOrgEnrich(domain, apolloKey);
+        orgId = org?.id ?? null;
+        if (org?.website_url && !companyWebsite) companyWebsite = org.website_url;
+      }
+
+      let candidates: any[] = [];
+      if (orgId) {
+        candidates = await apolloPeopleSearch(
+          { organization_ids: [orgId], person_titles: SENIOR_TITLES },
+          apolloKey,
+        );
+      } else if (isEntity && ownerName) {
+        // No domain yet — search by company name.
+        candidates = await apolloPeopleSearch(
+          { q_organization_name: ownerName, person_titles: SENIOR_TITLES },
+          apolloKey,
+        );
+      } else if (!isEntity && ownerName) {
+        // Individual owner — try people/match first.
+        const parts = ownerName.trim().split(/\s+/);
+        const matched = parts.length >= 2
+          ? await apolloPeopleMatch(
+              { first_name: parts[0], last_name: parts[parts.length - 1] },
+              apolloKey,
+            )
+          : null;
+        if (matched) candidates = [matched];
+      }
+
+      if (candidates.length) {
+        candidates.sort((a, b) => scoreApolloPerson(b) - scoreApolloPerson(a));
+        const top = candidates[0];
+        const fullName = [top?.first_name, top?.last_name].filter(Boolean).join(" ").trim() || top?.name || null;
+        if (fullName && !dmName) { dmName = fullName; confidence += 25; }
+        if (top?.title && !dmRole) { dmRole = top.title; confidence += 15; }
+        if (top?.linkedin_url && !dmLinkedIn) { dmLinkedIn = top.linkedin_url; confidence += 10; }
+        const email = isUnlockedEmail(top?.email) ? top.email : null;
+        if (email && !dmEmail) { dmEmail = email; confidence += 25; }
+        const phone = top?.sanitized_phone || top?.phone_numbers?.[0]?.sanitized_number || top?.phone_numbers?.[0]?.raw_number || null;
+        if (phone && !dmPhone) { dmPhone = phone; confidence += 20; }
+        const orgSite = top?.organization?.website_url ?? null;
+        if (orgSite && !companyWebsite) companyWebsite = orgSite;
+        apolloHit = !!(fullName || email || phone || top?.linkedin_url);
+        if (apolloHit) sources.push("apollo");
+      }
+    } catch (e) { console.warn("apollo pass threw", e); }
+  }
+
+  // Firecrawl LinkedIn fallback when Apollo didn't return one.
+  if (firecrawlKey && !dmLinkedIn && (dmName || ownerName)) {
     const target = dmName ?? ownerName!;
     const liRes = await fcSearch(
       `"${target}" ${lead.property_city ?? ""} ${lead.state ?? ""} site:linkedin.com/in -realtor -broker -"real estate agent" -"listing agent"`,
@@ -177,11 +233,10 @@ Deno.serve(async (req) => {
     const liUrl = liRes.find((r: any) => {
       const u = r.url ?? "";
       if (!/linkedin\.com\/in\//.test(u)) return false;
-      // Skip slugs that clearly belong to brokers/agents.
       const slug = u.toLowerCase();
       return !/-realtor|-broker|-real-?estate-?agent|-listing-?agent/.test(slug);
     })?.url;
-    if (liUrl && !dmLinkedIn) {
+    if (liUrl) {
       dmLinkedIn = liUrl;
       confidence += 10;
       sources.push("firecrawl:linkedin");
