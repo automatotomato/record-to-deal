@@ -154,6 +154,9 @@ Deno.serve(async (req) => {
   let dmName: string | null = lead.decision_maker_name ?? null;
   let dmRole: string | null = lead.decision_maker_role ?? null;
   let dmLinkedIn: string | null = lead.decision_maker_linkedin ?? null;
+  let dmEmail: string | null = lead.decision_maker_email ?? null;
+  let dmPhone: string | null = lead.decision_maker_phone ?? null;
+  let companyWebsite: string | null = lead.company_website ?? null;
   const sources: string[] = [...(lead.data_sources ?? [])];
   let confidence = lead.enrichment_confidence ?? 0;
 
