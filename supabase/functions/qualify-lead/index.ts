@@ -23,6 +23,27 @@ interface StateRate {
   is_high_tax: boolean;
   is_target: boolean;
   priority_rank: number;
+  city_surcharges?: Record<string, number> | null;
+}
+
+// Match the lead's property_city (and a few address fallbacks) against the
+// state_tax_rates.city_surcharges JSON map. Keys are upper-case city names.
+function cityExtraRate(lead: any, sr: StateRate | null): { city: string | null; rate: number } {
+  if (!sr?.city_surcharges) return { city: null, rate: 0 };
+  const map = sr.city_surcharges;
+  const cands: string[] = [];
+  if (lead.property_city) cands.push(String(lead.property_city));
+  if (lead.property_address) {
+    const m = String(lead.property_address).match(/,\s*([^,]+),\s*[A-Z]{2}\b/);
+    if (m) cands.push(m[1]);
+  }
+  for (const raw of cands) {
+    const key = raw.trim().toUpperCase();
+    if (key in map && typeof map[key] === "number") {
+      return { city: key, rate: map[key] };
+    }
+  }
+  return { city: null, rate: 0 };
 }
 type Tier = "CRITICAL" | "URGENT" | "ACTIVE" | "FOLLOW_UP" | "EXPIRED" | "DISQUALIFIED";
 
