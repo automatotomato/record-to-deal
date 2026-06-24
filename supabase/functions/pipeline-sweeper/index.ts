@@ -4,6 +4,7 @@
 // 3) Move sales > 180 days old to EXPIRED.
 // 4) Clean up done jobs older than 7 days.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { enqueueOnce } from "../_shared/enqueue.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
