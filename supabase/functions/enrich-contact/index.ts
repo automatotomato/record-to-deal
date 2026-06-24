@@ -40,7 +40,6 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
-  const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY");
 
   let body: { job_id?: string } = {};
   try { body = await req.json(); } catch (_) {}
@@ -60,6 +59,28 @@ Deno.serve(async (req) => {
       result: { skipped: "disqualified" },
     }).eq("id", body.job_id);
     return jsonOk({ ok: true, skipped: "disqualified" });
+  }
+
+  // Pre-sale prospects are NOT eligible for contact-hunt enrichment until a
+  // human moves them forward (avoids burning credits on listings that may
+  // never close).
+  if (lead.pipeline_stage === "pre_sale_prospect") {
+    await supabase.from("pipeline_jobs").update({
+      status: "done", finished_at: new Date().toISOString(),
+      result: { skipped: "pre_sale_prospect" },
+    }).eq("id", body.job_id);
+    return jsonOk({ ok: true, skipped: "pre_sale_prospect" });
+  }
+
+  // Cooldown / abandon check — stops re-running on the same dead-end leads.
+  const cd = await shouldSkipDiscovery(leadId, { coolHours: 72, maxAttempts: 4 });
+  if (cd.skip) {
+    if (cd.reason === "abandoned") await parkAbandoned(leadId);
+    await supabase.from("pipeline_jobs").update({
+      status: "done", finished_at: new Date().toISOString(),
+      result: { skipped: cd.reason, attempts: cd.attempts },
+    }).eq("id", body.job_id);
+    return jsonOk({ ok: true, skipped: cd.reason });
   }
 
   const ownerName = lead.owner_name as string | null;
