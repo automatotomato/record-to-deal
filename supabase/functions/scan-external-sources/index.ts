@@ -61,28 +61,10 @@ function searchQueriesFor(source: SourceKind, state: string, counties: string[])
   }
 }
 
-async function firecrawlSearch(query: string, fcKey: string, limit = 6): Promise<Array<{ url?: string; title?: string; markdown?: string; description?: string }>> {
-  const ctrl = new AbortController();
-  const tid = setTimeout(() => ctrl.abort(), 30_000);
-  try {
-    const r = await fetch(`${FC_V2}/search`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${fcKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        query, limit,
-        scrapeOptions: { formats: ["markdown"], onlyMainContent: true },
-      }),
-      signal: ctrl.signal,
-    });
-    if (!r.ok) {
-      console.warn(`firecrawl ${r.status}: ${(await r.text()).slice(0, 200)}`);
-      return [];
-    }
-    const d = await r.json();
-    const arr = d?.data?.web ?? d?.data ?? d?.web ?? [];
-    return Array.isArray(arr) ? arr : [];
-  } catch (e) { console.warn("firecrawl threw", e); return []; }
-  finally { clearTimeout(tid); }
+async function firecrawlSearch(query: string, _fcKey: string, limit = 6): Promise<Array<{ url?: string; title?: string; markdown?: string; description?: string }>> {
+  const { fcSearch } = await import("../_shared/firecrawl.ts");
+  const results = await fcSearch("scan-external-sources", query, { limit, scrape: true });
+  return results as Array<{ url?: string; title?: string; markdown?: string; description?: string }>;
 }
 
 async function extractFromEvidence(
@@ -233,7 +215,7 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
   const lovableKey = Deno.env.get("OPENAI_API_KEY");
-  const fcKey = Deno.env.get("FIRECRAWL_API_KEY");
+  const fcKey = (Deno.env.get("FIRECRAWL_API_KEY_OVERRIDE") ?? Deno.env.get("FIRECRAWL_API_KEY"));
 
   let body: { job_id?: string; enqueue?: boolean } = {};
   try { body = await req.json(); } catch (_) {}

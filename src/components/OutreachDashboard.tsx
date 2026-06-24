@@ -89,8 +89,10 @@ const reviewReason = (l: any): string => {
   if (!hasOutreachContact(l)) missing.push("contact info");
   if (!l.decision_maker_name) missing.push("decision-maker name");
   if (!l.decision_maker_role) missing.push("verified role");
-  if (l.discovery_status === "failed") return "Automated discovery failed — needs manual lookup.";
-  if (l.discovery_status === "partial") return `Discovery partial — missing ${missing.join(", ") || "details"}.`;
+  const attempts = l.discovery_attempt_count ?? 0;
+  if (attempts >= 4) return `Parked after ${attempts} automated discovery attempts — needs a human lookup.`;
+  if (l.discovery_status === "failed") return `Automated discovery failed (attempt ${attempts}) — needs manual lookup.`;
+  if (l.discovery_status === "partial") return `Discovery partial after ${attempts} attempts — missing ${missing.join(", ") || "details"}.`;
   if (missing.length) return `Missing ${missing.join(", ")}.`;
   return "Low confidence — review and confirm.";
 };

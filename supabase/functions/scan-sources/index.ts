@@ -103,29 +103,19 @@ For each deed, extract: grantor_name (seller), grantee_name (buyer), property ad
 
 async function firecrawlSearch(
   query: string,
-  apiKey: string,
+  _apiKey: string,
   tbs: string,
 ): Promise<{ url: string; title: string; markdown: string }[]> {
-  const r = await fetch(`${FIRECRAWL_V2}/search`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      query,
-      limit: MAX_RESULTS_PER_QUERY,
-      tbs,
-      scrapeOptions: { onlyMainContent: true, formats: ["markdown"] },
-    }),
+  const { fcSearch } = await import("../_shared/firecrawl.ts");
+  const results = await fcSearch("scan-sources", query, {
+    limit: MAX_RESULTS_PER_QUERY, scrape: true, tbs,
   });
-  if (!r.ok) throw new Error(`Firecrawl ${r.status}: ${(await r.text()).slice(0, 200)}`);
-  const data = await r.json();
-  const results: any[] = (data?.data?.web as any[]) ?? (Array.isArray(data?.data) ? data.data : []) ?? [];
-  return results
+  return (results as any[])
     .map((x) => ({
       url: String(x.url ?? ""),
       title: String(x.title ?? ""),
       markdown: String(x.markdown ?? x.description ?? ""),
     }))
-    // Hard-drop broker/MLS hosts before the AI sees them.
     .filter((r) => !isBrokerUrl(r.url));
 }
 
@@ -205,7 +195,7 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
-  const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY");
+  const firecrawlKey = (Deno.env.get("FIRECRAWL_API_KEY_OVERRIDE") ?? Deno.env.get("FIRECRAWL_API_KEY"));
   const openaiKey = Deno.env.get("OPENAI_API_KEY");
   if (!firecrawlKey || !openaiKey) {
     return new Response(JSON.stringify({ error: "FIRECRAWL_API_KEY or OPENAI_API_KEY missing" }), {

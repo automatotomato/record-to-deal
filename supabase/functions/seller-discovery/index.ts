@@ -9,6 +9,13 @@
 //   7. AI consolidation (Gemini picks best per field with confidence)
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { enqueueOnce } from "../_shared/enqueue.ts";
+import {
+  fcSearch as sharedFcSearch,
+  fcScrape as sharedFcScrape,
+  shouldSkipDiscovery,
+  recordDiscoveryAttempt,
+  parkAbandoned,
+} from "../_shared/firecrawl.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -83,42 +90,20 @@ class Budget {
   canAi() { return this.ai < BUDGET.ai; }
 }
 
-async function fcSearch(query: string, key: string, limit: number, scrape: boolean, budget: Budget) {
+async function fcSearch(query: string, _key: string, limit: number, scrape: boolean, budget: Budget) {
   if (!budget.canFc()) return [];
   budget.fc++;
-  try {
-    const r = await fetch(`${FC_V2}/search`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        query, limit,
-        scrapeOptions: scrape ? { formats: ["markdown"], onlyMainContent: true } : undefined,
-      }),
-    });
-    if (!r.ok) {
-      console.warn(`fc ${r.status}: ${(await r.text()).slice(0, 200)}`);
-      return [];
-    }
-    const d = await r.json();
-    const arr = d?.data?.web ?? d?.data ?? d?.web ?? [];
-    return Array.isArray(arr) ? arr : [];
-  } catch (e) { console.warn("fc threw", e); return []; }
+  const results = await sharedFcSearch("seller-discovery", query, { limit, scrape });
+  return results as any[];
 }
 
-async function fcScrape(url: string, key: string, budget: Budget): Promise<string | null> {
+async function fcScrape(url: string, _key: string, budget: Budget): Promise<string | null> {
   if (!budget.canFc()) return null;
   budget.fc++;
-  try {
-    const r = await fetch(`${FC_V2}/scrape`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ url, formats: ["markdown"], onlyMainContent: true }),
-    });
-    if (!r.ok) return null;
-    const d = await r.json();
-    return d?.data?.markdown ?? d?.markdown ?? null;
-  } catch (_) { return null; }
+  return await sharedFcScrape("seller-discovery", url);
 }
+
+
 
 const GATEWAY_HEADERS = (key: string) => ({
   "Authorization": `Bearer ${key}`,
@@ -474,7 +459,7 @@ Deno.serve(async (req) => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const fcKey = Deno.env.get("FIRECRAWL_API_KEY");
+  const fcKey = (Deno.env.get("FIRECRAWL_API_KEY_OVERRIDE") ?? Deno.env.get("FIRECRAWL_API_KEY"));
   const lovableKey = Deno.env.get("OPENAI_API_KEY");
 
   if (!fcKey || !lovableKey) {
@@ -520,6 +505,39 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
+
+  // Pre-sale prospects are NOT eligible for contact-hunt until a human moves them forward.
+  if (lead.pipeline_stage === "pre_sale_prospect" && !body.force) {
+    if (jobId) {
+      await supabase.from("pipeline_jobs").update({
+        status: "done", finished_at: new Date().toISOString(),
+        result: { skipped: "pre_sale_prospect" },
+      }).eq("id", jobId);
+    }
+    return new Response(JSON.stringify({ ok: true, skipped: "pre_sale_prospect" }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  // Cooldown / abandon check — stops re-running on dead-end leads day after day.
+  if (!body.force) {
+    const cd = await shouldSkipDiscovery(leadId, { coolHours: 72, maxAttempts: 4 });
+    if (cd.skip) {
+      if (cd.reason === "abandoned") await parkAbandoned(leadId);
+      if (jobId) {
+        await supabase.from("pipeline_jobs").update({
+          status: "done", finished_at: new Date().toISOString(),
+          result: { skipped: cd.reason, attempts: cd.attempts },
+        }).eq("id", jobId);
+      }
+      return new Response(JSON.stringify({ ok: true, skipped: cd.reason, attempts: cd.attempts }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+  }
+
+  await recordDiscoveryAttempt(leadId);
+
 
   const budget = new Budget();
   const d = empty();
