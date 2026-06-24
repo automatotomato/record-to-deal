@@ -17,8 +17,10 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
-  const aiKey = Deno.env.get("OPENAI_API_KEY");
-  const aiModel = Deno.env.get("OPENAI_MODEL") || "gpt-4o-mini";
+  // Use Lovable AI Gateway (cheaper Gemini, much higher rate limit) instead of
+  // raw OpenAI — the previous setup was hammering the gateway with 8.5k 429s.
+  const aiKey = Deno.env.get("LOVABLE_API_KEY");
+  const aiModel = "google/gemini-3-flash-preview";
 
   try {
     const body = await req.json().catch(() => ({}));
@@ -29,7 +31,7 @@ Deno.serve(async (req) => {
       leadId = job?.lead_id ?? null;
     }
     if (!leadId) return jsonErr("lead_id required", 400);
-    if (!aiKey) return finishJob(supabase, jobId, "OPENAI_API_KEY missing", true);
+    if (!aiKey) return finishJob(supabase, jobId, "LOVABLE_API_KEY missing", true);
 
     const { data: lead, error } = await supabase.from("leads").select("*").eq("id", leadId).maybeSingle();
     if (error || !lead) return finishJob(supabase, jobId, "lead not found", true);
@@ -100,9 +102,13 @@ We help sellers defer federal + state capital-gains and depreciation-recapture t
     const tid = setTimeout(() => ctrl.abort(), 30_000);
     let r: Response;
     try {
-      r = await fetch("https://api.openai.com/v1/chat/completions", {
+      r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
-        headers: { "Authorization": `Bearer ${aiKey}`, "Content-Type": "application/json" },
+        headers: {
+          "Lovable-API-Key": aiKey,
+          "X-Lovable-AIG-SDK": "vercel-ai-sdk",
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
           model: aiModel,
           messages: [{ role: "system", content: sys }, { role: "user", content: user }],
@@ -112,11 +118,28 @@ We help sellers defer federal + state capital-gains and depreciation-recapture t
       });
     } finally { clearTimeout(tid); }
 
+    if (r.status === 429) {
+      // Rate-limited by upstream — back off and let claim_jobs retry later.
+      const attempts = await getAttempts(supabase, jobId);
+      const delaySec = Math.min(1800, Math.pow(2, attempts) * 30);
+      if (jobId) {
+        await supabase.from("pipeline_jobs").update({
+          status: "retry",
+          last_error: "AI gateway 429 — backing off",
+          run_after: new Date(Date.now() + delaySec * 1000).toISOString(),
+          locked_at: null, locked_by: null,
+        }).eq("id", jobId);
+      }
+      return new Response(JSON.stringify({ ok: false, retry_after_s: delaySec }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     if (!r.ok) {
       const txt = await r.text();
       console.error("profile-seller AI error", r.status, txt);
       return finishJob(supabase, jobId, `AI gateway error ${r.status}`, true);
     }
+
 
     const data = await r.json();
     const raw = data?.choices?.[0]?.message?.content ?? "{}";
