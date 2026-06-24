@@ -243,11 +243,14 @@ Deno.serve(async (req) => {
     }
   }
 
-  const updated = {
+  const updated: Record<string, any> = {
     decision_maker_name: dmName,
     decision_maker_role: dmRole,
     decision_maker_linkedin: dmLinkedIn,
+    decision_maker_email: dmEmail,
+    decision_maker_phone: dmPhone,
     contact_linkedin: dmLinkedIn ?? lead.contact_linkedin,
+    company_website: companyWebsite,
     enrichment_confidence: Math.min(100, confidence),
     data_sources: Array.from(new Set(sources)),
   };
@@ -256,8 +259,6 @@ Deno.serve(async (req) => {
   const hasContact = isAnyContact(merged);
   const hasOutreach = isOutreachContact(merged);
 
-  // Always route through seller_discovery — it's where the real contact
-  // hunting lives. enrich-contact just primes name/LinkedIn metadata.
   await supabase.from("leads").update({
     ...updated,
     has_contact: hasContact,
@@ -266,12 +267,15 @@ Deno.serve(async (req) => {
     updated_at: new Date().toISOString(),
   }).eq("id", leadId);
 
+  const summaryBits: string[] = [];
+  if (apolloHit) summaryBits.push(`Apollo: ${dmName ?? "contact"}${dmRole ? ` (${dmRole})` : ""}`);
+  if (dmLinkedIn && !apolloHit) summaryBits.push("Seeded LinkedIn");
+  if (!summaryBits.length) summaryBits.push("No contact match");
+
   await supabase.from("lead_activities").insert({
     lead_id: leadId,
     kind: "enriched",
-    summary: dmLinkedIn
-      ? `Seeded LinkedIn — handing off to seller-discovery for contact hunt`
-      : `No LinkedIn match — handing off to seller-discovery for contact hunt`,
+    summary: `${summaryBits.join(" · ")} — handing off to seller-discovery`,
     payload: updated,
   });
 
