@@ -145,13 +145,17 @@ Deno.serve(async (req) => {
     payload: updated,
   });
 
-  // Always queue the deeper hunt and a brief refresh.
-  await supabase.from("pipeline_jobs").insert({
-    kind: "seller_discovery", lead_id: leadId,
+  // Only queue the deeper hunt when we still need contact info,
+  // and only refresh the brief if we don't already have one (24h cooldown applies either way).
+  await enqueueOnce(supabase, "seller_discovery", leadId, {
     priority: lead.is_urgent ? 35 : 60,
+    cooldownHours: 24,
+    unlessLeadHas: [{ column: "decision_maker_email", op: "not_null" }],
   });
-  await supabase.from("pipeline_jobs").insert({
-    kind: "lead_brief", lead_id: leadId, priority: 80,
+  await enqueueOnce(supabase, "lead_brief", leadId, {
+    priority: 80,
+    cooldownHours: 24,
+    unlessLeadHas: [{ column: "ai_brief", op: "not_null" }],
   });
 
   await supabase.from("pipeline_jobs").update({
