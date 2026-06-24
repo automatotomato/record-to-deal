@@ -21,7 +21,7 @@ const AI_MODEL = Deno.env.get("OPENAI_MODEL") || "gpt-4o-mini";
 if (!(globalThis as any).__sdLogged) { console.log(`[seller-discovery] OpenAI model: ${AI_MODEL}`); (globalThis as any).__sdLogged = true; }
 
 // Per-call budget so a single lead can't burn the day's quota
-const BUDGET = { firecrawl: 8, ai: 3 };
+const BUDGET = { firecrawl: 12, ai: 4 };
 
 // Firecrawl global gate (5 concurrent / 5,000 cr/month enforced in DB).
 const FC_ADMIN = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
@@ -428,8 +428,10 @@ ${blob.slice(0, 14000)}` },
 // Rank principals: manager > managing member > member > officer > director > registered agent.
 function rankPrincipal(p: Principal): number {
   const r = (p.role ?? "").toLowerCase();
-  if (/managing member|manager/.test(r)) return 100;
+  if (/managing member|managing partner|\bmanager\b/.test(r)) return 100;
+  if (/founder|co-founder|owner/.test(r)) return 95;
   if (/president|ceo|chief executive/.test(r)) return 90;
+  if (/\bcfo|\bcoo|vice president|\bvp\b/.test(r)) return 85;
   if (/\bmember\b/.test(r)) return 80;
   if (/officer|director|principal/.test(r)) return 70;
   if (/registered agent/.test(r)) return 40;
@@ -549,10 +551,13 @@ Deno.serve(async (req) => {
   if (entity && ownerName) {
     d.passes.entity_unmask = true;
 
-    // 1a. Firecrawl SoS / bizapedia search to find principals and registered agent.
+    // 1a. Firecrawl SoS / bizapedia / opencorporates / zoominfo / rocketreach search.
     const queries = [
       `"${ownerName}" ${stateName} secretary of state business entity search`,
       `"${ownerName}" site:bizapedia.com`,
+      `"${ownerName}" site:opencorporates.com`,
+      `"${ownerName}" site:zoominfo.com/c OR site:rocketreach.co/company`,
+      `"${ownerName}" "manager" OR "managing member" OR "president" OR "CEO" OR "founder" OR "principal"`,
     ];
     for (const q of queries) {
       const res = await fcSearch(q, fcKey, 3, true, budget);
@@ -560,16 +565,19 @@ Deno.serve(async (req) => {
         const md = `${r.url ?? ""}\n${r.title ?? ""}\n${r.markdown ?? r.description ?? ""}`;
         evidence.push(md);
         // Pull every (role → name) match, not just the first.
-        const roleRe = /(Manager|Managing Member|President|CEO|Officer|Member|Director|Registered Agent)[\s:|\-]+([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)/g;
+        const roleRe = /(Manager|Managing Member|Managing Partner|President|CEO|Chief Executive Officer|Founder|Co-Founder|Owner|Principal|Officer|Member|Director|Vice President|VP|CFO|COO|Registered Agent)[\s:|\-–—]+([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)/g;
         let mm: RegExpExecArray | null;
         while ((mm = roleRe.exec(md)) !== null) {
           if (looksLikePersonName(mm[2])) {
-            d.principals.push({
-              name: mm[2],
-              role: mm[1],
-              source: "sos",
-              source_url: r.url ?? null,
-            });
+            d.principals.push({ name: mm[2], role: mm[1], source: "sos", source_url: r.url ?? null });
+          }
+        }
+        // Inverse pattern: "Jane Doe, Manager" / "John Smith – President"
+        const nameRoleRe = /([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)[\s,|\-–—]+(Manager|Managing Member|Managing Partner|President|CEO|Chief Executive Officer|Founder|Co-Founder|Owner|Principal|Officer|Member|Director|Vice President|VP|CFO|COO)\b/g;
+        let nm: RegExpExecArray | null;
+        while ((nm = nameRoleRe.exec(md)) !== null) {
+          if (looksLikePersonName(nm[1])) {
+            d.principals.push({ name: nm[1], role: nm[2], source: "sos", source_url: r.url ?? null });
           }
         }
         // Related entities (other LLCs near this name)
@@ -599,41 +607,10 @@ Deno.serve(async (req) => {
     setField(d, "role", "Owner", 60, "deed:grantor");
   }
 
-  // HARD GATE: if owner is an entity and we could NOT unmask a human
-  // principal, do not run LinkedIn / web / Gemini passes. They re-introduce
-  // broker noise. Mark needs_review and exit early.
-  const unmaskFailed = entity && (!d.principals.length || !looksLikePersonName(d.name));
-  if (unmaskFailed) {
-    d.notes.push(`Entity unmask failed for ${ownerName ?? "owner"} — no human principal found via SoS / bizapedia. Skipping web passes.`);
-    const updates: Record<string, unknown> = {
-      decision_maker_name: null,
-      decision_maker_role: null,
-      entity_registry_url: d.entity_registry_url ?? lead.entity_registry_url,
-      entity_principals: d.principals.length ? d.principals : null,
-      discovery_status: "failed",
-      has_contact: false,
-      has_outreach_contact: false,
-      pipeline_stage: "needs_review",
-      enrichment_payload: { ...(lead.enrichment_payload ?? {}), discovery_v2: { ...d, budget_used: budget, unmask_failed: true } },
-      data_sources: Array.from(new Set([...(lead.data_sources ?? []), ...d.sources])),
-    };
-    await supabase.from("leads").update(updates).eq("id", leadId);
-    await supabase.from("lead_activities").insert({
-      lead_id: leadId,
-      kind: "seller_discovery",
-      summary: `Discovery: unmask_failed (entity ${ownerName ?? ""}) — needs manual review`,
-      payload: { discovery: d, budget_used: budget },
-    });
-    if (jobId) {
-      await supabase.from("pipeline_jobs").update({
-        status: "done", finished_at: new Date().toISOString(),
-        result: { status: "failed", reason: "unmask_failed" },
-      }).eq("id", jobId);
-    }
-    return new Response(JSON.stringify({ ok: true, status: "failed", reason: "unmask_failed" }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
+  // Soft gate: if SoS unmask returned no human, continue running website +
+  // LinkedIn leadership passes — they're often what actually unmasks the entity.
+  // We re-evaluate "unmask_failed" at the end and mark needs_review then.
+
 
   const targetName = isKnownOwnerName(d.name) ? d.name : (isKnownOwnerName(ownerName) ? ownerName : null);
 
@@ -681,12 +658,64 @@ Deno.serve(async (req) => {
     setField(d, "company_website", normalizeWebsite(domain), body.company_website ? 90 : 60, body.company_website ? "user" : "cached");
   }
 
-  // Confirm/scrape homepage + contact page
+  // Confirm/scrape homepage + contact + leadership pages (team/about/leadership).
   if (domain) {
     const homeMd = await fcScrape(`https://${domain}`, fcKey, budget);
     if (homeMd) evidence.push(`HOMEPAGE ${domain}\n${homeMd.slice(0, 4000)}`);
     const contactMd = await fcScrape(`https://${domain}/contact`, fcKey, budget);
     if (contactMd) evidence.push(`CONTACT ${domain}\n${contactMd.slice(0, 4000)}`);
+
+    // Leadership pages — strongest signal for "who runs this company"
+    for (const path of ["/team", "/about", "/leadership", "/our-team", "/about-us"]) {
+      if (!budget.canFc()) break;
+      const md = await fcScrape(`https://${domain}${path}`, fcKey, budget);
+      if (!md) continue;
+      evidence.push(`LEADERSHIP ${domain}${path}\n${md.slice(0, 5000)}`);
+      // Extract Name + Title pairs from the page
+      const reA = /([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)[\s,|\-–—\n]+(Founder|Co-Founder|Owner|Managing Partner|Managing Member|Manager|President|CEO|Chief Executive Officer|CFO|COO|Principal|Director|Vice President|VP)\b/g;
+      const reB = /(Founder|Co-Founder|Owner|Managing Partner|Managing Member|Manager|President|CEO|Chief Executive Officer|CFO|COO|Principal|Director|Vice President|VP)[\s:|\-–—\n]+([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)/g;
+      let m: RegExpExecArray | null;
+      while ((m = reA.exec(md)) !== null) {
+        if (looksLikePersonName(m[1]) && !isBrokerTitle(m[2])) {
+          d.principals.push({ name: m[1], role: m[2], source: "company_website", source_url: `https://${domain}${path}` });
+        }
+      }
+      while ((m = reB.exec(md)) !== null) {
+        if (looksLikePersonName(m[2]) && !isBrokerTitle(m[1])) {
+          d.principals.push({ name: m[2], role: m[1], source: "company_website", source_url: `https://${domain}${path}` });
+        }
+      }
+    }
+  }
+
+  // Search-based leadership hunt: "[company] CEO/President/founder LinkedIn"
+  if (ownerName && entity && budget.canFc()) {
+    const lq = `"${ownerName}" (CEO OR President OR Founder OR "Managing Partner" OR Owner) site:linkedin.com/in`;
+    const lres = await fcSearch(lq, fcKey, 4, false, budget);
+    for (const r of lres) {
+      const u: string = r.url ?? "";
+      const title: string = r.title ?? "";
+      if (!/linkedin\.com\/in\//i.test(u)) continue;
+      // LinkedIn title typically: "Jane Doe - CEO at Acme LLC | LinkedIn"
+      const tm = title.match(/^([A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+){1,3})\s*[-–—|]\s*([^|]+?)(?:\s+at\s+|\s*\||$)/);
+      if (tm && looksLikePersonName(tm[1]) && !isBrokerTitle(tm[2])) {
+        d.principals.push({ name: tm[1], role: tm[2].trim(), source: "linkedin_search", source_url: u });
+      }
+      evidence.push(`LINKEDIN ${u}\n${title}\n${r.description ?? ""}`);
+    }
+  }
+
+  // Re-rank principals (now includes website + LinkedIn finds) and upgrade if stronger than current name.
+  if (d.principals.length) {
+    d.principals = dedupePrincipals(d.principals).filter((p) => !isBrokerTitle(p.role));
+    const ranked = [...d.principals].sort((a, b) => rankPrincipal(b) - rankPrincipal(a));
+    const best = ranked[0];
+    const curScore = d.confidence_by_field["name"]?.score ?? 0;
+    if (best && rankPrincipal(best) >= 70 && curScore < 70) {
+      setField(d, "name", best.name, 70, `leadership:${best.source}`);
+      if (best.role) setField(d, "role", best.role, 70, `leadership:${best.source}`);
+      d.notes.push(`Identified ${best.name} (${best.role ?? "principal"}) via ${best.source}`);
+    }
   }
 
   // Source records sometimes carry contact info — but ONLY if the host is
