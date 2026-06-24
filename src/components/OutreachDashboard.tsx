@@ -770,6 +770,11 @@ export const OutreachDashboard = () => {
                         </TableCell>
                         <TableCell>
                           <LeadStatePill lead={l} />
+                          {tab === "review" && (
+                            <div className="text-[11px] text-muted-foreground mt-1 max-w-[220px] leading-tight">
+                              {reviewReason(l)}
+                            </div>
+                          )}
                         </TableCell>
 
                         <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
