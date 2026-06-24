@@ -981,6 +981,9 @@ Deno.serve(async (req) => {
     decision_maker_verified: dmVerified,
     decision_maker_verification_source: dmVerificationSource,
     second_pass_ran: lead.second_pass_ran || !!d.passes.second_pass,
+  };
+
+
 
   // If draft email exists with no recipient, update it
   if (d.email) {
