@@ -80,7 +80,8 @@ Deno.serve(async (req) => {
 
   // ---- Queue scan_external per (state, source) ----
   const states = Array.from(new Set((counties ?? []).map((c) => c.state)));
-  const externalSources = ["commercial", "pending_sale", "recent_close", "court", "sec"];
+  // Must match scan-external-sources SOURCES list exactly.
+  const externalSources = ["commercial", "residential", "court", "sec"];
   let queuedExternal = 0;
   for (const state of states) {
     for (const source of externalSources) {
