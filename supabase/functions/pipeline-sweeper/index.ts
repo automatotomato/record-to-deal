@@ -110,13 +110,16 @@ Deno.serve(async (req) => {
     if (res.enqueued) summary.re_briefed += 1;
   }
 
-  // 3) Purge leads outside the 30-day actionable window (and any already disqualified/expired).
-  //    Pre-sale prospects have no sale_date and are preserved.
-  const purgeCutoff = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
+  // 3) Purge ONLY very old leads (sale_date > 120 days). Pre-sale prospects
+  //    (no sale_date) and disqualified/expired leads are PRESERVED so found
+  //    properties stay visible for audit. The dashboard filters them from the
+  //    active opportunity list via tier/stage rules.
+  const purgeCutoff = new Date(Date.now() - 120 * 86_400_000).toISOString().slice(0, 10);
   const { data: toPurge } = await supabase
     .from("leads")
     .select("id")
-    .or(`sale_date.lt.${purgeCutoff},pipeline_stage.eq.disqualified,pipeline_stage.eq.expired,tier.eq.EXPIRED,tier.eq.DISQUALIFIED`);
+    .lt("sale_date", purgeCutoff)
+    .neq("pipeline_stage", "pre_sale_prospect");
   const purgeIds = (toPurge ?? []).map((r: any) => r.id);
   if (purgeIds.length) {
     await supabase.from("lead_activities").delete().in("lead_id", purgeIds);
