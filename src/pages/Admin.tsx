@@ -40,7 +40,9 @@ const Admin = () => {
       const activeCountyIds = new Set((activeJobs ?? []).filter((j: any) => j.kind === "scan_sources").map((j: any) => j.county_id).filter(Boolean));
       const activeExternal = new Set((activeJobs ?? []).filter((j: any) => j.kind === "scan_external").map((j: any) => `${j.payload?.state}:${j.payload?.source}`));
       const cutoff = Date.now() - 12 * 60 * 60 * 1000;
-      const eligible = (counties ?? []).filter((c) => !activeCountyIds.has(c.id))
+      const eligible = (counties ?? [])
+        .filter((c) => !EXCLUDED_SCAN_STATES.has(c.state))
+        .filter((c) => !activeCountyIds.has(c.id))
         .filter((c) => !c.last_run_at || new Date(c.last_run_at).getTime() < cutoff);
       const cooledDown = (counties ?? []).length - eligible.length - activeCountyIds.size;
       const countyRows: any[] = eligible.map((c) => ({
