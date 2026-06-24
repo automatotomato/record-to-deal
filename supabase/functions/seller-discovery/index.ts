@@ -90,41 +90,18 @@ class Budget {
   canAi() { return this.ai < BUDGET.ai; }
 }
 
-async function fcSearch(query: string, key: string, limit: number, scrape: boolean, budget: Budget) {
+async function fcSearch(query: string, _key: string, limit: number, scrape: boolean, budget: Budget) {
   if (!budget.canFc()) return [];
   budget.fc++;
-  try {
-    const r = await fetch(`${FC_V2}/search`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        query, limit,
-        scrapeOptions: scrape ? { formats: ["markdown"], onlyMainContent: true } : undefined,
-      }),
-    });
-    if (!r.ok) {
-      console.warn(`fc ${r.status}: ${(await r.text()).slice(0, 200)}`);
-      return [];
-    }
-    const d = await r.json();
-    const arr = d?.data?.web ?? d?.data ?? d?.web ?? [];
-    return Array.isArray(arr) ? arr : [];
-  } catch (e) { console.warn("fc threw", e); return []; }
+  const results = await sharedFcSearch("seller-discovery", query, { limit, scrape });
+  return results as any[];
 }
 
-async function fcScrape(url: string, key: string, budget: Budget): Promise<string | null> {
+async function fcScrape(url: string, _key: string, budget: Budget): Promise<string | null> {
   if (!budget.canFc()) return null;
   budget.fc++;
-  try {
-    const r = await fetch(`${FC_V2}/scrape`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ url, formats: ["markdown"], onlyMainContent: true }),
-    });
-    if (!r.ok) return null;
-    const d = await r.json();
-    return d?.data?.markdown ?? d?.markdown ?? null;
-  } catch (_) { return null; }
+  return await sharedFcScrape("seller-discovery", url);
+}
 }
 
 const GATEWAY_HEADERS = (key: string) => ({
