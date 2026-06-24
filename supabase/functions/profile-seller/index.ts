@@ -2,6 +2,7 @@
 // pitch angle, and Las Vegas replacement-property recommendation. Runs after
 // seller-discovery for leads with score >= 50. Pure inference over existing facts.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { enqueueOnce } from "../_shared/enqueue.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -32,6 +33,31 @@ Deno.serve(async (req) => {
 
     const { data: lead, error } = await supabase.from("leads").select("*").eq("id", leadId).maybeSingle();
     if (error || !lead) return finishJob(supabase, jobId, "lead not found", true);
+
+    // Early-exit: skip (not fail) when inputs are insufficient. Stops the
+    // attempts loop from burning tokens on leads that can't be profiled yet.
+    if (!lead.decision_maker_name || !lead.owner_name) {
+      if (jobId) {
+        await supabase.from("pipeline_jobs").update({
+          status: "done", finished_at: new Date().toISOString(),
+          result: { skipped: "missing_decision_maker_or_owner" },
+        }).eq("id", jobId);
+      }
+      return new Response(JSON.stringify({ ok: true, skipped: "missing_inputs" }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (lead.profiler_summary) {
+      if (jobId) {
+        await supabase.from("pipeline_jobs").update({
+          status: "done", finished_at: new Date().toISOString(),
+          result: { skipped: "already_profiled" },
+        }).eq("id", jobId);
+      }
+      return new Response(JSON.stringify({ ok: true, skipped: "already_profiled" }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     const facts = {
       owner_name: lead.owner_name,
@@ -123,9 +149,9 @@ We help sellers defer federal + state capital-gains and depreciation-recapture t
       payload: update,
     });
 
-    // Refresh brief now that profile is richer
-    await supabase.from("pipeline_jobs").insert({
-      kind: "lead_brief", lead_id: leadId, priority: 78,
+    // Refresh brief now that profile is richer (24h cooldown, skip if brief already fresh)
+    await enqueueOnce(supabase, "lead_brief", leadId, {
+      priority: 78, cooldownHours: 24,
     });
 
     if (jobId) {
