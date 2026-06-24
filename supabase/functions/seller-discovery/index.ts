@@ -976,9 +976,11 @@ Deno.serve(async (req) => {
       Math.round(Object.values(d.confidence_by_field).reduce((a: number, v: any) => a + v.score, 0) / Math.max(1, Object.keys(d.confidence_by_field).length)),
     ),
     contact_completeness: Math.max(lead.contact_completeness ?? 0, completeness),
-    enrichment_payload: { ...(lead.enrichment_payload ?? {}), discovery_v2: { ...d, budget_used: budget } },
+    enrichment_payload: { ...(lead.enrichment_payload ?? {}), discovery_v2: { ...d, budget_used: budget, dm_verified: dmVerified, dm_verification_source: dmVerificationSource } },
     data_sources: Array.from(new Set([...(lead.data_sources ?? []), ...d.sources])),
-  };
+    decision_maker_verified: dmVerified,
+    decision_maker_verification_source: dmVerificationSource,
+    second_pass_ran: lead.second_pass_ran || !!d.passes.second_pass,
 
   // If draft email exists with no recipient, update it
   if (d.email) {
