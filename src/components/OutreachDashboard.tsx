@@ -63,7 +63,47 @@ import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
 type Lead = any;
-type TabKey = "candidates" | "presale" | "active";
+type TabKey = "ready" | "review" | "researching" | "presale" | "active";
+
+// Lead-bucket predicates. These mirror the readiness column produced by
+// compute_lead_readiness() but also fall back to raw contact fields so a
+// lead with a phone/email always counts as "ready" even if the trigger
+// hasn't run yet.
+const hasOutreachContact = (l: any) =>
+  !!(l.decision_maker_email || l.decision_maker_phone || l.contact_phone);
+
+const isReadyLead = (l: any) => {
+  if (l.tier === "DISQUALIFIED" || l.pipeline_stage === "disqualified") return false;
+  const r = l.readiness;
+  return r === "ready_for_outreach" || r === "contact_found" || hasOutreachContact(l);
+};
+
+const isReviewLead = (l: any) => {
+  if (l.tier === "DISQUALIFIED" || l.pipeline_stage === "disqualified") return false;
+  if (isReadyLead(l)) return false;
+  const r = l.readiness;
+  if (r === "needs_manual_review" || r === "low_confidence") return true;
+  if ((l.discovery_status === "failed" || l.discovery_status === "partial") && !hasOutreachContact(l)) return true;
+  return false;
+};
+
+const isResearchingLead = (l: any) => {
+  if (l.tier === "DISQUALIFIED" || l.pipeline_stage === "disqualified") return false;
+  if (isReadyLead(l) || isReviewLead(l)) return false;
+  return true;
+};
+
+// Human-readable reason a lead is stuck in "Needs review".
+const reviewReason = (l: any): string => {
+  const missing: string[] = [];
+  if (!hasOutreachContact(l)) missing.push("contact info");
+  if (!l.decision_maker_name) missing.push("decision-maker name");
+  if (!l.decision_maker_role) missing.push("verified role");
+  if (l.discovery_status === "failed") return "Automated discovery failed — needs manual lookup.";
+  if (l.discovery_status === "partial") return `Discovery partial — missing ${missing.join(", ") || "details"}.`;
+  if (missing.length) return `Missing ${missing.join(", ")}.`;
+  return "Low confidence — review and confirm.";
+};
 type OwnerRollup = { owner_key: string; property_count: number; total_sale_value: number; total_tax_exposure: number };
 
 
