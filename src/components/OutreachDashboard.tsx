@@ -438,7 +438,7 @@ export const OutreachDashboard = () => {
                   The Desk
                 </h1>
                 <p className="text-sm text-primary-foreground/70 mt-2 max-w-xl">
-                  Intelligence on every fresh investment-property sale — surfaced, scored, and routed for the 180-day 1031 window.
+                  Pre-sale listings and fresh closings (last 30 days) — surfaced, scored, and routed before the 45-day 1031 identification window closes.
                 </p>
               </div>
             </div>
