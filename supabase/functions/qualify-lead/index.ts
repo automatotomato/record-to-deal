@@ -272,7 +272,9 @@ function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
   // Tax math — fix: actual_capital_gain is the GAIN (sale - basis), not the tax owed.
   // capital_gains_estimate kept as alias for actual_capital_gain for back-compat.
   // total_tax_exposure stays as fed + state tax owed.
-  const stateTotalRate = stateRate ? stateRate.ltcg_rate + stateRate.surcharge : null;
+  // City surcharge (NYC, Portland, etc.) is layered onto the state rate.
+  const stateTotalRate = stateRate ? stateRate.ltcg_rate + stateRate.surcharge + cityBoost.rate : null;
+  if (cityBoost.city) reasons.push(`${cityBoost.city} adds +${(cityBoost.rate * 100).toFixed(2)}% city tax`);
   const fmv = lead.assessed_value ?? 0;
   let basis = 0;
   if (fmv > 0 && sp > 0 && fmv < sp) basis = fmv;          // assessed value as basis
@@ -292,6 +294,8 @@ function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
     actual_capital_gain: gain || null,
     effective_tax_rate: effectiveRate,
     disqualified: false, needs_review: false,
+    city_surcharge_applied: cityBoost.city ? { city: cityBoost.city, rate: cityBoost.rate } : null,
+    days_until_45_deadline: daysTo45, days_until_180_deadline: daysTo180,
   };
 }
 
@@ -303,6 +307,9 @@ function disq(reason: string, days: number | null, sr: StateRate | null): ScoreO
     fed_capital_gains_estimate: null, state_capital_gains_estimate: null,
     total_tax_exposure: null, actual_capital_gain: null, effective_tax_rate: null,
     disqualified: true, needs_review: false,
+    city_surcharge_applied: null,
+    days_until_45_deadline: days != null ? 45 - days : null,
+    days_until_180_deadline: days != null ? 180 - days : null,
   };
 }
 function needsReview(reason: string, days: number | null, sr: StateRate | null): ScoreOut {
@@ -313,6 +320,9 @@ function needsReview(reason: string, days: number | null, sr: StateRate | null):
     fed_capital_gains_estimate: null, state_capital_gains_estimate: null,
     total_tax_exposure: null, actual_capital_gain: null, effective_tax_rate: null,
     disqualified: false, needs_review: true,
+    city_surcharge_applied: null,
+    days_until_45_deadline: days != null ? 45 - days : null,
+    days_until_180_deadline: days != null ? 180 - days : null,
   };
 }
 
