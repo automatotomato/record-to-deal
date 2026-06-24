@@ -23,6 +23,27 @@ interface StateRate {
   is_high_tax: boolean;
   is_target: boolean;
   priority_rank: number;
+  city_surcharges?: Record<string, number> | null;
+}
+
+// Match the lead's property_city (and a few address fallbacks) against the
+// state_tax_rates.city_surcharges JSON map. Keys are upper-case city names.
+function cityExtraRate(lead: any, sr: StateRate | null): { city: string | null; rate: number } {
+  if (!sr?.city_surcharges) return { city: null, rate: 0 };
+  const map = sr.city_surcharges;
+  const cands: string[] = [];
+  if (lead.property_city) cands.push(String(lead.property_city));
+  if (lead.property_address) {
+    const m = String(lead.property_address).match(/,\s*([^,]+),\s*[A-Z]{2}\b/);
+    if (m) cands.push(m[1]);
+  }
+  for (const raw of cands) {
+    const key = raw.trim().toUpperCase();
+    if (key in map && typeof map[key] === "number") {
+      return { city: key, rate: map[key] };
+    }
+  }
+  return { city: null, rate: 0 };
 }
 type Tier = "CRITICAL" | "URGENT" | "ACTIVE" | "FOLLOW_UP" | "EXPIRED" | "DISQUALIFIED";
 
@@ -76,6 +97,9 @@ interface ScoreOut {
   effective_tax_rate: number | null;
   disqualified: boolean;
   needs_review: boolean;
+  city_surcharge_applied: { city: string; rate: number } | null;
+  days_until_45_deadline: number | null;
+  days_until_180_deadline: number | null;
 }
 
 function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
@@ -88,6 +112,9 @@ function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
   const isHighTax = !!stateRate?.is_high_tax;
   const addr = (lead.property_address ?? "").toUpperCase();
   const isCondoApt = /\b(APT|UNIT|#|STE|SUITE)\b/.test(addr);
+  const cityBoost = cityExtraRate(lead, stateRate);
+  const daysTo45 = days != null ? 45 - days : null;
+  const daysTo180 = days != null ? 180 - days : null;
 
   // --- Hard disqualifiers ---
   const trig = lead.trigger_event ?? "";
@@ -139,9 +166,13 @@ function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
       score: 0, tier: "EXPIRED", is_urgent: false,
       reason: `Expired: sale ${days} days ago is outside the 90-day actionable window.`,
       breakdown: {}, days_since_sale: days,
-      state_tax_rate: stateRate ? stateRate.ltcg_rate + stateRate.surcharge : null,
+      state_tax_rate: stateRate ? stateRate.ltcg_rate + stateRate.surcharge + cityBoost.rate : null,
       fed_capital_gains_estimate: null, state_capital_gains_estimate: null,
-      total_tax_exposure: null, disqualified: true, needs_review: false,
+      total_tax_exposure: null,
+      actual_capital_gain: null, effective_tax_rate: null,
+      disqualified: true, needs_review: false,
+      city_surcharge_applied: cityBoost.city ? { city: cityBoost.city, rate: cityBoost.rate } : null,
+      days_until_45_deadline: daysTo45, days_until_180_deadline: daysTo180,
     };
   }
 
@@ -241,7 +272,9 @@ function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
   // Tax math — fix: actual_capital_gain is the GAIN (sale - basis), not the tax owed.
   // capital_gains_estimate kept as alias for actual_capital_gain for back-compat.
   // total_tax_exposure stays as fed + state tax owed.
-  const stateTotalRate = stateRate ? stateRate.ltcg_rate + stateRate.surcharge : null;
+  // City surcharge (NYC, Portland, etc.) is layered onto the state rate.
+  const stateTotalRate = stateRate ? stateRate.ltcg_rate + stateRate.surcharge + cityBoost.rate : null;
+  if (cityBoost.city) reasons.push(`${cityBoost.city} adds +${(cityBoost.rate * 100).toFixed(2)}% city tax`);
   const fmv = lead.assessed_value ?? 0;
   let basis = 0;
   if (fmv > 0 && sp > 0 && fmv < sp) basis = fmv;          // assessed value as basis
@@ -261,6 +294,8 @@ function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
     actual_capital_gain: gain || null,
     effective_tax_rate: effectiveRate,
     disqualified: false, needs_review: false,
+    city_surcharge_applied: cityBoost.city ? { city: cityBoost.city, rate: cityBoost.rate } : null,
+    days_until_45_deadline: daysTo45, days_until_180_deadline: daysTo180,
   };
 }
 
@@ -272,6 +307,9 @@ function disq(reason: string, days: number | null, sr: StateRate | null): ScoreO
     fed_capital_gains_estimate: null, state_capital_gains_estimate: null,
     total_tax_exposure: null, actual_capital_gain: null, effective_tax_rate: null,
     disqualified: true, needs_review: false,
+    city_surcharge_applied: null,
+    days_until_45_deadline: days != null ? 45 - days : null,
+    days_until_180_deadline: days != null ? 180 - days : null,
   };
 }
 function needsReview(reason: string, days: number | null, sr: StateRate | null): ScoreOut {
@@ -282,6 +320,9 @@ function needsReview(reason: string, days: number | null, sr: StateRate | null):
     fed_capital_gains_estimate: null, state_capital_gains_estimate: null,
     total_tax_exposure: null, actual_capital_gain: null, effective_tax_rate: null,
     disqualified: false, needs_review: true,
+    city_surcharge_applied: null,
+    days_until_45_deadline: days != null ? 45 - days : null,
+    days_until_180_deadline: days != null ? 180 - days : null,
   };
 }
 
@@ -307,7 +348,7 @@ Deno.serve(async (req) => {
 
   const { data: rate } = await supabase
     .from("state_tax_rates")
-    .select("state, ltcg_rate, surcharge, is_high_tax, is_target, priority_rank")
+    .select("state, ltcg_rate, surcharge, is_high_tax, is_target, priority_rank, city_surcharges")
     .eq("state", lead.state)
     .maybeSingle();
 
@@ -347,6 +388,8 @@ Deno.serve(async (req) => {
     actual_capital_gain: r.actual_capital_gain,
     total_tax_exposure: r.total_tax_exposure,
     effective_tax_rate: r.effective_tax_rate,
+    days_until_45_deadline: r.days_until_45_deadline,
+    days_until_180_deadline: r.days_until_180_deadline,
     has_contact: isAnyContact(lead),
     has_outreach_contact: isOutreachContact(lead),
     pipeline_stage: stage,

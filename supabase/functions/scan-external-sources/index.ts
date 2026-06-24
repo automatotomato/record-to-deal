@@ -28,9 +28,12 @@ const FC_V2 = "https://api.firecrawl.dev/v2";
 const HARD_BUDGET_MS = 90_000;
 
 // Commercial-only thesis: residential is dropped. We chase commercial
-// 1031 sellers in non-NV states for Nevada reinvestment.
-type SourceKind = "commercial" | "residential" | "court" | "sec";
-const SOURCES: SourceKind[] = ["commercial", "court", "sec"];
+// 1031 sellers in non-NV states for Nevada reinvestment. pending_sale +
+// recent_close are HIGH_ARBITRAGE-only buckets that surface listings about
+// to close (still inside 1031 ID window) and closings from the last ~30 days.
+type SourceKind = "commercial" | "residential" | "court" | "sec" | "pending_sale" | "recent_close";
+const SOURCES: SourceKind[] = ["commercial", "pending_sale", "recent_close", "court", "sec"];
+const HIGH_ARBITRAGE_STATES = new Set(["CA", "NY", "NJ", "OR", "HI"]);
 type FirecrawlCredential = { label: string; key: string };
 
 function firecrawlCredentials(): FirecrawlCredential[] {
@@ -85,6 +88,21 @@ function searchQueriesFor(source: SourceKind, state: string, counties: string[])
         `site:sec.gov 8-K disposition real estate ${state} ${year}`,
         `site:sec.gov 8-K sold property ${state}`,
         `site:sec.gov 10-Q "sale of real estate" ${state} ${year}`,
+      ];
+    case "pending_sale":
+      // Commercial deals about to close — sellers still inside the 1031 ID window.
+      return [
+        `site:loopnet.com "under contract" ${state} ${top} (commercial OR multifamily OR retail OR office OR industrial)`,
+        `site:crexi.com "under contract" OR "pending" ${state} ${top}`,
+        `"under contract" commercial real estate ${state} ${top} ${year} -residential -house -home`,
+      ];
+    case "recent_close":
+      // Closings in the last ~30 days from brokerage press releases + listings.
+      return [
+        `site:loopnet.com "sold" ${state} ${top} (commercial OR multifamily OR retail OR office OR industrial) ${year}`,
+        `site:crexi.com "sold" ${state} ${top} ${year}`,
+        `"closed" OR "sold" commercial property ${state} ${top} ${year} (CBRE OR JLL OR "Marcus & Millichap" OR Colliers OR Cushman)`,
+        `"announces sale" OR "completes sale" commercial ${state} ${top} ${year}`,
       ];
   }
 }
@@ -336,9 +354,13 @@ Deno.serve(async (req) => {
     for (const [state] of byState) {
       const rank = rankByState.get(state) ?? 99;
       for (const source of SOURCES) {
-        // Commercial drains first within each state. State priority then sets the
-        // per-state band: CA commercial (10+0) < NY commercial (20+0) < FL court (120+10) < ...
-        const sourceOffset = source === "commercial" ? 0 : source === "residential" ? 5 : 10;
+        // pending_sale + recent_close only matter for HIGH_ARBITRAGE states.
+        if ((source === "pending_sale" || source === "recent_close") && !HIGH_ARBITRAGE_STATES.has(state)) continue;
+        const sourceOffset = source === "commercial" ? 0
+          : source === "pending_sale" ? 2
+          : source === "recent_close" ? 3
+          : source === "residential" ? 5
+          : 10;
         rows.push({
           kind: "scan_external",
           payload: { state, source },
@@ -364,6 +386,13 @@ Deno.serve(async (req) => {
   if (!state || !source || !SOURCES.includes(source)) {
     await markFailed(supabase, body.job_id, "missing/invalid state or source");
     return jsonOk({ ok: false });
+  }
+  if ((source === "pending_sale" || source === "recent_close") && !HIGH_ARBITRAGE_STATES.has(state)) {
+    await supabase.from("pipeline_jobs").update({
+      status: "done", finished_at: new Date().toISOString(),
+      result: { skipped: `${source} restricted to HIGH_ARBITRAGE states` },
+    }).eq("id", body.job_id);
+    return jsonOk({ ok: true, skipped: true });
   }
 
   const { data: counties } = await supabase
