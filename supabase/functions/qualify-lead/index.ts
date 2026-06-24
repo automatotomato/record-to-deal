@@ -151,12 +151,12 @@ function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
   breakdown.sale_recency = recency;
   if (days != null) reasons.push(`sold ${days} days ago`);
 
-  // Property type (max 15)
+  // Property type (max 25) — commercial-class assets dominate
   let pt = 0;
-  if (propType === "Commercial" || propType === "Multifamily") pt = 15;
-  else if (propType === "Industrial" || propType === "Mixed") pt = 12;
-  else if (propType === "Land") pt = 8;
-  else if (ENTITY_OWNERS.has(ownerType)) pt = 6;
+  if (propType === "Commercial" || propType === "Multifamily" || propType === "Industrial") pt = 25;
+  else if (propType === "Mixed" || propType === "Retail" || propType === "Office") pt = 20;
+  else if (propType === "Land") pt = 10;
+  else if (ENTITY_OWNERS.has(ownerType)) pt = 12;
   breakdown.property_type = pt;
   reasons.push(`property type ${propType.toLowerCase()}`);
 
@@ -180,12 +180,18 @@ function scoreLead(lead: any, stateRate: StateRate | null): ScoreOut {
   breakdown.sale_price = ps;
   if (sp > 0) reasons.push(`sale price $${Math.round(sp / 1000)}k`);
 
-  // High-tax state (max 15) — bumped from 10. Federal-only target (FL/TX) gets +8.
+  // State-tax arbitrage (max 20) — the bigger their home-state tax bill,
+  // the bigger the Nevada (0% state income tax) upside we can pitch.
   let ht = 0;
-  if (isHighTax) ht = 15;
+  const HIGH_ARBITRAGE = new Set(["CA", "NY", "NJ", "OR", "HI"]);
+  const LOW_TAX_NO_PITCH = new Set(["TX", "FL", "WA", "TN", "SD", "WY", "AK", "NH"]);
+  if (HIGH_ARBITRAGE.has(lead.state)) ht = 20;
+  else if (isHighTax) ht = 15;
   else if (stateRate?.is_target) ht = 8;
-  breakdown.high_tax_state = ht;
-  if (isHighTax) reasons.push(`in ${lead.state} (high state tax)`);
+  else if (LOW_TAX_NO_PITCH.has(lead.state)) ht = 3;
+  breakdown.state_arbitrage = ht;
+  if (HIGH_ARBITRAGE.has(lead.state)) reasons.push(`${lead.state} → NV tax arbitrage is huge`);
+  else if (isHighTax) reasons.push(`in ${lead.state} (high state tax)`);
   else if (stateRate?.is_target) reasons.push(`in ${lead.state} (federal-only target market)`);
 
   // Outreach contactability (max 15)
