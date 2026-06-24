@@ -129,12 +129,6 @@ Deno.serve(async (req) => {
           }),
           signal: AbortSignal.timeout(30_000),
         });
-              { role: "user", content: `${JSON.stringify(ctx, null, 2)}\n\n${channelInstructions[currentStep.channel] ?? channelInstructions.email}` },
-            ],
-            response_format: { type: "json_object" },
-          }),
-          signal: AbortSignal.timeout(30_000),
-        });
         if (r.ok) {
           const data = await r.json();
           const parsed = JSON.parse(data?.choices?.[0]?.message?.content ?? "{}");
