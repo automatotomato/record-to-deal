@@ -821,11 +821,120 @@ Deno.serve(async (req) => {
     }
   }
 
+  // ============ PASS 6.5 — Second-pass agent (deeper SoS + LinkedIn + PM) ============
+  // Trigger when entity owner AND we still don't have a strong human principal.
+  const bestRankSoFar = d.principals.length
+    ? Math.max(...d.principals.map(rankPrincipal))
+    : 0;
+  const needsSecondPass = entity
+    && !lead.second_pass_ran
+    && (!d.name || bestRankSoFar < 70 || (d.confidence_by_field["name"]?.score ?? 0) < 60);
+
+  if (needsSecondPass && ownerName && budget.canFc()) {
+    d.passes.second_pass = true;
+    const stateSlug = (state ?? "").toLowerCase();
+    const sosQueries = [
+      `"${ownerName}" site:opencorporates.com/companies/us_${stateSlug}`,
+      `"${ownerName}" site:sos.${stateSlug}.gov OR site:sos.state.${stateSlug}.us`,
+      `"${ownerName}" "annual report" filing ${stateName}`,
+      `"${ownerName}" "statement of information" OR "operating agreement"`,
+      `site:linkedin.com/company "${ownerName}"`,
+      lead.property_address
+        ? `"${lead.property_address}" "property manager" OR "managed by" OR "leasing contact"`
+        : null,
+      city ? `"${ownerName}" "${city}" property manager` : null,
+    ].filter(Boolean) as string[];
+
+    for (const q of sosQueries) {
+      if (!budget.canFc()) break;
+      const res = await fcSearch(q, fcKey, 3, true, budget);
+      for (const r of res) {
+        const u: string = r.url ?? "";
+        const md = `${u}\n${r.title ?? ""}\n${r.markdown ?? r.description ?? ""}`;
+        evidence.push(md);
+
+        if (/linkedin\.com\/company/i.test(u) && r.markdown) {
+          const inLinks = Array.from((r.markdown as string).matchAll(/linkedin\.com\/in\/[a-z0-9-]+/gi))
+            .map((m) => `https://www.${m[0]}`)
+            .slice(0, 5);
+          for (const li of inLinks) {
+            const guess = splitLinkedInName(li);
+            if (guess) {
+              d.principals.push({
+                name: `${guess.first} ${guess.last}`,
+                role: "Employee",
+                source: "linkedin_company",
+                source_url: li,
+              });
+            }
+          }
+        }
+
+        const roleRe = /(Manager|Managing Member|Managing Partner|President|CEO|Chief Executive Officer|Founder|Co-Founder|Owner|Principal|Officer|Member|Director|Vice President|VP|CFO|COO|Property Manager|Leasing Manager)[\s:|\-–—]+([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)/g;
+        let mm: RegExpExecArray | null;
+        while ((mm = roleRe.exec(md)) !== null) {
+          if (looksLikePersonName(mm[2]) && !isBrokerTitle(mm[1])) {
+            d.principals.push({ name: mm[2], role: mm[1], source: "second_pass", source_url: u });
+          }
+        }
+        const nameRoleRe = /([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)[\s,|\-–—]+(Manager|Managing Member|Managing Partner|President|CEO|Founder|Co-Founder|Owner|Principal|Officer|Member|Director|Property Manager|Leasing Manager)\b/g;
+        let nm: RegExpExecArray | null;
+        while ((nm = nameRoleRe.exec(md)) !== null) {
+          if (looksLikePersonName(nm[1]) && !isBrokerTitle(nm[2])) {
+            d.principals.push({ name: nm[1], role: nm[2], source: "second_pass", source_url: u });
+          }
+        }
+      }
+    }
+
+    d.principals = dedupePrincipals(d.principals).filter((p) => !isBrokerTitle(p.role));
+    const ranked2 = [...d.principals].sort((a, b) => rankPrincipal(b) - rankPrincipal(a));
+    const best2 = ranked2[0];
+    const curScore = d.confidence_by_field["name"]?.score ?? 0;
+    if (best2 && rankPrincipal(best2) >= 70 && curScore < 75) {
+      setField(d, "name", best2.name, 75, `second_pass:${best2.source}`);
+      if (best2.role) setField(d, "role", best2.role, 75, `second_pass:${best2.source}`);
+      d.notes.push(`Second pass identified ${best2.name} (${best2.role ?? "principal"}) via ${best2.source}`);
+    }
+    d.sources.push("second_pass");
+  }
+
+  // ============ Decision-maker verification against entity principals ============
+  let dmVerified = false;
+  let dmVerificationSource: string | null = null;
+  if (!entity) {
+    if (d.name && ownerName && d.name.toUpperCase().trim() === ownerName.toUpperCase().trim()) {
+      dmVerified = true;
+      dmVerificationSource = "deed:grantor";
+    }
+  } else if (d.name && d.principals.length) {
+    const dmNorm = d.name.toUpperCase().replace(/\s+/g, " ").trim();
+    const match = d.principals.find((p) => {
+      const pn = p.name.toUpperCase().replace(/\s+/g, " ").trim();
+      if (pn === dmNorm) return true;
+      const a = splitName(dmNorm); const b = splitName(pn);
+      return !!(a && b && a.first === b.first && a.last === b.last);
+    });
+    if (match && !/registered agent/i.test(match.role ?? "")) {
+      dmVerified = true;
+      dmVerificationSource = match.source;
+    }
+  }
+  if (!dmVerified && entity && d.name) {
+    d.notes.push(`DM ${d.name} not verified against entity principals — flag for manual review`);
+  }
+
   // ============ Determine status ============
   let status: "none" | "partial" | "reachable" | "failed" = "none";
   if (d.email || d.phone || d.company_website) status = "reachable";
   else if (d.linkedin || d.entity_registry_url) status = "partial";
   else status = "failed";
+
+  // Downgrade unverified entity hits: don't promise "reachable" when we can't
+  // tie the contact back to the SoS principal list.
+  if (entity && status === "reachable" && !dmVerified) {
+    status = "partial";
+  }
 
   // Compute completeness (0-100)
   let completeness = 0;
