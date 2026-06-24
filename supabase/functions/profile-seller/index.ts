@@ -2,6 +2,7 @@
 // pitch angle, and Las Vegas replacement-property recommendation. Runs after
 // seller-discovery for leads with score >= 50. Pure inference over existing facts.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { enqueueOnce } from "../_shared/enqueue.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
