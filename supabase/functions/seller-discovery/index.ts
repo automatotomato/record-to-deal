@@ -563,16 +563,19 @@ Deno.serve(async (req) => {
         const md = `${r.url ?? ""}\n${r.title ?? ""}\n${r.markdown ?? r.description ?? ""}`;
         evidence.push(md);
         // Pull every (role → name) match, not just the first.
-        const roleRe = /(Manager|Managing Member|President|CEO|Officer|Member|Director|Registered Agent)[\s:|\-]+([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)/g;
+        const roleRe = /(Manager|Managing Member|Managing Partner|President|CEO|Chief Executive Officer|Founder|Co-Founder|Owner|Principal|Officer|Member|Director|Vice President|VP|CFO|COO|Registered Agent)[\s:|\-–—]+([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)/g;
         let mm: RegExpExecArray | null;
         while ((mm = roleRe.exec(md)) !== null) {
           if (looksLikePersonName(mm[2])) {
-            d.principals.push({
-              name: mm[2],
-              role: mm[1],
-              source: "sos",
-              source_url: r.url ?? null,
-            });
+            d.principals.push({ name: mm[2], role: mm[1], source: "sos", source_url: r.url ?? null });
+          }
+        }
+        // Inverse pattern: "Jane Doe, Manager" / "John Smith – President"
+        const nameRoleRe = /([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)[\s,|\-–—]+(Manager|Managing Member|Managing Partner|President|CEO|Chief Executive Officer|Founder|Co-Founder|Owner|Principal|Officer|Member|Director|Vice President|VP|CFO|COO)\b/g;
+        let nm: RegExpExecArray | null;
+        while ((nm = nameRoleRe.exec(md)) !== null) {
+          if (looksLikePersonName(nm[1])) {
+            d.principals.push({ name: nm[1], role: nm[2], source: "sos", source_url: r.url ?? null });
           }
         }
         // Related entities (other LLCs near this name)
