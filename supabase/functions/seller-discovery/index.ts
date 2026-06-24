@@ -849,17 +849,24 @@ Deno.serve(async (req) => {
     payload: { discovery: d, budget_used: budget },
   });
 
-  // Queue brief refresh now that discovery is done (so the drawer reflects it).
-  await supabase.from("pipeline_jobs").insert({
-    kind: "lead_brief", lead_id: leadId, priority: 80,
+  // Queue brief refresh only if we don't already have one (cooldown 24h).
+  await enqueueOnce(supabase, "lead_brief", leadId, {
+    priority: 80,
+    cooldownHours: 24,
+    unlessLeadHas: [{ column: "ai_brief", op: "not_null" }],
   });
 
-  // Track 3: profile + wealth scan for promising leads (score >= 50)
+  // Track 3: profile + wealth scan for promising leads (score >= 50),
+  // gated on the fields actually being missing so we don't redo them.
   if ((lead.score ?? 0) >= 50) {
-    await supabase.from("pipeline_jobs").insert([
-      { kind: "wealth_scan", lead_id: leadId, priority: 65 },
-      { kind: "profile_seller", lead_id: leadId, priority: 68 },
-    ]);
+    await enqueueOnce(supabase, "wealth_scan", leadId, {
+      priority: 65, cooldownHours: 72,
+      unlessLeadHas: [{ column: "wealth_estimate", op: "not_null" }],
+    });
+    await enqueueOnce(supabase, "profile_seller", leadId, {
+      priority: 68, cooldownHours: 72,
+      unlessLeadHas: [{ column: "seller_profile", op: "not_null" }],
+    });
   }
 
   // Outreach drafting is now handled by outreach-cadence-tick (assigns a
