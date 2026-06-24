@@ -66,6 +66,10 @@ type Lead = any;
 type TabKey = "candidates" | "presale" | "active";
 type OwnerRollup = { owner_key: string; property_count: number; total_sale_value: number; total_tax_exposure: number };
 
+const MANUAL_SCAN_LIMIT = 12;
+const MANUAL_COUNTY_SCAN_LIMIT = 4;
+const EXTERNAL_SOURCES = [["commercial", 0], ["residential", 5], ["court", 10], ["sec", 15]] as const;
+
 
 // Collapsed 3-tier priority system. The DB has CRITICAL/URGENT/ACTIVE/HOT/
 // WARM/FOLLOW_UP/COLD/etc. — too many overlapping labels. We bucket them:
@@ -183,8 +187,8 @@ export const OutreachDashboard = () => {
     queryFn: async () => {
       const { data } = await supabase
         .from("pipeline_jobs")
-        .select("created_at, finished_at, status, result")
-        .eq("kind", "scan_sources")
+        .select("kind, created_at, finished_at, status, result, last_error")
+        .in("kind", ["scan_sources", "scan_external"])
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -326,7 +330,7 @@ export const OutreachDashboard = () => {
     setRunning(true);
     try {
       const [{ data: counties, error: cErr }, { data: rates }, { data: activeJobs }] = await Promise.all([
-        supabase.from("counties").select("id, state").eq("enabled", true),
+        supabase.from("counties").select("id, state, last_run_at").eq("enabled", true),
         supabase.from("state_tax_rates").select("state, priority_rank, is_target"),
         supabase
           .from("pipeline_jobs")
@@ -339,25 +343,39 @@ export const OutreachDashboard = () => {
       for (const r of rates ?? []) rankByState.set(r.state, r.priority_rank ?? 99);
       const activeCountyIds = new Set((activeJobs ?? []).filter((j: any) => j.kind === "scan_sources").map((j: any) => j.county_id).filter(Boolean));
       const activeExternal = new Set((activeJobs ?? []).filter((j: any) => j.kind === "scan_external").map((j: any) => `${j.payload?.state}:${j.payload?.source}`));
-      const rows: any[] = (counties ?? []).filter((c) => !activeCountyIds.has(c.id)).map((c) => ({
+      const cutoff = Date.now() - 12 * 60 * 60 * 1000;
+      const countyRows: any[] = (counties ?? [])
+        .filter((c) => !activeCountyIds.has(c.id))
+        .filter((c) => !c.last_run_at || new Date(c.last_run_at).getTime() < cutoff)
+        .map((c) => ({
         kind: "scan_sources",
         county_id: c.id,
         priority: (rankByState.get(c.state) ?? 99) * 10,
-      }));
+        payload: {},
+      }))
+        .sort((a, b) => a.priority - b.priority)
+        .slice(0, MANUAL_COUNTY_SCAN_LIMIT);
+      const externalRows: any[] = [];
       for (const state of Array.from(new Set((counties ?? []).map((c) => c.state)))) {
-        for (const [source, offset] of [["commercial", 0], ["residential", 5], ["court", 10], ["sec", 15]] as const) {
-          if (!activeExternal.has(`${state}:${source}`)) rows.push({
+        for (const [source, offset] of EXTERNAL_SOURCES) {
+          if (!activeExternal.has(`${state}:${source}`)) externalRows.push({
             kind: "scan_external",
             payload: { state, source },
             priority: (rankByState.get(state) ?? 99) * 10 + offset,
           });
         }
       }
+      const rows = [
+        ...countyRows,
+        ...externalRows.sort((a, b) => a.priority - b.priority).slice(0, MANUAL_SCAN_LIMIT - countyRows.length),
+      ];
       if (!rows.length) { toast.info("A scan is already queued or running for every enabled source."); return; }
       const { error } = await supabase.from("pipeline_jobs").insert(rows);
       if (error) throw error;
       supabase.functions.invoke("job-dispatcher", { body: { trigger: "manual" } });
-      toast.success(`Queued ${rows.length} county scans — processing now.`);
+      const countiesQueued = rows.filter((r) => r.kind === "scan_sources").length;
+      const externalQueued = rows.length - countiesQueued;
+      toast.success(`Queued ${rows.length} scans (${countiesQueued} county, ${externalQueued} external) — processing now.`);
       qc.invalidateQueries({ queryKey: ["leads"] });
       qc.invalidateQueries({ queryKey: ["last-scan-job"] });
     } catch (e: any) {
@@ -397,6 +415,13 @@ export const OutreachDashboard = () => {
   );
 
   const lastRefreshed = lastRun?.finished_at ?? lastRun?.created_at;
+  const lastResult = (lastRun?.result ?? {}) as any;
+  const lastScanIssue = lastRun?.last_error
+    ?? (Array.isArray(lastResult.errors) && lastResult.errors.length ? lastResult.errors[0] : null)
+    ?? (lastResult.skipped ? `Skipped: ${lastResult.skipped}` : null);
+  const lastScanSummary = lastRun
+    ? `${lastRun.kind === "scan_external" ? "External" : "County"} ${lastRun.status}${typeof lastResult.inserted === "number" ? ` · ${lastResult.inserted} new` : ""}${typeof lastResult.found === "number" ? ` · ${lastResult.found} found` : ""}`
+    : null;
 
   return (
     <TooltipProvider delayDuration={150}>
@@ -477,11 +502,19 @@ export const OutreachDashboard = () => {
 
         {/* 1031 Pipeline Health strip — client-facing one-liner */}
         <div className="rounded-lg border bg-card p-4 md:p-5">
-          <div className="flex items-center gap-2 mb-3">
-            <Clock className="h-3.5 w-3.5 text-accent" />
-            <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground">
-              1031 Pipeline Health
-            </span>
+          <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <Clock className="h-3.5 w-3.5 text-accent" />
+              <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground">
+                1031 Pipeline Health
+              </span>
+            </div>
+            {lastScanSummary && (
+              <div className="text-right text-[11px] font-mono text-muted-foreground max-w-md">
+                <div>{lastScanSummary}</div>
+                {lastScanIssue && <div className="text-urgent truncate" title={lastScanIssue}>{lastScanIssue}</div>}
+              </div>
+            )}
           </div>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <HealthStat label="In 45-day window" value={stats.in45} tone={stats.in45 ? "accent" : "muted"} hint="Sellers still inside the 45-day identification window — the most actionable cohort." />

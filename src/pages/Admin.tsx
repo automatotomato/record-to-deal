@@ -11,6 +11,10 @@ import { toast } from "sonner";
 import { Loader2, Play } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 
+const MANUAL_SCAN_LIMIT = 12;
+const MANUAL_COUNTY_SCAN_LIMIT = 4;
+const EXTERNAL_SOURCES = [["commercial", 0], ["residential", 5], ["court", 10], ["sec", 15]] as const;
+
 const Admin = () => {
   const { isAdmin, loading } = useAuth();
   const qc = useQueryClient();
@@ -37,21 +41,28 @@ const Admin = () => {
       const eligible = (counties ?? []).filter((c) => !activeCountyIds.has(c.id))
         .filter((c) => !c.last_run_at || new Date(c.last_run_at).getTime() < cutoff);
       const cooledDown = (counties ?? []).length - eligible.length - activeCountyIds.size;
-      const rows: any[] = eligible.map((c) => ({
+      const countyRows: any[] = eligible.map((c) => ({
         kind: "scan_sources",
         county_id: c.id,
         priority: (rankByState.get(c.state) ?? 99) * 10,
         payload: {},
-      }));
+      }))
+        .sort((a, b) => a.priority - b.priority)
+        .slice(0, MANUAL_COUNTY_SCAN_LIMIT);
+      const externalRows: any[] = [];
       for (const state of Array.from(new Set((counties ?? []).map((c) => c.state)))) {
-        for (const [source, offset] of [["commercial", 0], ["residential", 5], ["court", 10], ["sec", 15]] as const) {
-          if (!activeExternal.has(`${state}:${source}`)) rows.push({
+        for (const [source, offset] of EXTERNAL_SOURCES) {
+          if (!activeExternal.has(`${state}:${source}`)) externalRows.push({
             kind: "scan_external",
             payload: { state, source },
             priority: (rankByState.get(state) ?? 99) * 10 + offset,
           });
         }
       }
+      const rows = [
+        ...countyRows,
+        ...externalRows.sort((a, b) => a.priority - b.priority).slice(0, MANUAL_SCAN_LIMIT - countyRows.length),
+      ];
       if (!rows.length) {
         toast.info(cooledDown > 0
           ? `County records are in cooldown and external scans are already queued or running.`
@@ -61,7 +72,9 @@ const Admin = () => {
       const { error } = await supabase.from("pipeline_jobs").insert(rows);
       if (error) throw error;
       supabase.functions.invoke("job-dispatcher", { body: { trigger: "manual" } });
-      toast.success(`Queued ${rows.length} county scans — processing now.`);
+      const countiesQueued = rows.filter((r) => r.kind === "scan_sources").length;
+      const externalQueued = rows.length - countiesQueued;
+      toast.success(`Queued ${rows.length} scans (${countiesQueued} county, ${externalQueued} external) — processing now.`);
       qc.invalidateQueries({ queryKey: ["counties"] });
       qc.invalidateQueries({ queryKey: ["leads"] });
       qc.invalidateQueries({ queryKey: ["pipeline-job-counts"] });

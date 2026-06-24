@@ -421,6 +421,7 @@ Deno.serve(async (req) => {
         kind: "verify_property",
         lead_id: leadRow.id,
         priority: 100,
+        payload: {},
       });
       enqueued += 1;
     }

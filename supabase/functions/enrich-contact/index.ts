@@ -161,9 +161,10 @@ Deno.serve(async (req) => {
   await supabase.from("pipeline_jobs").insert({
     kind: "seller_discovery", lead_id: leadId,
     priority: lead.is_urgent ? 35 : 60,
+    payload: {},
   });
   await supabase.from("pipeline_jobs").insert({
-    kind: "lead_brief", lead_id: leadId, priority: 80,
+    kind: "lead_brief", lead_id: leadId, priority: 80, payload: {},
   });
 
   await supabase.from("pipeline_jobs").update({
