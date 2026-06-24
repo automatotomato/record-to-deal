@@ -179,7 +179,7 @@ const LeadStatePill = ({ lead }: { lead: any }) => {
 export const OutreachDashboard = () => {
   const { isAdmin } = useAuth();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<TabKey>("ready");
+  const [tab, setTab] = useState<TabKey>("active");
   const [tierFilter, setTierFilter] = useState<string>("all");
   const [stateFilter, setStateFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("active");
@@ -199,7 +199,8 @@ export const OutreachDashboard = () => {
       const { data, error } = await supabase
         .from("leads")
         .select("*")
-        .neq("tier", "DISQUALIFIED")
+        .not("tier", "in", "(DISQUALIFIED,EXPIRED)")
+        .not("pipeline_stage", "in", "(disqualified,expired)")
         .or(`sale_date.gte.${cutoffDate},and(sale_date.is.null,created_at.gte.${cutoffIso})`)
         .order("is_urgent", { ascending: false })
         .order("created_at", { ascending: false })

@@ -301,20 +301,31 @@ Deno.serve(async (req) => {
     : r.tier === "EXPIRED" ? "expired"
     : "qualified";
 
-  // If lead is disqualified or expired (outside 90-day actionable window),
-  // purge it entirely — we don't keep a graveyard of unreachable opportunities.
+  // Disqualified/expired leads are RETAINED (not deleted) so found properties
+  // remain visible for audit/debugging. The dashboard hides them from the
+  // active opportunity list via tier/stage filters.
   if (r.disqualified || r.tier === "EXPIRED" || r.tier === "DISQUALIFIED") {
-    await supabase.from("lead_activities").delete().eq("lead_id", leadId);
-    await supabase.from("lead_touchpoints").delete().eq("lead_id", leadId);
-    await supabase.from("outreach_touches").delete().eq("lead_id", leadId);
-    await supabase.from("outreach_emails").delete().eq("lead_id", leadId);
-    await supabase.from("pipeline_jobs").delete().eq("lead_id", leadId).neq("id", body.job_id);
-    await supabase.from("leads").delete().eq("id", leadId);
+    await supabase.from("leads").update({
+      score: r.score,
+      tier: r.tier,
+      qualification_reason: r.reason,
+      score_breakdown: r.breakdown,
+      days_since_sale: r.days_since_sale,
+      state_tax_rate: r.state_tax_rate,
+      pipeline_stage: stage,
+      updated_at: new Date().toISOString(),
+    }).eq("id", leadId);
+    await supabase.from("lead_activities").insert({
+      lead_id: leadId,
+      kind: "qualifier_scored",
+      summary: `${r.tier} · ${r.reason}`,
+      payload: { reason: r.reason, stage },
+    });
     await supabase.from("pipeline_jobs").update({
       status: "done", finished_at: new Date().toISOString(),
-      result: { tier: r.tier, score: r.score, stage, purged: true, reason: r.reason },
+      result: { tier: r.tier, score: r.score, stage, reason: r.reason },
     }).eq("id", body.job_id);
-    return jsonOk({ ok: true, tier: r.tier, score: r.score, stage, purged: true });
+    return jsonOk({ ok: true, tier: r.tier, score: r.score, stage });
   }
 
   await supabase.from("leads").update({

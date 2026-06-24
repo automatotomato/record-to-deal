@@ -289,14 +289,17 @@ Deno.serve(async (req) => {
     errors.push(e instanceof Error ? e.message : String(e));
   }
 
-  // Dedupe + drop incomplete records.
+  // Dedupe + drop incomplete records. Contact info (reachability) is NOT
+  // required for intake — enrichment finds contacts later. Blocking inserts
+  // on missing contacts hides real properties from the dashboard.
   const seen = new Set<string>();
   const fresh: Candidate[] = [];
+  let droppedNoOwner = 0, droppedNoAddress = 0, droppedDup = 0;
   for (const c of candidates) {
-    if (!c.owner_name || !c.property_address || !c.source_record_url) continue;
-    if (!hasReachability(c)) continue;
+    if (!c.property_address || !c.source_record_url) { droppedNoAddress++; continue; }
+    if (!c.owner_name) { droppedNoOwner++; continue; }
     const k = `${norm(c.property_address)}|${norm(c.owner_name)}`;
-    if (seen.has(k)) continue;
+    if (seen.has(k)) { droppedDup++; continue; }
     seen.add(k);
     fresh.push(c);
   }
@@ -367,10 +370,19 @@ Deno.serve(async (req) => {
 
   await supabase.from("pipeline_jobs").update({
     status: "done", finished_at: new Date().toISOString(),
-    result: { state, source, found: fresh.length, inserted, enqueued, errors: errors.slice(0, 3) },
+    result: {
+      state, source,
+      raw_candidates: candidates.length,
+      found: fresh.length,
+      inserted, enqueued,
+      dropped_no_address: droppedNoAddress,
+      dropped_no_owner: droppedNoOwner,
+      dropped_duplicate: droppedDup,
+      errors: errors.slice(0, 3),
+    },
   }).eq("id", body.job_id);
 
-  return jsonOk({ ok: true, state, source, found: fresh.length, inserted, enqueued, errors });
+  return jsonOk({ ok: true, state, source, raw: candidates.length, found: fresh.length, inserted, enqueued, errors });
 });
 
 function jsonOk(b: unknown) {
