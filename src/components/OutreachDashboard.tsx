@@ -265,20 +265,12 @@ export const OutreachDashboard = () => {
 
   const isPresale = (l: Lead) => l.pipeline_stage === "pre_sale_prospect";
 
-  const isCandidate = (l: Lead) => {
-    if (isPresale(l)) return false; // presale has its own tab
-    if (l.tier === "COLD" || l.tier === "DISQUALIFIED" || l.tier === "UNSCORED") return false;
-    if (l.readiness === "low_confidence" || l.readiness === "researching") return false;
-    const trig = (l.trigger_event ?? "").toLowerCase();
-    if (!trig.includes("sale") && trig !== "probate") return false;
-    const otype = (l.owner_type ?? "").toLowerCase();
-    return otype !== "individual" && otype !== "unknown" && otype !== "";
-  };
-
   const filtered = useMemo(() => {
     if (!leads) return [];
     return leads.filter((l) => {
-      if (tab === "candidates" && !isCandidate(l)) return false;
+      if (tab === "ready" && (isPresale(l) || !isReadyLead(l))) return false;
+      if (tab === "review" && (isPresale(l) || !isReviewLead(l))) return false;
+      if (tab === "researching" && (isPresale(l) || !isResearchingLead(l))) return false;
       if (tab === "presale" && !isPresale(l)) return false;
       if (tierFilter !== "all" && priorityOf(l.tier, l.is_urgent) !== tierFilter) return false;
       if (stateFilter !== "all" && l.state !== stateFilter) return false;
@@ -312,11 +304,13 @@ export const OutreachDashboard = () => {
   }, [filtered]);
 
   const tabCounts = useMemo(() => {
-    const c = { candidates: 0, presale: 0, active: 0 };
+    const c = { ready: 0, review: 0, researching: 0, presale: 0, active: 0 };
     for (const l of leads ?? []) {
       c.active += 1;
-      if (isPresale(l)) c.presale += 1;
-      else if (isCandidate(l)) c.candidates += 1;
+      if (isPresale(l)) { c.presale += 1; continue; }
+      if (isReadyLead(l)) c.ready += 1;
+      else if (isReviewLead(l)) c.review += 1;
+      else c.researching += 1;
     }
     return c;
   }, [leads]);
