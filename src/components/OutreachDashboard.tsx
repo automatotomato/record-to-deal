@@ -1012,7 +1012,7 @@ const EmptyState = ({
   const tabCopy: Record<TabKey, string> = {
     ready: "No leads ready for outreach yet — check back as discovery finishes.",
     review: "Nothing waiting on you. The pipeline is keeping up.",
-    researching: "Discovery is idle — run a scan to find new leads.",
+    
     presale: "No pre-sale prospects yet — these are listed-but-not-yet-sold investment properties.",
     active: "No leads match your current filters. Try clearing them or switching tabs.",
   };
