@@ -4,11 +4,11 @@
 // candidate leads that flow through the same verify_property → qualify_lead →
 // enrich_contact chain as county-sourced leads.
 //
-// Source families (per user-selected scope):
-//   - commercial : Crexi + LoopNet recently sold
-//   - residential: Redfin recently sold (investment-grade only)
-//   - court      : probate, tax-lien, divorce property dispositions
-//   - sec        : SEC EDGAR 8-K real-estate dispositions by entity sellers
+// Source families (per user-selected scope) — ALL FREE PUBLIC SOURCES:
+//   - commercial : SEC EDGAR + FDIC ORE + GSA/realestatesales.gov + HUD + .gov assessors
+//   - residential: HUD Home Store + Fannie HomePath + Freddie HomeSteps + USDA resales + .gov assessors
+//   - court      : .gov probate/tax-deed notices + state press-association public-notice portals + sheriff sales
+//   - sec        : SEC EDGAR 8-K / 10-Q real-estate dispositions
 //
 // Job kind: scan_external. Payload: { state: "TX", source: "commercial" }.
 // Special bootstrap mode: { enqueue: true } — fans out one job per
