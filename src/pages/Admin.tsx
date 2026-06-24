@@ -55,6 +55,7 @@ const Admin = () => {
         .slice(0, MANUAL_COUNTY_SCAN_LIMIT);
       const externalRows: any[] = [];
       for (const state of Array.from(new Set((counties ?? []).map((c) => c.state)))) {
+        if (EXCLUDED_SCAN_STATES.has(state)) continue;
         for (const [source, offset] of EXTERNAL_SOURCES) {
           if (!activeExternal.has(`${state}:${source}`)) externalRows.push({
             kind: "scan_external",
