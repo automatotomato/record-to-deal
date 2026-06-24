@@ -510,7 +510,7 @@ export const OutreachDashboard = () => {
             <div className="flex items-center gap-2">
               <Clock className="h-3.5 w-3.5 text-accent" />
               <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground">
-                1031 Pipeline Health
+                Out-of-State 1031 → Nevada Pipeline
               </span>
             </div>
             {lastScanSummary && (
