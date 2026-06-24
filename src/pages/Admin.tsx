@@ -13,7 +13,9 @@ import { Progress } from "@/components/ui/progress";
 
 const MANUAL_SCAN_LIMIT = 12;
 const MANUAL_COUNTY_SCAN_LIMIT = 4;
-const EXTERNAL_SOURCES = [["commercial", 0], ["residential", 5], ["court", 10], ["sec", 15]] as const;
+// Commercial-only thesis: residential source removed. NV sellers skipped (no arbitrage to pitch).
+const EXTERNAL_SOURCES = [["commercial", 0], ["court", 5], ["sec", 10]] as const;
+const EXCLUDED_SCAN_STATES = new Set(["NV"]);
 
 const Admin = () => {
   const { isAdmin, loading } = useAuth();
