@@ -127,6 +127,7 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
   const firecrawlKey = Deno.env.get("FIRECRAWL_API_KEY_OVERRIDE");
+  const apolloKey = Deno.env.get("APOLLO_API_KEY");
 
   let body: { job_id?: string } = {};
   try { body = await req.json(); } catch (_) {}
