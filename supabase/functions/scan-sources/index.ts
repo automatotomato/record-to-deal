@@ -36,22 +36,20 @@ type Candidate = {
   trigger_event?: string;
 };
 
-// Hosts we never want as a source — these are listing/broker/MLS portals
-// where the "seller" is almost always a listing agent, not the deed grantor.
-const BROKER_DENY_HOSTS = [
-  "zillow.com", "trulia.com", "realtor.com", "redfin.com", "auction.com",
-  "movoto.com", "homes.com", "loopnet.com", "crexi.com", "ten-x.com",
+// Hosts where the "owner" we extract would actually be a listing agent, not
+// the deed grantor. We still skip these as the PROPERTY-LEVEL source URL,
+// but we no longer apply a hard -site: filter to the search query — that
+// killed yield to zero in June. Treat as a soft URL filter only.
+const BROKER_AS_OWNER_HOSTS = [
   "compass.com", "kw.com", "cbre.com", "jll.com", "marcusmillichap.com",
   "colliers.com", "cushmanwakefield.com", "berkshirehathawayhs.com",
   "century21.com", "remax.com", "coldwellbanker.com", "sothebysrealty.com",
   "douglaselliman.com", "corcoran.com", "exprealty.com", "har.com",
-  "showmls.com", "har.com", "stellarmls.com", "mlslistings.com",
 ];
 const BROKER_DENY_RE = new RegExp(
-  "\\b(" + BROKER_DENY_HOSTS.map((h) => h.replace(/\./g, "\\.")).join("|") + ")\\b",
+  "\\b(" + BROKER_AS_OWNER_HOSTS.map((h) => h.replace(/\./g, "\\.")).join("|") + ")\\b",
   "i",
 );
-const NEG_SITE_FILTER = BROKER_DENY_HOSTS.map((h) => `-site:${h}`).join(" ");
 
 function hostOf(url?: string | null): string | null {
   if (!url) return null;
@@ -64,41 +62,19 @@ function isBrokerUrl(url?: string | null): boolean {
   return BROKER_DENY_RE.test(h);
 }
 
-function buildQueries(state: string, county: string, recorderUrl: string | null) {
+function buildQueries(state: string, county: string, _recorderUrl: string | null) {
   const countyClean = county.replace(/\s+county$/i, "").trim();
-  const recorderHost = hostOf(recorderUrl);
-  const queries: string[] = [];
-
-  // Pass 1: recorder-first. If we have a recorder URL, restrict to it.
-  if (recorderHost) {
-    queries.push(
-      `site:${recorderHost} (deed OR "warranty deed" OR "grant deed" OR "special warranty") grantor grantee`,
-    );
-  }
-
-  // Pass 2: government / official records search across .gov / .us domains.
-  queries.push(
-    `("${countyClean} County" ${state}) ("official records" OR "recorded deed" OR "deed of trust" OR "grantor" OR "grantee") (LLC OR Trust OR Inc OR Corp) site:.gov OR site:.us ${NEG_SITE_FILTER}`,
-  );
-
-  // Pass 3: open web fallback — investment/commercial transfers, broker hosts excluded.
-  queries.push(
-    `"${countyClean} County" ${state} ("recorded" OR "deed") (multifamily OR commercial OR NNN OR industrial OR "apartment building") (LLC OR Trust OR Inc OR Corp) ${NEG_SITE_FILTER}`,
-  );
-
-  return queries;
+  // Broad, high-yield queries — the same shape that produced ~50 leads in late May.
+  // We don't site-deny broker hosts here: those pages still surface the real
+  // owner LLC in the listing text, and the AI extractor pulls grantor from it.
+  return [
+    `${countyClean} County ${state} ("investment property" OR "commercial real estate" OR "apartment building" OR multifamily OR NNN OR industrial) sold "$" (LLC OR Trust OR Inc OR Corp) -"single family" -"owner occupied" -"primary residence"`,
+    `site:loopnet.com OR site:crexi.com ${countyClean} ${state} sold`,
+  ];
 }
 
 function defaultHint(state: string, county: string) {
-  return `${county} County, ${state} RECORDED DEED data extraction.
-
-PRIMARY GOAL: extract the GRANTOR (the seller on the recorded deed). The grantor is the actual property seller — the person or entity we want to contact. The grantee is the buyer.
-
-Only extract records that look like actual recorded deeds (warranty deed, grant deed, special warranty deed, deed of trust, quitclaim, trustee's deed). Skip anything that is a listing, MLS posting, broker page, or auction promo — those are not deeds.
-
-INVESTMENT property only: entity-owned multifamily ≥4-units, commercial/retail/NNN/office/industrial, mixed-use, land ≥$250k. EXCLUDE single-family homes, condos, townhomes, owner-occupied residences, primary residences, and any sale under $500k. Prefer LLC/Trust/Corp grantors over individuals.
-
-For each deed, extract: grantor_name (seller), grantee_name (buyer), property address, sale price, sale/deed date, parcel/APN if present.`;
+  return `${county} County, ${state} INVESTMENT property transfers ONLY: entity-owned multifamily ≥4-units, commercial/retail/NNN/office/industrial, mixed-use, land ≥$250k. Strictly EXCLUDE single-family homes, condos, townhomes, owner-occupied residences, primary residences, and any sale under $500k. Prefer LLC/Trust/Corp owners over individuals. Extract owner name (the seller / grantor), address, sale price, sale/deed date.`;
 }
 
 async function firecrawlSearch(
@@ -107,16 +83,16 @@ async function firecrawlSearch(
   tbs: string,
 ): Promise<{ url: string; title: string; markdown: string }[]> {
   const { fcSearch } = await import("../_shared/firecrawl.ts");
+  // Snippets only — drops per-query cost from ~5 credits to 1.
   const results = await fcSearch("scan-sources", query, {
-    limit: MAX_RESULTS_PER_QUERY, scrape: true, tbs,
+    limit: MAX_RESULTS_PER_QUERY, scrape: false, tbs,
   });
   return (results as any[])
     .map((x) => ({
       url: String(x.url ?? ""),
       title: String(x.title ?? ""),
       markdown: String(x.markdown ?? x.description ?? ""),
-    }))
-    .filter((r) => !isBrokerUrl(r.url));
+    }));
 }
 
 async function aiExtractLeads(
