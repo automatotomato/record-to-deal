@@ -33,6 +33,31 @@ Deno.serve(async (req) => {
     const { data: lead, error } = await supabase.from("leads").select("*").eq("id", leadId).maybeSingle();
     if (error || !lead) return finishJob(supabase, jobId, "lead not found", true);
 
+    // Early-exit: skip (not fail) when inputs are insufficient. Stops the
+    // attempts loop from burning tokens on leads that can't be profiled yet.
+    if (!lead.decision_maker_name || !lead.owner_name) {
+      if (jobId) {
+        await supabase.from("pipeline_jobs").update({
+          status: "done", finished_at: new Date().toISOString(),
+          result: { skipped: "missing_decision_maker_or_owner" },
+        }).eq("id", jobId);
+      }
+      return new Response(JSON.stringify({ ok: true, skipped: "missing_inputs" }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    if (lead.profiler_summary) {
+      if (jobId) {
+        await supabase.from("pipeline_jobs").update({
+          status: "done", finished_at: new Date().toISOString(),
+          result: { skipped: "already_profiled" },
+        }).eq("id", jobId);
+      }
+      return new Response(JSON.stringify({ ok: true, skipped: "already_profiled" }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const facts = {
       owner_name: lead.owner_name,
       owner_type: lead.owner_type,
