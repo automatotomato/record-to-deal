@@ -3,6 +3,7 @@
 // can find one, then ALWAYS hands off to seller_discovery (Gemini-driven)
 // for the actual contact hunt. Apollo has been removed.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { enqueueOnce } from "../_shared/enqueue.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
