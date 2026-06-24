@@ -867,14 +867,14 @@ Deno.serve(async (req) => {
 
   // Queue brief refresh now that discovery is done (so the drawer reflects it).
   await supabase.from("pipeline_jobs").insert({
-    kind: "lead_brief", lead_id: leadId, priority: 80,
+    kind: "lead_brief", lead_id: leadId, priority: 80, payload: {},
   });
 
   // Track 3: profile + wealth scan for promising leads (score >= 50)
   if ((lead.score ?? 0) >= 50) {
     await supabase.from("pipeline_jobs").insert([
-      { kind: "wealth_scan", lead_id: leadId, priority: 65 },
-      { kind: "profile_seller", lead_id: leadId, priority: 68 },
+      { kind: "wealth_scan", lead_id: leadId, priority: 65, payload: {} },
+      { kind: "profile_seller", lead_id: leadId, priority: 68, payload: {} },
     ]);
   }
 

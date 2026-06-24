@@ -95,7 +95,7 @@ Deno.serve(async (req) => {
     });
     // Re-qualify the merged lead
     await supabase.from("pipeline_jobs").insert({
-      kind: "qualify_lead", lead_id: matchedId, priority: 90,
+      kind: "qualify_lead", lead_id: matchedId, priority: 90, payload: {},
     });
     await supabase.from("pipeline_jobs").update({
       status: "done", finished_at: new Date().toISOString(),
@@ -146,7 +146,7 @@ Deno.serve(async (req) => {
 
   if (hasResolvedAddress) {
     await supabase.from("pipeline_jobs").insert({
-      kind: "qualify_lead", lead_id: leadId, priority: 90,
+      kind: "qualify_lead", lead_id: leadId, priority: 90, payload: {},
     });
   }
 

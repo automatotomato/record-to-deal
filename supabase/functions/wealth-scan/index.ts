@@ -167,7 +167,7 @@ Deno.serve(async (req) => {
     // Whales jump the brief queue
     if (tier === "whale") {
       await supabase.from("pipeline_jobs").insert({
-        kind: "lead_brief", lead_id: leadId, priority: 30,
+        kind: "lead_brief", lead_id: leadId, priority: 30, payload: {},
       });
     }
 

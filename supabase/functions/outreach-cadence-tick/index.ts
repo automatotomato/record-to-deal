@@ -117,7 +117,7 @@ Deno.serve(async (req) => {
     if ((count ?? 0) > 0) { summary.skipped += 1; continue; }
 
     await supabase.from("pipeline_jobs").insert({
-      kind: "draft_outreach_step", lead_id: l.id, priority: 70,
+      kind: "draft_outreach_step", lead_id: l.id, priority: 70, payload: {},
     });
     summary.enqueued += 1;
   }
