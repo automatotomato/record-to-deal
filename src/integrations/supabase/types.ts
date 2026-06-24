@@ -244,6 +244,8 @@ export type Database = {
           decision_maker_name: string | null
           decision_maker_phone: string | null
           decision_maker_role: string | null
+          decision_maker_verification_source: string | null
+          decision_maker_verified: boolean
           deed_date: string | null
           deed_source_url: string | null
           depreciation_recapture_est: number | null
@@ -304,6 +306,7 @@ export type Database = {
           score: number | null
           score_breakdown: Json | null
           scout_confidence: number | null
+          second_pass_ran: boolean
           smarty_key: string | null
           source_record_url: string | null
           state: string
@@ -350,6 +353,8 @@ export type Database = {
           decision_maker_name?: string | null
           decision_maker_phone?: string | null
           decision_maker_role?: string | null
+          decision_maker_verification_source?: string | null
+          decision_maker_verified?: boolean
           deed_date?: string | null
           deed_source_url?: string | null
           depreciation_recapture_est?: number | null
@@ -410,6 +415,7 @@ export type Database = {
           score?: number | null
           score_breakdown?: Json | null
           scout_confidence?: number | null
+          second_pass_ran?: boolean
           smarty_key?: string | null
           source_record_url?: string | null
           state: string
@@ -456,6 +462,8 @@ export type Database = {
           decision_maker_name?: string | null
           decision_maker_phone?: string | null
           decision_maker_role?: string | null
+          decision_maker_verification_source?: string | null
+          decision_maker_verified?: boolean
           deed_date?: string | null
           deed_source_url?: string | null
           depreciation_recapture_est?: number | null
@@ -516,6 +524,7 @@ export type Database = {
           score?: number | null
           score_breakdown?: Json | null
           scout_confidence?: number | null
+          second_pass_ran?: boolean
           smarty_key?: string | null
           source_record_url?: string | null
           state?: string
