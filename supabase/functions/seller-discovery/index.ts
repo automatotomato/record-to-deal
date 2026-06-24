@@ -8,6 +8,7 @@
 //   6. Personal contact scrape (regex + scoring)
 //   7. AI consolidation (Gemini picks best per field with confidence)
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { enqueueOnce } from "../_shared/enqueue.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
