@@ -348,7 +348,7 @@ Deno.serve(async (req) => {
 
   const { data: rate } = await supabase
     .from("state_tax_rates")
-    .select("state, ltcg_rate, surcharge, is_high_tax, is_target, priority_rank")
+    .select("state, ltcg_rate, surcharge, is_high_tax, is_target, priority_rank, city_surcharges")
     .eq("state", lead.state)
     .maybeSingle();
 
