@@ -40,15 +40,20 @@ Deno.serve(async (req) => {
     .select("id");
   summary.stuck_reset = stuck?.length ?? 0;
 
+  // Only re-touch leads that haven't been updated in the last 24h — anything
+  // newer is either in flight or just finished and doesn't need another pass.
+  const staleCutoff = new Date(Date.now() - 24 * 3_600_000).toISOString();
+
   // 2) Heal stragglers — verified but not qualified
   const { data: needQualify } = await supabase
     .from("leads")
     .select("id")
     .eq("pipeline_stage", "verified")
+    .lt("updated_at", staleCutoff)
     .limit(STAGE_CAP);
   for (const r of needQualify ?? []) {
-    await supabase.from("pipeline_jobs").insert({ kind: "qualify_lead", lead_id: r.id, priority: 90 });
-    summary.requalified += 1;
+    const res = await enqueueOnce(supabase, "qualify_lead", r.id, { priority: 90, cooldownHours: 24 });
+    if (res.enqueued) summary.requalified += 1;
   }
 
   // 2b) Qualified but no enrichment job in flight
@@ -56,17 +61,11 @@ Deno.serve(async (req) => {
     .from("leads")
     .select("id")
     .eq("pipeline_stage", "qualified")
+    .lt("updated_at", staleCutoff)
     .limit(STAGE_CAP);
   for (const r of needEnrich ?? []) {
-    const { count } = await supabase.from("pipeline_jobs")
-      .select("id", { count: "exact", head: true })
-      .eq("lead_id", r.id)
-      .eq("kind", "enrich_contact")
-      .in("status", ["queued", "retry", "running"]);
-    if ((count ?? 0) === 0) {
-      await supabase.from("pipeline_jobs").insert({ kind: "enrich_contact", lead_id: r.id, priority: 80 });
-      summary.re_enriched += 1;
-    }
+    const res = await enqueueOnce(supabase, "enrich_contact", r.id, { priority: 80, cooldownHours: 24 });
+    if (res.enqueued) summary.re_enriched += 1;
   }
 
   // 2c) Enriched but no draft job in flight
@@ -75,58 +74,44 @@ Deno.serve(async (req) => {
     .select("id")
     .eq("pipeline_stage", "enriched")
     .eq("has_outreach_contact", true)
+    .lt("updated_at", staleCutoff)
     .limit(STAGE_CAP);
   for (const r of needDraft ?? []) {
-    const { count } = await supabase.from("pipeline_jobs")
-      .select("id", { count: "exact", head: true })
-      .eq("lead_id", r.id)
-      .eq("kind", "draft_outreach_step")
-      .in("status", ["queued", "retry", "running"]);
-    if ((count ?? 0) === 0) {
-      await supabase.from("pipeline_jobs").insert({ kind: "draft_outreach_step", lead_id: r.id, priority: 70 });
-      summary.re_drafted += 1;
-    }
+    const res = await enqueueOnce(supabase, "draft_outreach_step", r.id, { priority: 70, cooldownHours: 24 });
+    if (res.enqueued) summary.re_drafted += 1;
   }
 
-  // 2d) Leads in seller-discovery limbo (needs_review, no recent discovery job)
+  // 2d) Leads in seller-discovery limbo
   const { data: needDiscovery } = await supabase
     .from("leads")
     .select("id")
     .eq("pipeline_stage", "needs_review")
     .in("tier", ["URGENT", "CRITICAL", "ACTIVE", "HOT", "WARM"])
+    .lt("updated_at", staleCutoff)
     .limit(STAGE_CAP);
   for (const r of needDiscovery ?? []) {
-    const { count } = await supabase.from("pipeline_jobs")
-      .select("id", { count: "exact", head: true })
-      .eq("lead_id", r.id)
-      .eq("kind", "seller_discovery")
-      .in("status", ["queued", "retry", "running"]);
-    if ((count ?? 0) === 0) {
-      await supabase.from("pipeline_jobs").insert({ kind: "seller_discovery", lead_id: r.id, priority: 60 });
-      summary.re_discovered += 1;
-    }
+    const res = await enqueueOnce(supabase, "seller_discovery", r.id, {
+      priority: 60, cooldownHours: 24,
+      unlessLeadHas: [{ column: "decision_maker_email", op: "not_null" }],
+    });
+    if (res.enqueued) summary.re_discovered += 1;
   }
 
-  // 2e) Qualified leads missing AI brief — re-enqueue regardless of contact info
-  const briefStaleCutoff = new Date(Date.now() - BRIEF_STALE_MIN * 60_000).toISOString();
+  // 2e) Qualified leads still missing AI brief
   const { data: needBrief } = await supabase
     .from("leads")
     .select("id")
     .is("ai_brief", null)
     .in("tier", ["URGENT", "CRITICAL", "ACTIVE", "HOT", "WARM"])
     .not("pipeline_stage", "in", "(discovered,scoring,disqualified,expired)")
-    .lt("updated_at", briefStaleCutoff)
+    .lt("updated_at", staleCutoff)
     .limit(STAGE_CAP);
   for (const r of needBrief ?? []) {
-    const { count } = await supabase.from("pipeline_jobs")
-      .select("id", { count: "exact", head: true })
-      .eq("lead_id", r.id)
-      .eq("kind", "lead_brief")
-      .in("status", ["queued", "retry", "running"]);
-    if ((count ?? 0) === 0) {
-      await supabase.from("pipeline_jobs").insert({ kind: "lead_brief", lead_id: r.id, priority: 75 });
-      summary.re_briefed += 1;
-    }
+    const res = await enqueueOnce(supabase, "lead_brief", r.id, {
+      priority: 75, cooldownHours: 24,
+      unlessLeadHas: [{ column: "ai_brief", op: "not_null" }],
+    });
+    if (res.enqueued) summary.re_briefed += 1;
   }
 
   // 3) Purge leads outside the 30-day actionable window (and any already disqualified/expired).
