@@ -689,12 +689,64 @@ Deno.serve(async (req) => {
     setField(d, "company_website", normalizeWebsite(domain), body.company_website ? 90 : 60, body.company_website ? "user" : "cached");
   }
 
-  // Confirm/scrape homepage + contact page
+  // Confirm/scrape homepage + contact + leadership pages (team/about/leadership).
   if (domain) {
     const homeMd = await fcScrape(`https://${domain}`, fcKey, budget);
     if (homeMd) evidence.push(`HOMEPAGE ${domain}\n${homeMd.slice(0, 4000)}`);
     const contactMd = await fcScrape(`https://${domain}/contact`, fcKey, budget);
     if (contactMd) evidence.push(`CONTACT ${domain}\n${contactMd.slice(0, 4000)}`);
+
+    // Leadership pages — strongest signal for "who runs this company"
+    for (const path of ["/team", "/about", "/leadership", "/our-team", "/about-us"]) {
+      if (!budget.canFc()) break;
+      const md = await fcScrape(`https://${domain}${path}`, fcKey, budget);
+      if (!md) continue;
+      evidence.push(`LEADERSHIP ${domain}${path}\n${md.slice(0, 5000)}`);
+      // Extract Name + Title pairs from the page
+      const reA = /([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)[\s,|\-–—\n]+(Founder|Co-Founder|Owner|Managing Partner|Managing Member|Manager|President|CEO|Chief Executive Officer|CFO|COO|Principal|Director|Vice President|VP)\b/g;
+      const reB = /(Founder|Co-Founder|Owner|Managing Partner|Managing Member|Manager|President|CEO|Chief Executive Officer|CFO|COO|Principal|Director|Vice President|VP)[\s:|\-–—\n]+([A-Z][a-zA-Z'-]+\s+[A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)?)/g;
+      let m: RegExpExecArray | null;
+      while ((m = reA.exec(md)) !== null) {
+        if (looksLikePersonName(m[1]) && !isBrokerTitle(m[2])) {
+          d.principals.push({ name: m[1], role: m[2], source: "company_website", source_url: `https://${domain}${path}` });
+        }
+      }
+      while ((m = reB.exec(md)) !== null) {
+        if (looksLikePersonName(m[2]) && !isBrokerTitle(m[1])) {
+          d.principals.push({ name: m[2], role: m[1], source: "company_website", source_url: `https://${domain}${path}` });
+        }
+      }
+    }
+  }
+
+  // Search-based leadership hunt: "[company] CEO/President/founder LinkedIn"
+  if (ownerName && entity && budget.canFc()) {
+    const lq = `"${ownerName}" (CEO OR President OR Founder OR "Managing Partner" OR Owner) site:linkedin.com/in`;
+    const lres = await fcSearch(lq, fcKey, 4, false, budget);
+    for (const r of lres) {
+      const u: string = r.url ?? "";
+      const title: string = r.title ?? "";
+      if (!/linkedin\.com\/in\//i.test(u)) continue;
+      // LinkedIn title typically: "Jane Doe - CEO at Acme LLC | LinkedIn"
+      const tm = title.match(/^([A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+){1,3})\s*[-–—|]\s*([^|]+?)(?:\s+at\s+|\s*\||$)/);
+      if (tm && looksLikePersonName(tm[1]) && !isBrokerTitle(tm[2])) {
+        d.principals.push({ name: tm[1], role: tm[2].trim(), source: "linkedin_search", source_url: u });
+      }
+      evidence.push(`LINKEDIN ${u}\n${title}\n${r.description ?? ""}`);
+    }
+  }
+
+  // Re-rank principals (now includes website + LinkedIn finds) and upgrade if stronger than current name.
+  if (d.principals.length) {
+    d.principals = dedupePrincipals(d.principals).filter((p) => !isBrokerTitle(p.role));
+    const ranked = [...d.principals].sort((a, b) => rankPrincipal(b) - rankPrincipal(a));
+    const best = ranked[0];
+    const curScore = d.confidence_by_field["name"]?.score ?? 0;
+    if (best && rankPrincipal(best) >= 70 && curScore < 70) {
+      setField(d, "name", best.name, 70, `leadership:${best.source}`);
+      if (best.role) setField(d, "role", best.role, 70, `leadership:${best.source}`);
+      d.notes.push(`Identified ${best.name} (${best.role ?? "principal"}) via ${best.source}`);
+    }
   }
 
   // Source records sometimes carry contact info — but ONLY if the host is
