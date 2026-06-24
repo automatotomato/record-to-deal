@@ -237,6 +237,8 @@ export type Database = {
           created_at: string
           data_sources: string[] | null
           days_since_sale: number | null
+          days_until_180_deadline: number | null
+          days_until_45_deadline: number | null
           decision_maker_email: string | null
           decision_maker_linkedin: string | null
           decision_maker_name: string | null
@@ -341,6 +343,8 @@ export type Database = {
           created_at?: string
           data_sources?: string[] | null
           days_since_sale?: number | null
+          days_until_180_deadline?: number | null
+          days_until_45_deadline?: number | null
           decision_maker_email?: string | null
           decision_maker_linkedin?: string | null
           decision_maker_name?: string | null
@@ -445,6 +449,8 @@ export type Database = {
           created_at?: string
           data_sources?: string[] | null
           days_since_sale?: number | null
+          days_until_180_deadline?: number | null
+          days_until_45_deadline?: number | null
           decision_maker_email?: string | null
           decision_maker_linkedin?: string | null
           decision_maker_name?: string | null
@@ -860,6 +866,7 @@ export type Database = {
       }
       state_tax_rates: {
         Row: {
+          city_surcharges: Json
           is_high_tax: boolean
           is_target: boolean
           ltcg_rate: number
@@ -871,6 +878,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          city_surcharges?: Json
           is_high_tax?: boolean
           is_target?: boolean
           ltcg_rate?: number
@@ -882,6 +890,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          city_surcharges?: Json
           is_high_tax?: boolean
           is_target?: boolean
           ltcg_rate?: number
