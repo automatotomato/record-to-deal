@@ -89,6 +89,21 @@ function searchQueriesFor(source: SourceKind, state: string, counties: string[])
         `site:sec.gov 8-K sold property ${state}`,
         `site:sec.gov 10-Q "sale of real estate" ${state} ${year}`,
       ];
+    case "pending_sale":
+      // Commercial deals about to close — sellers still inside the 1031 ID window.
+      return [
+        `site:loopnet.com "under contract" ${state} ${top} (commercial OR multifamily OR retail OR office OR industrial)`,
+        `site:crexi.com "under contract" OR "pending" ${state} ${top}`,
+        `"under contract" commercial real estate ${state} ${top} ${year} -residential -house -home`,
+      ];
+    case "recent_close":
+      // Closings in the last ~30 days from brokerage press releases + listings.
+      return [
+        `site:loopnet.com "sold" ${state} ${top} (commercial OR multifamily OR retail OR office OR industrial) ${year}`,
+        `site:crexi.com "sold" ${state} ${top} ${year}`,
+        `"closed" OR "sold" commercial property ${state} ${top} ${year} (CBRE OR JLL OR "Marcus & Millichap" OR Colliers OR Cushman)`,
+        `"announces sale" OR "completes sale" commercial ${state} ${top} ${year}`,
+      ];
   }
 }
 
