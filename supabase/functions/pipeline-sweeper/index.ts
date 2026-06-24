@@ -81,21 +81,10 @@ Deno.serve(async (req) => {
     if (res.enqueued) summary.re_drafted += 1;
   }
 
-  // 2d) Leads in seller-discovery limbo
-  const { data: needDiscovery } = await supabase
-    .from("leads")
-    .select("id")
-    .eq("pipeline_stage", "needs_review")
-    .in("tier", ["URGENT", "CRITICAL", "ACTIVE", "HOT", "WARM"])
-    .lt("updated_at", staleCutoff)
-    .limit(STAGE_CAP);
-  for (const r of needDiscovery ?? []) {
-    const res = await enqueueOnce(supabase, "seller_discovery", r.id, {
-      priority: 60, cooldownHours: 24,
-      unlessLeadHas: [{ column: "decision_maker_email", op: "not_null" }],
-    });
-    if (res.enqueued) summary.re_discovered += 1;
-  }
+  // 2d) DISABLED: we no longer re-run seller_discovery on leads stuck in
+  // needs_review. If the first discovery pass couldn't surface contact info,
+  // the lead stays in "Needs review" for a human — pipeline focus stays on
+  // finding new opportunities instead of grinding on the same dead ends.
 
   // 2e) Qualified leads still missing AI brief
   const { data: needBrief } = await supabase
