@@ -150,7 +150,7 @@ Deno.serve(async (req) => {
     if (!bodyText) {
       // Fallback templates
       subject = `Step ${currentStep.step_index} · ${currentStep.template_key}`;
-      bodyText = `Hi ${firstName},\n\nFollowing up on ${ctx.property}. ${lead.pitch_angle ?? `A 1031 exchange into Las Vegas could defer ~${ctx.tax_exposure} in tax.`}\n\n– The team\n1031 Exchange Elite`;
+      bodyText = `Hi ${firstName},\n\nFollowing up on ${ctx.property}. ${lead.pitch_angle ?? `A 1031 exchange into Nevada could defer ~${ctx.tax_exposure} in federal + ${ctx.state ?? "home-state"} tax — Nevada has no state income tax on the deferred gain.`}\n\n– The team\nYou Decide Realty`;
     }
 
     // Persist touch
