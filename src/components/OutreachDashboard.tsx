@@ -293,13 +293,12 @@ export const OutreachDashboard = () => {
   }, [filtered]);
 
   const tabCounts = useMemo(() => {
-    const c = { ready: 0, review: 0, researching: 0, presale: 0, active: 0 };
+    const c = { ready: 0, review: 0, presale: 0, active: 0 };
     for (const l of leads ?? []) {
       c.active += 1;
       if (isPresale(l)) { c.presale += 1; continue; }
       if (isReadyLead(l)) c.ready += 1;
-      else if (isReviewLead(l)) c.review += 1;
-      else c.researching += 1;
+      else c.review += 1;
     }
     return c;
   }, [leads]);
