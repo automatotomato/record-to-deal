@@ -1,114 +1,67 @@
-## Goal
+## What actually changed (root cause)
 
-Stop bleeding Firecrawl credits and AI calls on leads we've already failed to enrich. Get net-new pre-sale opportunities flowing. No top-up required.
+Your "before" setup wasn't lost to credits — it was lost to a strategy change. Three things stacked up and killed yield:
 
-## Why this is happening
+1. **`scan-sources` was rewritten to a "recorder-deed-only" strategy.**
+   - Old (May, when leads were flowing): 2 broad Google queries on LoopNet/Crexi/general web for "sold" investment properties, 4 results each, scraped. ~10 credits/county and consistently returned multiple candidates.
+   - Now: 3 queries restricted to `site:.gov OR site:.us` and a deny-list of every major real-estate domain (LoopNet, Crexi, Zillow, Compass, KW, CBRE, JLL, etc.). County recorder sites aren't usefully indexed by Google, so these searches return ~0 results. We still pay the search credit, get nothing, and the AI extractor returns an empty list.
 
-Yesterday's 8k Firecrawl burn + 8,552 AI 429s came from three holes:
+2. **The `compute_lead_readiness` trigger was tightened.** Anything with a broker-pattern owner name, broker email domain, or generic inbox now flips to `low_confidence` / `needs_manual_review`. So even when a Crexi/LoopNet lead does slip through, it gets parked instead of surfaced.
 
-1. **No per-lead cooldown.** When `seller-discovery` or `enrich-contact` fail to find a real email/phone, the lead falls back to `queued`/`retry` and gets picked up again on the next sweep — same lead, same searches, same credits.
-2. **Per-call budget exists, per-day budget doesn't.** `seller-discovery` caps at 15 Firecrawl calls *per lead invocation*, but a lead can be invoked many times a day. Nothing stops a single stuck lead from burning hundreds of credits across retries.
-3. **`profile_seller` retries on 429.** When the AI gateway rate-limits, the worker re-queues and re-fires immediately. That's where the 8,552-fail loop comes from.
+3. **`scan-external-sources` scrapes every search result** (~7 credits per query at limit=6). It runs against the same broker/SEC/court sites that don't expose owner contact info in their markdown, so the AI extractor returns empty. Lots of credits, ~0 leads.
 
-The Pre-sale tab is empty because nothing inserts `pre_sale_prospect` rows — `scan-external-sources` only emits closed/recorded leads.
+The new guardrails (daily caps, 14-day URL cache, 72h per-lead cooldown, parking after 4 attempts) are working as designed — they're throttling the bleed, which is why today's "actual credits done" is small. But the *yield* was already broken by the strategy change above. We've gone from "broad queries that returned leads cheaply" to "narrow queries that return nothing while still costing credits per call".
 
-## What changes
-
-### 1. Per-lead cooldowns (kills the loop)
-
-- Add `leads.last_discovery_attempt_at` and `leads.discovery_attempt_count`.
-- `seller-discovery` and `enrich-contact` refuse to run on a lead that:
-  - Was attempted in the last **72 hours** with `discovery_status` in `partial`/`failed`, OR
-  - Has been attempted **≥ 4 times total** without producing a real contact → mark `pipeline_stage = 'needs_review'`, `readiness = 'needs_manual_review'`, stop touching it.
-- `pipeline-sweeper` skips these when re-queueing.
-
-This alone stops re-scanning the same ~50 leads day after day.
-
-### 2. Daily Firecrawl ceiling per caller
-
-- New table `firecrawl_daily_budget(caller text, day date, credits_used int)`.
-- Update `fc_reserve()` to reject when today's spend for that caller exceeds a cap:
-  - `seller-discovery`: 300/day
-  - `enrich-contact`: 200/day
-  - `scan-sources`: 400/day
-  - `scan-external-sources`: 300/day
-  - `wealth-scan`: 100/day
-- Total hard ceiling ~1,300/day. When a caller hits its cap, it logs `throttled: daily cap` and skips the call (no retry storm).
-
-### 3. URL-level dedupe cache
-
-- New table `firecrawl_url_cache(url text primary key, last_fetched_at timestamptz, caller text)`.
-- Every Firecrawl `scrape`/`search` result URL is recorded. Re-fetching the same URL within **14 days** is a cache hit — no credit spent.
-- Already partially done in `scan-sources` via `last_seen_source_urls`; extend to all five callers.
-
-### 4. Fix the profile_seller 429 storm
-
-- Switch model from current default to **`google/gemini-3-flash-preview`** (cheaper, higher rate limit).
-- Add exponential backoff: on 429, re-queue with `run_after = now() + (2^attempts * 30s)` capped at 30 min, max 3 attempts then `failed`.
-- Concurrency cap: only 2 `profile_seller` jobs running at once (claim_jobs already supports this — lower the dispatcher's batch size for this kind).
-
-### 5. Pre-sale source: Crexi + LoopNet scrape
-
-- Add a new `scan_presale` job kind in `run_scout_cron` (once/day per state).
-- New edge function `scan-presale`:
-  - Firecrawl `search` against `site:crexi.com "for sale" investment property <state>` and `site:loopnet.com "for sale" <state>`, time-filtered to last 30 days.
-  - Each unique listing → insert lead with `pipeline_stage = 'pre_sale_prospect'`, `readiness = 'researching'`, source tagged `crexi`/`loopnet`.
-  - Subject to the same 300/day cap (item 2) and URL cache (item 3).
-- Pre-sale leads are NOT eligible for `seller-discovery` until a human moves them forward (avoids burning contact-hunt credits on listings that may never close).
-
-## Technical details
-
-**Migrations**
-```sql
-alter table public.leads
-  add column if not exists last_discovery_attempt_at timestamptz,
-  add column if not exists discovery_attempt_count int not null default 0;
-
-create table public.firecrawl_daily_budget (
-  caller text not null,
-  day date not null default current_date,
-  credits_used int not null default 0,
-  primary key (caller, day)
-);
-grant select, insert, update on public.firecrawl_daily_budget to service_role;
-alter table public.firecrawl_daily_budget enable row level security;
--- service-role only, no end-user policies
-
-create table public.firecrawl_url_cache (
-  url text primary key,
-  last_fetched_at timestamptz not null default now(),
-  caller text not null
-);
-grant select, insert, update on public.firecrawl_url_cache to service_role;
-alter table public.firecrawl_url_cache enable row level security;
+Lead-creation timeline confirms it:
+```
+May 25–31:  30 leads   ← old scan-sources, broad queries
+Jun 1–6:    21 leads
+Jun 7–22:    0 leads   ← rewrite period
+Jun 23–24:   6 leads   ← only because Travis County adapter still works
 ```
 
-`fc_reserve()` gains a `(caller, daily_cap)` lookup and writes to `firecrawl_daily_budget`.
+## Fix plan
 
-**Files touched**
-- `supabase/migrations/<new>.sql` — schema above
-- DB function `fc_reserve` — daily caps + url-cache check signature
-- `supabase/functions/_shared/firecrawl.ts` (new) — single wrapper around scrape/search that consults `firecrawl_url_cache` and `fc_reserve`
-- `supabase/functions/seller-discovery/index.ts` — cooldown check + use shared wrapper
-- `supabase/functions/enrich-contact/index.ts` — same
-- `supabase/functions/scan-sources/index.ts` — same
-- `supabase/functions/scan-external-sources/index.ts` — same
-- `supabase/functions/wealth-scan/index.ts` — same
-- `supabase/functions/profile-seller/index.ts` — model swap + 429 backoff
-- `supabase/functions/pipeline-sweeper/index.ts` — respect cooldown / attempt cap
-- `supabase/functions/scan-presale/index.ts` (new)
-- `run_scout_cron` DB function — enqueue `scan_presale` per state
-- `src/components/OutreachDashboard.tsx` — surface `discovery_attempt_count` on the lead card so it's visible when a lead is "parked"
+### 1. Revert `scan-sources` to broker-friendly broad queries
+Replace the recorder-deed strategy with the original 2-query pattern. Keep the new dedupe + cache + daily cap.
+
+- Queries: the old `{county} ("investment property" OR multifamily OR NNN ...) sold "$" (LLC OR Trust ...)` + `site:loopnet.com OR site:crexi.com {county} {state} sold`.
+- Remove `BROKER_DENY_HOSTS` from the URL filter (keep it only as a soft signal for "owner name looks like a broker", not as a hard `-site:` filter).
+- Drop scraping inside search — use just snippets/descriptions for AI extraction. Saves ~5 credits per query.
+- Keep `MAX_RESULTS_PER_QUERY=4`, 2 queries → ~2 credits/county instead of ~12.
+
+### 2. Loosen `compute_lead_readiness` trigger
+- Broker-name / broker-domain matches → still allowed to reach `contact_found` (with a warning flag), instead of forcing `low_confidence`.
+- Only force `low_confidence` when the lead has NO owner, NO address, AND looks like a broker page.
+- This rescues the leads scan-sources will start producing again.
+
+### 3. Cut `scan-external-sources` cost per call
+- Drop `scrape: true` from `fcSearch` — use the search snippet only. The AI extractor was getting almost nothing useful from the markdown anyway.
+- Lowers per-call cost from ~7 credits to 1.
+- Keep all 5 source families (commercial, residential, court, sec, pending_sale) and the daily 300-cap budget.
+
+### 4. Keep the new guardrails — they're correct
+- Daily per-caller caps, monthly cap, URL cache, per-lead cooldown, profile_seller backoff: all stay.
+- The presale scan stays (still on Crexi/LoopNet).
+
+### 5. Backfill what's currently parked
+- One-time SQL: any lead currently in `needs_review` / `low_confidence` whose only failure was the broker filter → re-set to `enriched` so the loosened trigger re-evaluates them on next update.
+
+## Files
+
+- `supabase/functions/scan-sources/index.ts` — revert query strategy, drop scrape, drop site deny-list.
+- `supabase/functions/scan-external-sources/index.ts` — `scrape: false`.
+- `supabase/migrations/<new>.sql` — update `compute_lead_readiness()`; one-time UPDATE to re-evaluate parked leads.
+
+## What I'm NOT doing
+
+- Not touching the daily cap, monthly cap, URL cache, cooldown, presale scan, or profile-seller backoff.
+- Not adding a new data source or paid API.
+- Not topping off Firecrawl.
 
 ## Expected outcome
 
-- Worst-case daily Firecrawl spend bounded at ~1,300 credits.
-- A failed lead stops costing money after 4 attempts and shows up in **Needs Review** instead of cycling.
-- `profile_seller` failure rate drops from thousands/week to near zero.
-- Pre-sale tab starts populating from Crexi/LoopNet within one cron cycle.
-
-## What this plan does NOT do
-
-- No Firecrawl top-up requested.
-- No new paid data API (ATTOM/Estated) — explicitly skipped per your direction.
-- No change to the closing-scout adapter for Travis County.
+- scan-sources cost drops from ~12 credits/county to ~2 credits/county.
+- scan-external-sources cost drops from ~7 credits/query to ~1.
+- Lead yield returns to ~5–10 new leads/county/run, like late May.
+- Total daily Firecrawl burn stays well under the 1,300 ceiling.
