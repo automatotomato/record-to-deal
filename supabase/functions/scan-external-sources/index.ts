@@ -4,11 +4,11 @@
 // candidate leads that flow through the same verify_property → qualify_lead →
 // enrich_contact chain as county-sourced leads.
 //
-// Source families (per user-selected scope):
-//   - commercial : Crexi + LoopNet recently sold
-//   - residential: Redfin recently sold (investment-grade only)
-//   - court      : probate, tax-lien, divorce property dispositions
-//   - sec        : SEC EDGAR 8-K real-estate dispositions by entity sellers
+// Source families (per user-selected scope) — ALL FREE PUBLIC SOURCES:
+//   - commercial : SEC EDGAR + FDIC ORE + GSA/realestatesales.gov + HUD + .gov assessors
+//   - residential: HUD Home Store + Fannie HomePath + Freddie HomeSteps + USDA resales + .gov assessors
+//   - court      : .gov probate/tax-deed notices + state press-association public-notice portals + sheriff sales
+//   - sec        : SEC EDGAR 8-K / 10-Q real-estate dispositions
 //
 // Job kind: scan_external. Payload: { state: "TX", source: "commercial" }.
 // Special bootstrap mode: { enqueue: true } — fans out one job per
@@ -41,32 +41,48 @@ if (!(globalThis as any).__sesLogged) {
   (globalThis as any).__sesLogged = true;
 }
 
+// All queries below are biased toward FREE public sources only.
+// Crexi / LoopNet / Redfin (paywalled or anti-bot) were replaced with
+// federal agencies, county assessors, and public legal-notice sites.
 function searchQueriesFor(source: SourceKind, state: string, counties: string[]): string[] {
   const top = counties.slice(0, 3).join(" OR ");
   const year = new Date().getUTCFullYear();
   const years = `${year} OR ${year - 1}`;
   switch (source) {
     case "commercial":
+      // Free: SEC EDGAR, FDIC failed-bank asset sales, GSA real-property
+      // disposals, HUD multifamily sales, and ordinary .gov assessor sales.
       return [
-        `site:crexi.com sold ${state} commercial multifamily (${years}) ${top}`,
-        `site:loopnet.com sold ${state} ${top} (${years})`,
-        `"sold" "buyer" "seller" commercial real estate ${state} (${years}) ${top}`,
-        `"acquired" "sold" "LLC" "${state}" commercial property (${years})`,
+        `site:sec.gov 8-K "disposition" "real property" ${state} (${years})`,
+        `site:fdic.gov "owned real estate" OR "ORE sale" ${state}`,
+        `site:gsa.gov OR site:realestatesales.gov surplus property sale ${state} (${years})`,
+        `site:hud.gov multifamily "sale" OR "disposition" ${state} (${years})`,
+        `site:.gov "commercial" "recently sold" ${state} ${top} (${years})`,
       ];
     case "residential":
+      // Free: HUD Home Store, Fannie Mae HomePath, Freddie Mac HomeSteps,
+      // USDA homesales, and county-assessor recent-sale rolls.
       return [
-        `site:redfin.com sold ${state} ${top} multifamily (${years})`,
-        `site:redfin.com sold ${state} duplex triplex (${years})`,
+        `site:hudhomestore.gov ${state} (${years})`,
+        `site:homepath.com ${state} sold (${years})`,
+        `site:homesteps.com ${state} ${top}`,
+        `site:resales.usda.gov ${state}`,
+        `site:.gov assessor "recent sales" ${state} ${top} (${years})`,
       ];
     case "court":
+      // Free: official court calendars, county clerk legal-notice portals,
+      // public-notice aggregators run by state press associations.
       return [
-        `${state} probate sale notice ${top} (${years})`,
-        `${state} tax lien auction property (${years}) ${top}`,
+        `site:.gov probate "notice of sale" ${state} ${top} (${years})`,
+        `site:.gov "tax deed" OR "tax lien" auction ${state} ${top} (${years})`,
+        `site:publicnoticeads.com OR site:publicnotices.com ${state} property sale (${years})`,
+        `site:.us "sheriff sale" OR "foreclosure sale" ${state} ${top} (${years})`,
       ];
     case "sec":
       return [
-        `site:sec.gov 8-K disposition real estate ${state} 2025`,
+        `site:sec.gov 8-K disposition real estate ${state} ${year}`,
         `site:sec.gov 8-K sold property ${state}`,
+        `site:sec.gov 10-Q "sale of real estate" ${state} ${year}`,
       ];
   }
 }
