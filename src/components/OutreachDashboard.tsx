@@ -673,30 +673,6 @@ export const OutreachDashboard = () => {
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-muted-foreground mr-1">
-                Quick view
-              </span>
-              {[
-                { v: "all", l: "All" },
-                { v: "ready", l: "Ready" },
-                { v: "researching", l: "Researching" },
-                { v: "review", l: "Needs review" },
-              ].map((opt) => (
-                <button
-                  key={opt.v}
-                  onClick={() => setReadinessFilter(opt.v)}
-                  className={cn(
-                    "px-2.5 py-1 rounded-full border text-[11px] font-medium transition-colors",
-                    readinessFilter === opt.v
-                      ? "bg-foreground text-background border-foreground"
-                      : "bg-background text-muted-foreground border-border hover:border-foreground/40 hover:text-foreground",
-                  )}
-                >
-                  {opt.l}
-                </button>
-              ))}
-            </div>
 
             {activeFilterCount > 0 && (
               <div className="flex flex-wrap gap-1.5">
