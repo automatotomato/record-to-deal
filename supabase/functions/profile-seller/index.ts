@@ -149,9 +149,9 @@ We help sellers defer federal + state capital-gains and depreciation-recapture t
       payload: update,
     });
 
-    // Refresh brief now that profile is richer
-    await supabase.from("pipeline_jobs").insert({
-      kind: "lead_brief", lead_id: leadId, priority: 78,
+    // Refresh brief now that profile is richer (24h cooldown, skip if brief already fresh)
+    await enqueueOnce(supabase, "lead_brief", leadId, {
+      priority: 78, cooldownHours: 24,
     });
 
     if (jobId) {
