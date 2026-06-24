@@ -376,15 +376,22 @@ Deno.serve(async (req) => {
     }
   }
 
-  await supabase.from("counties").update({ last_run_at: new Date().toISOString() }).eq("id", county.id);
+  // Ring-buffer of last ~500 URLs we've extracted for this county, so the next
+  // run can short-circuit Firecrawl results without hitting the leads table.
+  const mergedUrls = Array.from(new Set([...newlySeenUrls, ...lastSeen.filter((u: unknown) => typeof u === "string")])).slice(0, 500);
+  await supabase.from("counties").update({
+    last_run_at: new Date().toISOString(),
+    last_scanned_at: new Date().toISOString(),
+    last_seen_source_urls: mergedUrls,
+  }).eq("id", county.id);
 
   await supabase.from("pipeline_jobs").update({
     status: "done",
     finished_at: new Date().toISOString(),
-    result: { found: fresh.length, inserted, enqueued, recorder_url: county.recorder_index_url, errors: errors.slice(0, 3) },
+    result: { found: fresh.length, inserted, enqueued, skipped_queries_no_new: skippedNoNewResults, recorder_url: county.recorder_index_url, errors: errors.slice(0, 3) },
   }).eq("id", jobId);
 
-  return jsonOk({ ok: true, county: county.county, found: fresh.length, inserted, enqueued, errors });
+  return jsonOk({ ok: true, county: county.county, found: fresh.length, inserted, enqueued, skipped_queries_no_new: skippedNoNewResults, errors });
 });
 
 function jsonOk(body: unknown) {
