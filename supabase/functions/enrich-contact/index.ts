@@ -31,6 +31,65 @@ async function fcRelease(id: string | null, actual: number, status = "done") {
   try { await FC_ADMIN.rpc("fc_release", { p_id: id, p_actual: actual, p_status: status }); } catch (_) {}
 }
 
+const APOLLO_BASE = "https://api.apollo.io/api/v1";
+const SENIOR_TITLES = [
+  "owner","founder","co-founder","ceo","president","principal","managing member","managing partner",
+  "partner","manager","trustee","officer","director","vp","vice president","chief",
+];
+
+async function apolloOrgEnrich(domain: string, key: string) {
+  try {
+    const r = await fetch(`${APOLLO_BASE}/organizations/enrich?domain=${encodeURIComponent(domain)}`, {
+      method: "GET",
+      headers: { "X-Api-Key": key, "Cache-Control": "no-cache", "Content-Type": "application/json" },
+    });
+    if (!r.ok) { console.warn(`apollo org enrich ${r.status}`); return null; }
+    const d = await r.json();
+    return d?.organization ?? null;
+  } catch (e) { console.warn("apollo org enrich threw", e); return null; }
+}
+
+async function apolloPeopleSearch(params: Record<string, any>, key: string) {
+  try {
+    const r = await fetch(`${APOLLO_BASE}/mixed_people/search`, {
+      method: "POST",
+      headers: { "X-Api-Key": key, "Cache-Control": "no-cache", "Content-Type": "application/json" },
+      body: JSON.stringify({ page: 1, per_page: 5, ...params }),
+    });
+    if (!r.ok) { console.warn(`apollo people search ${r.status}: ${(await r.text()).slice(0,200)}`); return []; }
+    const d = await r.json();
+    return (d?.people ?? d?.contacts ?? []) as any[];
+  } catch (e) { console.warn("apollo people search threw", e); return []; }
+}
+
+async function apolloPeopleMatch(params: Record<string, any>, key: string) {
+  try {
+    const r = await fetch(`${APOLLO_BASE}/people/match`, {
+      method: "POST",
+      headers: { "X-Api-Key": key, "Cache-Control": "no-cache", "Content-Type": "application/json" },
+      body: JSON.stringify({ reveal_personal_emails: false, ...params }),
+    });
+    if (!r.ok) { console.warn(`apollo people match ${r.status}`); return null; }
+    const d = await r.json();
+    return d?.person ?? null;
+  } catch (e) { console.warn("apollo people match threw", e); return null; }
+}
+
+function scoreApolloPerson(p: any): number {
+  const title = String(p?.title ?? "").toLowerCase();
+  let s = 0;
+  for (const t of SENIOR_TITLES) if (title.includes(t)) { s += 40; break; }
+  if (isUnlockedEmail(p?.email)) s += 30;
+  if (p?.phone_numbers?.length || p?.sanitized_phone) s += 20;
+  if (p?.linkedin_url) s += 10;
+  return s;
+}
+
+function pickHost(url?: string | null): string | null {
+  if (!url) return null;
+  try { return new URL(url.startsWith("http") ? url : `https://${url}`).hostname.replace(/^www\./, ""); } catch { return null; }
+}
+
 async function fcSearch(query: string, key: string, limit = 3) {
   const resId = await fcReserve("enrich-contact:search", limit);
   if (!resId) { console.warn("fc_throttled enrich-contact"); return []; }
