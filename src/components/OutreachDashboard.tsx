@@ -554,10 +554,6 @@ export const OutreachDashboard = () => {
                     Needs review
                     <Badge variant="secondary" className="tabular">{tabCounts.review}</Badge>
                   </TabsTrigger>
-                  <TabsTrigger value="researching" className="gap-2">
-                    Researching
-                    <Badge variant="secondary" className="tabular">{tabCounts.researching}</Badge>
-                  </TabsTrigger>
                   <TabsTrigger value="presale" className="gap-2">
                     Pre-sale
                     <Badge variant="secondary" className="tabular">{tabCounts.presale}</Badge>
