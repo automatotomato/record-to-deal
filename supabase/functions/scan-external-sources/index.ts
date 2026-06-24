@@ -63,7 +63,9 @@ function searchQueriesFor(source: SourceKind, state: string, counties: string[])
 
 async function firecrawlSearch(query: string, _fcKey: string, limit = 6): Promise<Array<{ url?: string; title?: string; markdown?: string; description?: string }>> {
   const { fcSearch } = await import("../_shared/firecrawl.ts");
-  const results = await fcSearch("scan-external-sources", query, { limit, scrape: true });
+  // Use snippets only (no per-result scrape) to keep cost at ~1 credit/query.
+  // Most public listing/SEC/court pages don't expose owner contact info in their markdown anyway.
+  const results = await fcSearch("scan-external-sources", query, { limit, scrape: false });
   return results as Array<{ url?: string; title?: string; markdown?: string; description?: string }>;
 }
 
