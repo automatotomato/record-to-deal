@@ -389,6 +389,25 @@ const StepCard = ({
   </Card>
 );
 
+const SourceCard = ({
+  icon,
+  title,
+  description,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+}) => (
+  <div className="border border-border bg-card p-4 space-y-2">
+    <div className="flex items-center gap-2 text-accent">
+      {icon}
+      <span className="font-semibold text-sm">{title}</span>
+    </div>
+    <p className="text-sm text-muted-foreground leading-relaxed">{description}</p>
+  </div>
+);
+
+
 const StageRow = ({
   stage,
   badge,
