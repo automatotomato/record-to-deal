@@ -455,10 +455,10 @@ Deno.serve(async (req) => {
       payload: { source, source_url: c.source_record_url, job_id: body.job_id },
     });
 
-    const followups: Array<{ kind: string; lead_id: string; priority: number }> = [
-      { kind: "verify_property", lead_id: leadRow.id, priority: 100 },
+    const followups: Array<{ kind: string; lead_id: string; priority: number; payload: Record<string, never> }> = [
+      { kind: "verify_property", lead_id: leadRow.id, priority: 100, payload: {} },
     ];
-    if (!reachable) followups.push({ kind: "enrich_contact", lead_id: leadRow.id, priority: 120 });
+    if (!reachable) followups.push({ kind: "enrich_contact", lead_id: leadRow.id, priority: 120, payload: {} });
     await supabase.from("pipeline_jobs").insert(followups);
     enqueued += followups.length;
   }
