@@ -80,6 +80,15 @@ Deno.serve(async (req) => {
 
     const dmName = lead.decision_maker_name ?? lead.owner_name ?? "there";
     const firstName = String(dmName).split(/\s+/)[0];
+    const d45 = lead.days_until_45_deadline;
+    const d180 = lead.days_until_180_deadline;
+    const clockLine = d45 != null && d180 != null
+      ? (d45 > 0
+          ? `URGENT: ${d45} days left to identify replacement property (45-day rule), ${d180} days to close (180-day rule).`
+          : d180 > 0
+            ? `45-day ID window already closed (${Math.abs(d45)} days past); ${d180} days remain on the 180-day close clock.`
+            : `Both 1031 deadlines have passed.`)
+      : null;
     const ctx = {
       first_name: firstName,
       owner_name: lead.owner_name,
@@ -89,6 +98,10 @@ Deno.serve(async (req) => {
       sale_price: fmtMoney(lead.sale_price),
       sale_date: lead.sale_date,
       tax_exposure: fmtMoney(lead.total_tax_exposure),
+      state_tax_saved: fmtMoney(lead.state_capital_gains_estimate),
+      days_until_45_deadline: d45,
+      days_until_180_deadline: d180,
+      clock: clockLine,
       state: lead.state,
       tier: lead.tier,
       wealth_tier: lead.wealth_tier,
@@ -103,11 +116,12 @@ Deno.serve(async (req) => {
       channel: currentStep.channel,
     };
 
+    const clockHook = clockLine ? ` Open with the 1031 clock: "${clockLine}"` : "";
     const channelInstructions: Record<string, string> = {
-      email: `Return JSON: { "subject": "<60 char personalized subject — MUST mention the dollar deferral and 'Nevada' or 'Las Vegas'", "body": "120-180 word email, plain text, signed: -The team / You Decide Realty" }. The thesis: they just sold a commercial property in a HIGH-TAX state (${ctx.state ?? 'their state'}); a 1031 into Nevada defers federal LTCG AND escapes their home-state tax (NV has 0% state income tax). Lead with the pitch_angle if present. Step ${currentStep.step_index} of the sequence — vary tone from prior steps.`,
-      linkedin: `Return JSON: { "body": "280 char LinkedIn connection-request blurb, no subject line" }. Reference the recent sale + 1031 into Nevada (0% state tax) angle in plain conversational tone.`,
-      phone_task: `Return JSON: { "subject": "Phone talking points for ${firstName}", "body": "5–7 short bullet talking points an agent will read on a cold call. Open by naming their state + tax_exposure, anchor on the out-of-state-into-Nevada arbitrage and pitch_angle, anticipate one objection (often: 'why Nevada?'), close with a calendar ask. Plain text, dashes for bullets." }`,
-      email_advisor: `Return JSON: { "subject": "<60 char subject for the seller's attorney/CPA", "body": "120-180 word email addressed to a tax professional, framing the 1031-into-Nevada opportunity for their client without naming the client. Emphasize state-tax arbitrage (their home state vs. NV 0%). Sign as -The team / You Decide Realty." }`,
+      email: `Return JSON: { "subject": "<60 char personalized subject — MUST mention the dollar deferral and 'Nevada' or 'Las Vegas'", "body": "120-180 word email, plain text, signed: -The team / You Decide Realty" }. The thesis: they just sold a commercial property in a HIGH-TAX state (${ctx.state ?? 'their state'}); a 1031 into Nevada defers federal LTCG AND escapes their home-state tax (NV has 0% state income tax). Quantify: roughly ${ctx.state_tax_saved} in state tax alone could be deferred.${clockHook} Lead with the pitch_angle if present. Step ${currentStep.step_index} of the sequence — vary tone from prior steps.`,
+      linkedin: `Return JSON: { "body": "280 char LinkedIn connection-request blurb, no subject line" }. Reference the recent sale + 1031 into Nevada (0% state tax) angle in plain conversational tone.${clockHook}`,
+      phone_task: `Return JSON: { "subject": "Phone talking points for ${firstName}", "body": "5–7 short bullet talking points an agent will read on a cold call. Open by naming their state + tax_exposure and the 45-day clock (${d45 ?? "?"} days left), anchor on the out-of-state-into-Nevada arbitrage and pitch_angle, anticipate one objection (often: 'why Nevada?'), close with a calendar ask. Plain text, dashes for bullets." }`,
+      email_advisor: `Return JSON: { "subject": "<60 char subject for the seller's attorney/CPA", "body": "120-180 word email addressed to a tax professional, framing the 1031-into-Nevada opportunity for their client without naming the client. Emphasize state-tax arbitrage (their home state vs. NV 0%) and the 45-day identification deadline. Sign as -The team / You Decide Realty." }`,
     };
 
     let subject = "";
