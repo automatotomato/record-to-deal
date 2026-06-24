@@ -171,7 +171,7 @@ const LeadStatePill = ({ lead }: { lead: any }) => {
   if (readiness === "needs_manual_review" || readiness === "low_confidence") {
     return <StateChip label="Needs review" tone="bg-urgent/15 text-urgent border-urgent/40" title="Automated search exhausted — needs a human." />;
   }
-  return <StateChip label="Finding contact…" tone="bg-muted text-muted-foreground border-border" title="Pipeline is still searching for the seller's contact info." pulse />;
+  return <StateChip label="Needs review" tone="bg-urgent/15 text-urgent border-urgent/40" title="No contact details found — needs a manual lookup." />;
 };
 
 export const OutreachDashboard = () => {
